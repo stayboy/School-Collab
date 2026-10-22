@@ -83,14 +83,16 @@ public class NotificationTemplatesLandingTests : BunitContext
     [TestMethod]
     public void TheCodeColumn_RendersTheGeneratedCode_AndADashForAPreUpgradeRow()
     {
-        // D7: a row that predates the code column was never backfilled, so the grid names it with a dash
-        // rather than an empty cell the operator would read as a bug.
+        // Arrange — D7: a row that predates the code column was never backfilled.
         var handler = Register();
         handler.Rows.Add(new TemplateRow { Kind = 0, Channel = 0, Title = "Minted on create", Code = "TPL07" });
         handler.Rows.Add(new TemplateRow { Kind = 1, Channel = 1, Title = "From before the upgrade", Code = null });
 
+        // Act
         var cut = Render<IndexPage>();
 
+        // Assert — the grid names such a row with a dash rather than an empty cell the operator would
+        // read as a bug.
         cut.WaitForAssertion(() =>
             cut.FindAll(".template-code").Select(c => c.TextContent.Trim())
                 .Should().Equal(["TPL07", "—"],
@@ -100,6 +102,7 @@ public class NotificationTemplatesLandingTests : BunitContext
     [TestMethod]
     public void TheTemplateCell_IsTheTitleLink_WithTheDescriptionBeneathIt()
     {
+        // Arrange
         var handler = Register();
         var row = new TemplateRow
         {
@@ -111,8 +114,10 @@ public class NotificationTemplatesLandingTests : BunitContext
         };
         handler.Rows.Add(row);
 
+        // Act
         var cut = Render<IndexPage>();
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             var cell = cut.Find(".template-cell");
@@ -131,6 +136,7 @@ public class NotificationTemplatesLandingTests : BunitContext
     [TestMethod]
     public void AReset_AsksForAReasonInTheSharedDialog_NamingTheTitle_ThenDeletesWithIt()
     {
+        // Arrange
         var handler = Register();
         var dialogs = RegisterDialogs();
         handler.Rows.Add(new TemplateRow { Kind = 0, Channel = 0, Title = "Grade 8 Science reminder" });
@@ -138,9 +144,11 @@ public class NotificationTemplatesLandingTests : BunitContext
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 8 Science reminder"));
 
+        // Act
         dialogs.ReasonAnswer = "Superseded by the new reminder";
         MenuItem(cut, "Reset to built-in default...").MenuItemClick();
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             var delete = handler.Calls.Single(c => c.Method == "DELETE");
@@ -158,6 +166,7 @@ public class NotificationTemplatesLandingTests : BunitContext
     [TestMethod]
     public void AReset_DismissedInTheReasonDialog_WritesNothing_AndKeepsTheRow()
     {
+        // Arrange
         var handler = Register();
         var dialogs = RegisterDialogs();
         handler.Rows.Add(new TemplateRow { Kind = 0, Channel = 0, Title = "Grade 8 Science reminder" });
@@ -165,9 +174,11 @@ public class NotificationTemplatesLandingTests : BunitContext
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 8 Science reminder"));
 
+        // Act
         dialogs.ReasonAnswer = null;
         MenuItem(cut, "Reset to built-in default...").MenuItemClick();
 
+        // Assert
         cut.WaitForAssertion(() => dialogs.ReasonOpenCount.Should().Be(1));
         handler.Calls.Should().NotContain(c => c.Method == "DELETE", "no reason, no reset");
         cut.Markup.Should().Contain("Grade 8 Science reminder", "the row is still there");
@@ -220,6 +231,7 @@ public class NotificationTemplatesLandingTests : BunitContext
     [TestMethod]
     public void Adopt_ConfirmsTheCopy_NamingTheRowByItsTitle()
     {
+        // Arrange
         var handler = Register(realTenant: true);
         var dialogs = RegisterDialogs();
         handler.Rows.Add(new TemplateRow
@@ -230,9 +242,11 @@ public class NotificationTemplatesLandingTests : BunitContext
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 8 Science reminder"));
 
-        dialogs.ConfirmAnswer = false; // the operator reads the prompt and backs out
+        // Act — the operator reads the prompt and backs out.
+        dialogs.ConfirmAnswer = false;
         MenuItem(cut, "Adopt to this tenant").MenuItemClick();
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             dialogs.LastConfirmMessage.Should().Contain("Grade 8 Science reminder",
@@ -266,6 +280,7 @@ public class NotificationTemplatesLandingTests : BunitContext
     [TestMethod]
     public void PublishPortalWide_ConfirmsTheCopy_NamingTheRowByItsTitle()
     {
+        // Arrange
         var handler = Register(realTenant: false);
         var dialogs = RegisterDialogs();
         handler.Rows.Add(new TemplateRow
@@ -277,9 +292,11 @@ public class NotificationTemplatesLandingTests : BunitContext
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 8 Science reminder"));
 
+        // Act
         dialogs.ConfirmAnswer = false;
         MenuItem(cut, "Publish portal-wide...").MenuItemClick();
 
+        // Assert
         cut.WaitForAssertion(() => dialogs.LastConfirmMessage.Should().Contain("Grade 8 Science reminder",
             "the confirmation names the row the operator is about to publish (D3)"));
         handler.Calls.Should().NotContain(c => c.Url.Contains("/promote", StringComparison.Ordinal));

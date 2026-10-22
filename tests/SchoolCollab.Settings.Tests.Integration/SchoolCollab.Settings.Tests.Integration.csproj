@@ -21,6 +21,13 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Api\SchoolCollab.Settings.Api.csproj" />
     <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
+    <!--
+      The notification-template handlers mint their code from the shipped entity-code rule, and this
+      suite seeds it with the production seeder rather than retyping its shape (the unit suite's
+      TestEntityCodeSetup precedent). Aliased because the MigrationService worker also declares a
+      top-level Program, and ApiFactory binds WebApplicationFactory<Program> to the API's.
+    -->
+    <ProjectReference Include="..\..\src\SchoolCollab.MigrationService\SchoolCollab.MigrationService.csproj" Aliases="migration" />
     <ProjectReference Include="..\..\src\AI\SchoolCollab.AI.Server\SchoolCollab.AI.Server.csproj" Aliases="ai" />
     <ProjectReference Include="..\..\src\AI\SchoolCollab.AI.Abstractions\SchoolCollab.AI.Abstractions.csproj" Aliases="ai" />
     <ProjectReference Include="..\..\src\AI\SchoolCollab.AI.Tools.CodedValues\SchoolCollab.AI.Tools.CodedValues.csproj" Aliases="ai" />

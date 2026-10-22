@@ -26,6 +26,18 @@ public sealed class TenantNotificationTemplate
     /// </summary>
     public const string CodeRule = "NOTIFICATION_TEMPLATE_CODE";
 
+    /// <summary>
+    /// The stored cap on <see cref="Title" /> (naming spec D1). Enforced here as well as by the column
+    /// and the form, so an oversized title is a 400 from the route instead of a 500 from Postgres.
+    /// </summary>
+    public const int TitleMaxLength = 120;
+
+    /// <summary>
+    /// The stored cap on <see cref="Description" /> (naming spec D1) — enforced here for the same reason
+    /// <see cref="TitleMaxLength" /> is.
+    /// </summary>
+    public const int DescriptionMaxLength = 500;
+
     private TenantNotificationTemplate() { }
 
     /// <inheritdoc />
@@ -134,6 +146,15 @@ public sealed class TenantNotificationTemplate
         if (string.IsNullOrWhiteSpace(title))
             throw new ArgumentException("Template title must not be empty.", nameof(title));
 
+        if (title.Trim().Length > TitleMaxLength)
+            throw new ArgumentException(
+                $"Template title must not be longer than {TitleMaxLength} characters.", nameof(title));
+
+        if (description?.Trim().Length > DescriptionMaxLength)
+            throw new ArgumentException(
+                $"Template description must not be longer than {DescriptionMaxLength} characters.",
+                nameof(description));
+
         if (string.IsNullOrWhiteSpace(body))
             throw new ArgumentException("Template body must not be empty.", nameof(body));
 
@@ -172,12 +193,13 @@ public sealed class TenantNotificationTemplate
 
     /// <summary>
     /// Replaces the template's title, description, subject, body and constraints. Stamps
-    /// <see cref="UpdatedAt"/>. Returns the previous values so the caller can write an audit row.
+    /// <see cref="UpdatedAt"/>. Returns the values it is replacing (subject, body and constraint set), so
+    /// the audit entry can record before/after without a second read.
     /// <see cref="Code"/> is deliberately not a parameter: a generated code is set once at creation
     /// and never rewritten (naming spec D6).
     /// </summary>
-    public (string? PreviousSubject, string PreviousBody, IReadOnlyList<TemplateConstraint> PreviousConstraints,
-        string PreviousTitle, string? PreviousDescription) Update(
+    public (string? PreviousSubject, string PreviousBody,
+        IReadOnlyList<TemplateConstraint> PreviousConstraints) Update(
         string title,
         string? description,
         string? subject,
@@ -187,15 +209,22 @@ public sealed class TenantNotificationTemplate
         if (string.IsNullOrWhiteSpace(title))
             throw new ArgumentException("Template title must not be empty.", nameof(title));
 
+        if (title.Trim().Length > TitleMaxLength)
+            throw new ArgumentException(
+                $"Template title must not be longer than {TitleMaxLength} characters.", nameof(title));
+
+        if (description?.Trim().Length > DescriptionMaxLength)
+            throw new ArgumentException(
+                $"Template description must not be longer than {DescriptionMaxLength} characters.",
+                nameof(description));
+
         if (string.IsNullOrWhiteSpace(body))
             throw new ArgumentException("Template body must not be empty.", nameof(body));
 
         var previous = (
             PreviousSubject: Subject,
             PreviousBody: Body,
-            PreviousConstraints: (IReadOnlyList<TemplateConstraint>)_constraints.ToList(),
-            PreviousTitle: Title,
-            PreviousDescription: Description);
+            PreviousConstraints: (IReadOnlyList<TemplateConstraint>)_constraints.ToList());
 
         Title = title.Trim();
         Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();

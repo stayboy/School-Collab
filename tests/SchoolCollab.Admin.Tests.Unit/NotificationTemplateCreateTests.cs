@@ -35,6 +35,7 @@ public class NotificationTemplateCreateTests : BunitContext
     [TestMethod]
     public async Task Save_PostsTheWholeDraft_IncludingTheTitleAndDescription_WithNoReason()
     {
+        // Arrange
         var handler = Register();
         var dialogs = TemplateDialogs.Register(this);
         Services.GetRequiredService<NavigationManager>()
@@ -63,10 +64,11 @@ public class NotificationTemplateCreateTests : BunitContext
             .Single(a => a.Instance.Id == "template-body-text");
         await cut.InvokeAsync(() => body.Instance.ValueChanged.InvokeAsync("Hello {{Title}}"));
 
+        // Act
         cut.Find("#template-save").Click();
 
-        // A generous window: Save also refreshes the sibling/audit reads, and this suite runs beside the
-        // landing/dialog suites (the icons-skill note on load-sensitive bUnit timeouts).
+        // Assert — a generous window: Save also refreshes the sibling/audit reads, and this suite runs
+        // beside the landing/dialog suites (the icons-skill note on load-sensitive bUnit timeouts).
         cut.WaitForAssertion(() =>
         {
             var post = handler.Calls.Single(c => c.Method == "POST");
@@ -88,12 +90,16 @@ public class NotificationTemplateCreateTests : BunitContext
     [TestMethod]
     public void Save_WithABlankTitle_ShowsTheError_AndNeverPosts()
     {
+        // Arrange
         var handler = Register();
         var cut = Render<Create>();
         cut.WaitForAssertion(() => cut.FindAll("#template-save").Should().ContainSingle());
 
+        // Act
         cut.Find("#template-save").Click();
 
+        // Assert — the page refuses a draft it could not save before asking the operator for anything
+        // or writing anything.
         cut.WaitForAssertion(() =>
             cut.Find("#template-editor-error").TextContent.Should().Contain("A title is required",
                 "no template can be created nameless (naming spec D1/D2)"));
@@ -107,10 +113,13 @@ public class NotificationTemplateCreateTests : BunitContext
     [TestMethod]
     public void Create_StartsOnEmail_WithTheNamingRows_AndNoReasonFieldOnThePage()
     {
+        // Arrange
         Register();
 
+        // Act
         var cut = Render<Create>();
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             // Naming spec D1: the title (required) and the optional description sit above Template Type.

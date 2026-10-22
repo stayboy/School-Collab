@@ -51,6 +51,10 @@ namespace SchoolCollab.Settings.Core.Migrations
             // Backfill in the same migration, before the column becomes required: subject → first ~80
             // chars of the body's plain text → "{Kind} · {Channel}". Kind/Channel are stored as ints
             // (HasConversion<int>()), so the fallback names them in English here.
+            //
+            // This label list is FROZEN on purpose: a migration must keep producing the string it
+            // produced when it shipped, so it does not read the channels' [Description] text through the
+            // shared helper the UI uses — a later wording change must not rewrite history.
             migrationBuilder.Sql(
                 """
                 UPDATE tenant_notification_templates
@@ -105,13 +109,14 @@ namespace SchoolCollab.Settings.Core.Migrations
         {
             // Reverting drops all three columns, so every backfilled title and every minted code goes
             // with them — there is nowhere to preserve the values, and the pre-migration schema had no
-            // such data at all.
+            // such data at all. Columns are dropped in the reverse of the order Up() added them:
+            // code → description → title became title → description → code.
             migrationBuilder.DropIndex(
                 name: "ix_tenant_notification_templates_tenant_code",
                 table: "tenant_notification_templates");
 
             migrationBuilder.DropColumn(
-                name: "code",
+                name: "title",
                 table: "tenant_notification_templates");
 
             migrationBuilder.DropColumn(
@@ -119,7 +124,7 @@ namespace SchoolCollab.Settings.Core.Migrations
                 table: "tenant_notification_templates");
 
             migrationBuilder.DropColumn(
-                name: "title",
+                name: "code",
                 table: "tenant_notification_templates");
         }
     }

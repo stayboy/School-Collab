@@ -75,6 +75,13 @@
     justify-content: flex-end;
 }
 
+/* The trailing action row inside a panel body (the constraints panel's "View all constraints"):
+   the same right-aligned treatment as the preview's refresh row. */
+.template-editor-panel__actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
 @media (max-width: 1400px) {
     .template-editor-layout {
         grid-template-columns: minmax(0, 1fr);

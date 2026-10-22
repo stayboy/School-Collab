@@ -8,8 +8,9 @@ namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
 /// The landing's filtering, at its pure seam (redesign spec §3.2): the type filter, the contact-mode
-/// filter, the subject-and-body search and the grade deep link. Expected values come from the fixture,
-/// not from the implementation, so a broken rule fails here instead of being mirrored.
+/// filter, the name-and-content search (a template's title, its description, its subject and its plain
+/// body text) and the grade deep link. Expected values come from the fixture, not from the
+/// implementation, so a broken rule fails here instead of being mirrored.
 /// </summary>
 [TestClass]
 public class TemplateLandingFilterTests
@@ -83,6 +84,44 @@ public class TemplateLandingFilterTests
 
         TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, string.Empty, "library")
             .Should().ContainSingle().Which.Kind.Should().Be(NotificationTemplateKind.Reminder);
+    }
+
+    /// <summary>
+    /// A row named only by its TITLE (naming spec D1/D3) — the SMS/WhatsApp shape, where the domain
+    /// keeps no subject at all and the title is the only name the row has.
+    /// </summary>
+    private static TenantNotificationTemplateDto NamedRow(
+        string title, string? description = null, string body = "<p>body</p>") =>
+        new(Guid.NewGuid(), NotificationTemplateKind.Reminder, NotificationChannel.SMS,
+            Title: title, Description: description, Code: null, Subject: null,
+            Body: body, Constraints: [],
+            CreatedAt: DateTimeOffset.UnixEpoch, UpdatedAt: DateTimeOffset.UnixEpoch,
+            TenantId: null, OwnerName: "System");
+
+    [TestMethod]
+    public void TheSearch_FindsATemplateByTheNameTheOperatorGaveIt()
+    {
+        // Arrange — the term appears in exactly one row, in the field under test.
+        var rows = new[]
+        {
+            NamedRow("Grade 8 Science reminder"),
+            NamedRow("Field trip packing list", description: "Sent the day before the museum trip"),
+            NamedRow("Unrelated overdue chase", body: "<p>please return the lab coats</p>"),
+        };
+
+        // Act / Assert — D1/D3: a template is named by its title, so the search reads it, and the
+        // description under it; the subject and the plain body stay part of the search too.
+        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, string.Empty, "grade 8")
+            .Should().ContainSingle().Which.Title.Should().Be("Grade 8 Science reminder",
+                "an operator who knows a template by its title can find it");
+
+        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, string.Empty, "museum trip")
+            .Should().ContainSingle().Which.Title.Should().Be("Field trip packing list",
+                "the description is part of the name the operator gave the row");
+
+        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, string.Empty, "lab coats")
+            .Should().ContainSingle().Which.Title.Should().Be("Unrelated overdue chase",
+                "the body text is still searchable");
     }
 
     [TestMethod]

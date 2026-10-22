@@ -1,5 +1,6 @@
 @page "/notification-templates"
 @using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Core.Notifications
 @inject NotificationTemplateApiClient Api
 @inject VisibleTenantService Tenants
@@ -101,7 +102,7 @@
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Contact mode" SortBy="@_sortByChannel" Sortable="true">
-            @ModeLabel(context.Channel)
+            @EnumLabels.For(context.Channel)
         </TemplateColumn>
         @* Naming spec D7: the generated reference, shown read-only — a dash where a pre-upgrade row has none. *@
         <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Code" SortBy="@_sortByCode" Sortable="true">
@@ -377,14 +378,6 @@
         return actions;
     }
 
-    private static string ModeLabel(NotificationChannel channel) => channel switch
-    {
-        NotificationChannel.Email => "Email",
-        NotificationChannel.SMS => "SMS",
-        NotificationChannel.WhatsApp => "WhatsApp",
-        _ => channel.ToString(),
-    };
-
     /// <summary>The zero-constraint badge names the SCOPE, not just "tenant" (spec 3.2).</summary>
     private static string DefaultBadgeLabel(TenantNotificationTemplateDto row) =>
         row.IsSystem ? "System default" : "Tenant default";
@@ -394,7 +387,7 @@
     /// resort so a payload that omits the field never renders an empty cell.
     /// </summary>
     private static string TitleOf(TenantNotificationTemplateDto row) => TemplateTitles.For(
-        row.Title, row.Subject, row.Body, $"{row.Kind} · {ModeLabel(row.Channel)}");
+        row.Title, row.Subject, row.Body, $"{row.Kind} · {EnumLabels.For(row.Channel)}");
 
     /// <summary>The generated reference (D7), or the dash that marks a row which predates the code column.</summary>
     private static string CodeOf(TenantNotificationTemplateDto row) =>
@@ -407,7 +400,7 @@
     private async Task OpenConstraintsAsync(TenantNotificationTemplateDto row)
     {
         await DialogService.ShowReadonlyDialogAsync<TemplateConstraintsDialog>(
-            $"{row.Kind} - {ModeLabel(row.Channel)}",
+            $"{row.Kind} - {EnumLabels.For(row.Channel)}",
             new Dictionary<string, object?>
             {
                 [TemplateConstraintsDialog.ConstraintsKey] = row.Constraints,

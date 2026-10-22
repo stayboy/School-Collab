@@ -250,6 +250,33 @@ public class NotificationTemplateHandlerTests
     }
 
     [TestMethod]
+    public async Task Create_RejectsATitleLongerThanTheColumnAllows()
+    {
+        // Naming spec D1: the cap is the database column's (120), and the domain enforces it so an
+        // oversized title is the route's 400 rather than a 500 out of Postgres.
+        AsTenant(TenantA);
+
+        var act = () => CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.Email,
+            title: new string('t', TenantNotificationTemplate.TitleMaxLength + 1));
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        (await _db.TenantNotificationTemplates.AsNoTracking().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task Create_RejectsADescriptionLongerThanTheColumnAllows()
+    {
+        AsTenant(TenantA);
+
+        var act = () => CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.Email,
+            description: new string('d', TenantNotificationTemplate.DescriptionMaxLength + 1));
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [TestMethod]
     public async Task Create_MintsTheTemplateCodeFromTheShippedRule()
     {
         // Naming spec D5: the code comes from the NOTIFICATION_TEMPLATE_CODE rule (stamp TPL + a
@@ -530,6 +557,36 @@ public class NotificationTemplateHandlerTests
         (await _getAll.HandleAsync(new GetTenantNotificationTemplates()))
             .Single(r => r.Id == created.Id).Title.Should().Be(created.Title,
                 "a rejected rename leaves the stored title untouched");
+    }
+
+    [TestMethod]
+    public async Task Update_RejectsATitleLongerThanTheColumnAllows()
+    {
+        AsTenant(TenantA);
+        var created = await CreateAsync(NotificationTemplateKind.Publish, NotificationChannel.Email);
+
+        var act = () => UpdateAsync(
+            created.Id, title: new string('t', TenantNotificationTemplate.TitleMaxLength + 1),
+            body: "Body v2");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [TestMethod]
+    public async Task Update_RejectsADescriptionLongerThanTheColumnAllows()
+    {
+        AsTenant(TenantA);
+        var created = await CreateAsync(NotificationTemplateKind.Publish, NotificationChannel.Email);
+
+        var act = () => UpdateAsync(
+            created.Id,
+            description: new string('d', TenantNotificationTemplate.DescriptionMaxLength + 1),
+            body: "Body v2");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        (await _getAll.HandleAsync(new GetTenantNotificationTemplates()))
+            .Single(r => r.Id == created.Id).Description.Should().BeNull(
+                "a rejected description leaves the stored row untouched");
     }
 
     [TestMethod]

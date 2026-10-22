@@ -32,14 +32,17 @@ public class NotificationTemplateCodeRuleTests
     [TestMethod]
     public async Task Seeder_CreatesTheTemplateRule_WithAStampAndANumericSequence()
     {
+        // Arrange
         var options = NewOptions();
         var tenants = new TenantProvider();
 
+        // Act
         await using (var seedDb = new SettingsDbContext(options, tenants))
         {
             await NewSeeder(seedDb, tenants).SeedAsync();
         }
 
+        // Assert
         await using var db = new SettingsDbContext(options, tenants);
         var rule = await db.EntityCodeRules
             .Include(x => x.Segments)
@@ -61,11 +64,12 @@ public class NotificationTemplateCodeRuleTests
     [TestMethod]
     public async Task Seeder_IsIdempotent_SoASecondRunDoesNotForkTheRule()
     {
-        // The ordering constraint in the spec: the MigrationService may run many times, and a second
-        // rule with the same Code would make the generator's single-row read ambiguous.
+        // Arrange — the ordering constraint in the spec: the MigrationService may run many times, and a
+        // second rule with the same Code would make the generator's single-row read ambiguous.
         var options = NewOptions();
         var tenants = new TenantProvider();
 
+        // Act
         await using (var firstRun = new SettingsDbContext(options, tenants))
         {
             await NewSeeder(firstRun, tenants).SeedAsync();
@@ -76,6 +80,7 @@ public class NotificationTemplateCodeRuleTests
             await NewSeeder(secondRun, tenants).SeedAsync();
         }
 
+        // Assert
         await using var db = new SettingsDbContext(options, tenants);
         (await db.EntityCodeRules.CountAsync(x => x.Code == "NOTIFICATION_TEMPLATE_CODE"))
             .Should().Be(1);
@@ -84,6 +89,7 @@ public class NotificationTemplateCodeRuleTests
     [TestMethod]
     public async Task Generator_ProducesPaddedCodes_AndReachesTheHundredth()
     {
+        // Arrange
         var options = NewOptions();
         var tenants = new TenantProvider();
 
@@ -96,6 +102,7 @@ public class NotificationTemplateCodeRuleTests
             new TestSettingsDbContextFactory(options, tenants), tenants,
             NullLogger<EntityCodeGenerator>.Instance);
 
+        // Act
         (await generator.GenerateAsync("NOTIFICATION_TEMPLATE_CODE")).Should().Be("TPL01");
         (await generator.GenerateAsync("NOTIFICATION_TEMPLATE_CODE")).Should().Be("TPL02");
 
@@ -105,6 +112,7 @@ public class NotificationTemplateCodeRuleTests
         for (var i = 3; i <= 100; i++)
             last = await generator.GenerateAsync("NOTIFICATION_TEMPLATE_CODE");
 
+        // Assert
         last.Should().Be("TPL100", "the width pads, the limit lets the sequence grow past 99");
     }
 }

@@ -32,8 +32,10 @@ internal sealed class TenantNotificationTemplateConfiguration
         builder.Property(x => x.Subject).HasMaxLength(500);
         builder.Property(x => x.Body).IsRequired().HasMaxLength(4000);
 
-        builder.Property(x => x.Title).IsRequired().HasMaxLength(120);
-        builder.Property(x => x.Description).HasMaxLength(500);
+        // The caps are the aggregate's own constants: the guard in Create/Update and the column limit
+        // read one value, so an oversized title cannot reach Postgres and 500 where the route answers 400.
+        builder.Property(x => x.Title).IsRequired().HasMaxLength(TenantNotificationTemplate.TitleMaxLength);
+        builder.Property(x => x.Description).HasMaxLength(TenantNotificationTemplate.DescriptionMaxLength);
         builder.Property(x => x.Code).HasMaxLength(16);
 
         // Several live templates per tenant per kind × channel (round notification-templates-b2c):

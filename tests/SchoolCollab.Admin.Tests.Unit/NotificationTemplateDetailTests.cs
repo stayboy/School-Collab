@@ -62,13 +62,16 @@ public class NotificationTemplateDetailTests : BunitContext
     [TestMethod]
     public void TypeAndContactMode_AreLockedIndicators_WithTheirReasonOnTheRowsHelpTooltip()
     {
+        // Arrange
         var handler = Register();
         RegisterDialogs();
         var row = new TemplateRow { Kind = 0, Channel = 0, Title = "LOCKED-ROW" };
         handler.Rows.Add(row);
 
+        // Act
         var cut = RenderDetail(row.Id);
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             cut.FindComponents<DropdownComponent<TemplateEditor.KindOption, NotificationTemplateKind>>()
@@ -87,6 +90,7 @@ public class NotificationTemplateDetailTests : BunitContext
     [TestMethod]
     public async Task Save_ReplacesTheRowById_WithTheStagedDraft_AndTheReasonTypedIntoTheDialog()
     {
+        // Arrange
         var handler = Register();
         var dialogs = RegisterDialogs();
         var row = new TemplateRow
@@ -105,8 +109,10 @@ public class NotificationTemplateDetailTests : BunitContext
         await TypeBodyAsync(cut, "NEW-BODY");
         dialogs.ReasonAnswer = "Wording fix after the science review";
 
+        // Act
         cut.Find("#template-save").Click();
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             var put = handler.Calls.Single(c => c.Method == "PUT");
@@ -125,6 +131,7 @@ public class NotificationTemplateDetailTests : BunitContext
     [TestMethod]
     public async Task Save_WithARenamedTitle_SendsTheNewTitle_SoARenameIsAttributable()
     {
+        // Arrange
         var handler = Register();
         var dialogs = RegisterDialogs();
         var row = new TemplateRow { Kind = 0, Channel = 1, Title = "Old name", Body = "BODY" };
@@ -137,8 +144,10 @@ public class NotificationTemplateDetailTests : BunitContext
         await cut.InvokeAsync(() => title.Instance.ValueChanged.InvokeAsync("Grade 8 Science reminder"));
         dialogs.ReasonAnswer = "Fixing a naming mistake";
 
+        // Act
         cut.Find("#template-save").Click();
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             var put = handler.Calls.Single(c => c.Method == "PUT");
@@ -151,6 +160,7 @@ public class NotificationTemplateDetailTests : BunitContext
     [TestMethod]
     public async Task Save_WithADismissedReasonDialog_PerformsNoWrite_AndLeavesTheDraft()
     {
+        // Arrange
         var handler = Register();
         var dialogs = RegisterDialogs();
         var row = new TemplateRow { Kind = 0, Channel = 1, Title = "Grade 8 Science reminder", Body = "OLD" };
@@ -161,10 +171,11 @@ public class NotificationTemplateDetailTests : BunitContext
 
         await TypeBodyAsync(cut, "STAGED-BUT-NOT-SAVED");
 
-        // D11: cancelling the dialog abandons the save — nothing is written and the draft is untouched.
+        // Act — cancelling the dialog abandons the save (D11).
         dialogs.ReasonAnswer = null;
         cut.Find("#template-save").Click();
 
+        // Assert
         cut.WaitForAssertion(() => dialogs.ReasonOpenCount.Should().Be(1,
             "the dialog opens before the write, so dismissing it is what stops the write"));
         handler.Calls.Should().NotContain(c => c.Method == "PUT", "no reason, no write");
@@ -179,6 +190,7 @@ public class NotificationTemplateDetailTests : BunitContext
     [TestMethod]
     public void Reset_DismissingTheReasonDialog_IsNotAWrite()
     {
+        // Arrange
         var handler = Register();
         var dialogs = RegisterDialogs();
         var row = new TemplateRow { Kind = 0, Channel = 0, Title = "RESET-ME" };
@@ -187,9 +199,11 @@ public class NotificationTemplateDetailTests : BunitContext
         var cut = RenderDetail(row.Id);
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("RESET-ME"));
 
+        // Act
         dialogs.ReasonAnswer = null;
         cut.Find("#template-reset").Click();
 
+        // Assert
         cut.WaitForAssertion(() => dialogs.ReasonOpenCount.Should().Be(1));
         handler.Calls.Should().NotContain(c => c.Method == "DELETE", "a dismissed reset writes nothing");
     }
@@ -197,6 +211,7 @@ public class NotificationTemplateDetailTests : BunitContext
     [TestMethod]
     public void Reset_WithAReason_UsesTheSharedReasonDialog_AndDeletesWithTheReason()
     {
+        // Arrange
         var handler = Register();
         var dialogs = RegisterDialogs();
         var row = new TemplateRow { Kind = 0, Channel = 0, Title = "RESET-ME" };
@@ -205,9 +220,11 @@ public class NotificationTemplateDetailTests : BunitContext
         var cut = RenderDetail(row.Id);
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("RESET-ME"));
 
+        // Act
         dialogs.ReasonAnswer = "Superseded by the new reminder";
         cut.Find("#template-reset").Click();
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             var delete = handler.Calls.Single(c => c.Method == "DELETE");
@@ -309,6 +326,7 @@ public class NotificationTemplateDetailTests : BunitContext
     [TestMethod]
     public void TheShell_RendersTheBreadcrumbTrail_NamingTheTemplateByItsTitle()
     {
+        // Arrange
         var handler = Register();
         RegisterDialogs();
         var row = new TemplateRow
@@ -317,8 +335,10 @@ public class NotificationTemplateDetailTests : BunitContext
         };
         handler.Rows.Add(row);
 
+        // Act
         var cut = RenderDetail(row.Id);
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             cut.Find("#authoring-breadcrumb").TextContent.Should().Contain("Notification templates",
@@ -332,6 +352,7 @@ public class NotificationTemplateDetailTests : BunitContext
     [TestMethod]
     public void TheConflictWarning_ComparesOnlyWithinTheDraftsScope()
     {
+        // Arrange
         var handler = Register();
         RegisterDialogs();
         var row = new TemplateRow
@@ -358,6 +379,8 @@ public class NotificationTemplateDetailTests : BunitContext
         });
 
         var cut = RenderDetail(row.Id);
+
+        // Act / Assert — the blueprint twin is not a conflict…
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("TENANT-ROW"));
         cut.Markup.Should().NotContain("identical constraint set",
             "a tenant row shadows an identical blueprint row (spec §3.9)");
@@ -375,6 +398,8 @@ public class NotificationTemplateDetailTests : BunitContext
         });
 
         var again = RenderDetail(row.Id);
+
+        // …and the same-scope twin is, named by its title (D3).
         again.WaitForAssertion(() =>
         {
             again.Markup.Should().Contain("identical constraint set");

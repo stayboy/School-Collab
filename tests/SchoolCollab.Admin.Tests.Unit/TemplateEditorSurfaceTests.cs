@@ -45,10 +45,14 @@ public class TemplateEditorSurfaceTests : BunitContext
     [TestMethod]
     public void TheTemplateTypeRow_HoldsBothDropdowns_InOneRow()
     {
+        // Arrange
         Register();
+
+        // Act
         var cut = RenderCreate();
         cut.WaitForAssertion(() => cut.FindAll("#template-title").Should().ContainSingle());
 
+        // Assert
         var dropdowns = cut.FindAll("[aria-label='Template type'], [aria-label='Preferred mode of contact']");
         dropdowns.Should().HaveCount(2, "the kind and the contact mode are both rendered");
 
@@ -62,10 +66,14 @@ public class TemplateEditorSurfaceTests : BunitContext
     [TestMethod]
     public void TheNamingRows_SitAboveTheTemplateTypeRow_WithARequiredTitle()
     {
+        // Arrange
         Register();
+
+        // Act
         var cut = RenderCreate();
         cut.WaitForAssertion(() => cut.FindAll("#template-title").Should().ContainSingle());
 
+        // Assert
         var labels = cut.FindComponents<FormRow>().Select(r => r.Instance.Label).ToList();
 
         labels.IndexOf("Title").Should().BeGreaterThanOrEqualTo(0, "a template is named on create (D1)");
@@ -80,12 +88,66 @@ public class TemplateEditorSurfaceTests : BunitContext
     }
 
     [TestMethod]
+    public void TheCodeRow_SitsUnderTheTitle_IsReadOnly_AndADraftShowsADash()
+    {
+        // Arrange
+        Register();
+
+        // Act
+        var cut = RenderCreate();
+        cut.WaitForAssertion(() => cut.FindAll("#template-code").Should().ContainSingle());
+
+        // Assert — D6/D7 and stories 10-12: the code is shown, never typed, and a draft that has not
+        // been saved has not been minted yet.
+        var code = cut.FindComponents<FluentTextInput>().Single(i => i.Instance.Id == "template-code");
+        code.Instance.Value.Should().Be("—", "a draft has no code yet, and an empty box would read as a required input");
+        code.Instance.Disabled.Should().BeTrue("the code is generated, never typed (D6)");
+
+        cut.Find("#template-code-hint").TextContent.Should().Contain("Generated when the template is saved",
+            "the operator is told where the empty field comes from (story 12)");
+
+        var labels = cut.FindComponents<FormRow>().Select(r => r.Instance.Label).ToList();
+        labels.IndexOf("Code").Should().BeGreaterThan(labels.IndexOf("Title"),
+            "the code belongs beside the name it belongs to");
+        labels.IndexOf("Code").Should().BeLessThan(labels.IndexOf("Template Type"),
+            "…and above the decision row, not inside the message body's flow");
+    }
+
+    [TestMethod]
+    public void TheCodeRow_OnASavedRow_ShowsTheMintedCode()
+    {
+        // Arrange
+        var handler = Register();
+        var row = new TemplateRow
+        {
+            Kind = 0, Channel = 1, Title = "Grade 8 Science reminder", Body = "BODY", Code = "TPL07",
+        };
+        handler.Rows.Add(row);
+
+        // Act
+        var cut = RenderEdit(row.Id);
+
+        // Assert
+        cut.WaitForAssertion(() =>
+        {
+            var code = cut.FindComponents<FluentTextInput>().Single(i => i.Instance.Id == "template-code");
+            code.Instance.Value.Should().Be("TPL07", "the minted reference is shown, so support can quote it");
+            code.Instance.Disabled.Should().BeTrue("and it is never editable, even on an editable row");
+            cut.Find("#template-code-hint").TextContent.Should().Contain("Generated on save");
+        });
+    }
+
+    [TestMethod]
     public void TheActionBar_RepeatsNeitherTheKindNorThePagesAddress()
     {
+        // Arrange
         Register();
+
+        // Act
         var cut = RenderCreate();
         cut.WaitForAssertion(() => cut.FindAll("#template-save").Should().ContainSingle());
 
+        // Assert
         var actionBar = cut.Find(".authoring-actionbar");
 
         actionBar.QuerySelectorAll(".kind-banner").Should().BeEmpty(
@@ -99,6 +161,7 @@ public class TemplateEditorSurfaceTests : BunitContext
     [TestMethod]
     public void OnEdit_TheActionBarHeading_IsTheTemplatesTitle_AndTheOwnerStaysBesideIt()
     {
+        // Arrange
         var handler = Register();
         var row = new TemplateRow
         {
@@ -106,8 +169,10 @@ public class TemplateEditorSurfaceTests : BunitContext
         };
         handler.Rows.Add(row);
 
+        // Act
         var cut = RenderEdit(row.Id);
 
+        // Assert
         cut.WaitForAssertion(() =>
         {
             cut.Find(".authoring-heading").TextContent.Should().Contain("Grade 8 Science reminder",
@@ -121,6 +186,7 @@ public class TemplateEditorSurfaceTests : BunitContext
     [TestMethod]
     public void ViewAllConstraints_AppearsOnlyOnceTheChipRowStopsBeingScannable()
     {
+        // Arrange
         var handler = Register();
         var atTheThreshold = new TemplateRow
         {
@@ -140,8 +206,11 @@ public class TemplateEditorSurfaceTests : BunitContext
         };
         handler.Rows.AddRange([atTheThreshold, aboveTheThreshold]);
 
+        // Act
         var five = RenderEdit(atTheThreshold.Id);
         five.WaitForAssertion(() => five.FindAll("#template-constraints-chips").Should().ContainSingle());
+
+        // Assert
         five.FindAll("#template-constraints-view-all").Should().BeEmpty(
             "five constraints still fit the chip row, so the link would only duplicate it (D12)");
 

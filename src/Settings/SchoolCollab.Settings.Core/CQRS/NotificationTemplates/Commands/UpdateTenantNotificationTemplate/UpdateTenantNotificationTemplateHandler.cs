@@ -68,7 +68,14 @@ public sealed class UpdateTenantNotificationTemplateHandler(
             .Select(c => TemplateConstraint.Create(template.TenantId, template.Id, c.Dimension, c.Value))
             .ToList();
 
-        var previous = template.Update(request.Title, request.Description, request.Subject, request.Body, newRows);
+        // Every argument is named because title, description and subject are all strings: a positional
+        // swap would compile.
+        var previous = template.Update(
+            title: request.Title,
+            description: request.Description,
+            subject: request.Subject,
+            body: request.Body,
+            constraints: newRows);
 
         db.TemplateConstraints.RemoveRange(oldRows);
         db.TemplateConstraints.AddRange(newRows);

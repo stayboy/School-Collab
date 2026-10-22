@@ -89,14 +89,15 @@ contract — no `OnCreate` dialog), `RowActions`, `RowActionsAriaLabel="Template
 | Type | `<NotificationTemplateKindBanner Kind="context.Kind" />` |
 | Owner | `context.TenantId is null` → `<FluentBadge Color="BadgeColor.Informational">System</FluentBadge>`; else `context.OwnerName` |
 | Contact mode | `Email` / `SMS` / `WhatsApp` (`Channel` label map; SMS keeps its existing casing) |
-| Template | `FluentLink` → `/notification-templates/{id}`; label = `Subject` when the mode is Email and it is non-empty, else the plain-text body excerpt (`RichInstructionSanitizer.ToPlainText`, 80 chars + ellipsis) |
+| Template | `FluentLink` → `/notification-templates/{id}`; label = the template's **`Title`** (2026-10-23 — the subject/body-excerpt derivation this row originally specified is retired by `notification-template-naming-and-editor-surface.md` D3; `Subject` is content, not identity), with the optional `Description` as a muted second line |
+| Code | narrow sortable column showing the generated `Code` (`TPL07`), or an em dash for a pre-upgrade row whose code was never minted (same spec, D6/D7) |
 | Constraints | `Constraints.Count == 0` → `<FluentBadge Color="BadgeColor.Success">Tenant default</FluentBadge>` (label `System default` on a system row); else a `FluentLink` labelled `N constraint`/`N constraints` (singular at 1) that opens `TemplateConstraintsDialog` for that row |
 | Updated | `UpdatedAt.ToLocalTime()` formatted `yyyy-MM-dd HH:mm` |
 
 **Toolbar filters** (`<ToolbarFilters>`, `DropdownComponent` wrappers, never raw selects):
 All types / Publish / Reminder / Completion / Overdue; All modes / Email / SMS / WhatsApp; All owners /
-System / This tenant. Search is client-side over subject + plain-text body (the `ConfigFlags/Index`
-posture). A `?grade=` arrival renders a context bar naming the filter and keeps every row reachable that
+System / This tenant. Search is client-side over **`Title` + `Description` + subject + plain-text body** (the title and description are the identity fields since 2026-10-23 — a search box that could not find a template by its own name was the gap `notification-template-naming-and-editor-surface.md` closed; `ConfigFlags/Index`
+posture otherwise unchanged). A `?grade=` arrival renders a context bar naming the filter and keeps every row reachable that
 `AppliesToGrade` allows (the existing rule, moved into `NotificationTemplateScopeRules`). The bar is a
 `LandingPage` `ContextBar` fragment rendered above the grid *inside* the wrapper — not page markup above
 it — so the wrapper keeps ownership of its chrome and the bar is assertable in bUnit
@@ -109,7 +110,7 @@ it — so the wrapper keeps ownership of its chrome and the bar is assertable in
 | Open | always | `RowAction.Navigate` → `/notification-templates/{id}` |
 | Adopt to this tenant | row is system **and** the session has a real tenant | confirm → `POST …/{id}/adopt` → navigate to the returned new row |
 | Publish portal-wide… | row is tenant-owned **and** the session is in system scope | confirm → `POST …/{id}/promote` → navigate to the returned system row |
-| Reset to built-in default… | row is writable in the current scope | **not** flagged `Destructive` (the kebab would then confirm twice) + the new audited `TemplateResetReasonDialog` — the reason is required and is the confirmation → `DELETE …/{id}?reason=` → reload |
+| Reset to built-in default… | row is writable in the current scope | **not** flagged `Destructive` (the kebab would then confirm twice) + the shared audited `ReasonDialog` (**amended 2026-10-23**: the single-purpose `TemplateResetReasonDialog` named here is retired; `notification-template-naming-and-editor-surface.md` D11 generalised it so reset and edit-save share one dialog) — the reason is required and is the confirmation → `DELETE …/{id}?reason=` → reload |
 
 ### 3.3 Template editor layout (Detail and Create share it)
 
@@ -295,16 +296,19 @@ library — no literal hex in the css (the `PanelSection` surface lesson).
 | settings-db | `(TenantId, Kind, Channel)` filtered index unchanged (a NULL-able column is valid in a Postgres index); no new index | in the same migration's model snapshot |
 | settings-db | no column for owner: it is derived (`TenantId` + the `tenants` join) | — |
 | settings-db | `TemplateAuditEntry.TenantId` already nullable | — |
+| settings-db | **`tenant_notification_templates.title` (required, 120), `.description` (500), `.code` (16)**; `title` backfilled then `NOT NULL`; unique index `(tenant_id, code)` filtered `is_deleted = false AND code IS NOT NULL` (**added 2026-10-23** by `notification-template-naming-and-editor-surface.md` D1/D6/D8) | `AddTenantNotificationTemplateTitleDescriptionAndCode` |
 
 No backfill: every existing row already carries its real tenant id and keeps it; system rows only appear
 when a system-scope session creates one. A down-migration restores `NOT NULL` and fails loudly if any
 `NULL` row exists (the correct posture — silently deleting blueprints is not acceptable).
 
 **DTO / contract changes** (mirrored in `SchoolCollab.Settings.Core.DTOs` and the Admin.Shared client):
-`TenantNotificationTemplateDto` + `TenantId`, `OwnerName`; `TemplateAuditEntryDto` + `TemplateId`;
-`ApplicableTemplateDto` + `TenantId`, `OwnerName`; new `ConstraintEditRequest`-free surface (constraints keep
-riding `TemplateConstraintRequest`). Assignments side: `PublishTemplateCandidateDto` + `IsSystem`, `OwnerName`;
-the resolver's `TenantNotificationTemplatePayload` mirror + `tenantId`.
+`TenantNotificationTemplateDto` + `TenantId`, `OwnerName`, and (**2026-10-23**) `Title`, `Description`, `Code`;
+`Create`/`UpdateTenantNotificationTemplateRequest` + `Title`, `Description`; `TemplateAuditEntryDto` + `TemplateId`;
+`ApplicableTemplateDto` + `TenantId`, `OwnerName` (still no title — a known follow-up recorded in
+`documents/solution/notification-template-naming-and-codes.md`); new `ConstraintEditRequest`-free surface
+(constraints keep riding `TemplateConstraintRequest`). Assignments side: `PublishTemplateCandidateDto` +
+`IsSystem`, `OwnerName`; the resolver's `TenantNotificationTemplatePayload` mirror + `tenantId`.
 
 ## 5. API surface
 
@@ -427,8 +431,9 @@ implementation record.
   promotion scoped to the tied row's own scope. `PublishTemplateCandidateDto` gained
   `IsSystem`/`OwnerName`, and the publish picker marks a blueprint row with its owner.
 - **UI** — landing gained the Owner column + owner filter, the `System default` / `Tenant default` badge
-  split, and scope-gated row actions (Adopt, Publish portal-wide…, Reset… via the new audited
-  `TemplateResetReasonDialog`). The editor shows the owner chip, renders a row outside the session's
+  split, and scope-gated row actions (Adopt, Publish portal-wide…, Reset… via the audited reason dialog — the
+  `TemplateResetReasonDialog` named in the original text is retired, see `notification-template-naming-and-editor-surface.md`
+  D11). The editor shows the owner chip, renders a row outside **the session's**
   write scope **read-only** (no Save/Reset/reason, no constraint kebab or dismissible chips) and offers
   the copy action that makes it editable (Adopt for a tenant session, Publish portal-wide for system
   scope).

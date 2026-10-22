@@ -20,11 +20,17 @@ namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.Promote
 /// separately traceable (naming spec D7).
 /// </para>
 /// <para>
-/// This is the <b>one cross-tenant read</b> in the feature: a system-scope session ignores the "Tenant"
-/// filter to reach the source row, and that read is wrapped in
-/// <see cref="ITenantContextAccessor.SuppressTenantGuard"/> (the sanctioned bypass). It is gated by
-/// scope, not by a claim - a tenant session is refused here (403), so it can never reach another
-/// tenant's row. An identical system-side constraint set is a conflict (409).
+/// This is the <b>one cross-tenant read</b> in the feature: a system-scope session drops the "Tenant"
+/// filter to reach the source row, and that read is the sanctioned <b>named</b> suppression
+/// (<c>IgnoreQueryFilters(["Tenant"])</c>). It is gated by scope, not by a claim - a tenant session is
+/// refused here (403), so it can never reach another tenant's row. An identical system-side constraint
+/// set is a conflict (409).
+/// </para>
+/// <para>
+/// <see cref="ITenantContextAccessor.SuppressTenantGuard"/> wraps the <b>insert</b>, not the read: it is
+/// a save-time guard (<c>ModuleDbContext.PrepareChanges</c>), so only a write can ever be the reason for
+/// it. It scopes the one write this handler makes outside the session's own scope — the blueprint copy
+/// (<c>TenantId = null</c>) — and nothing else.
 /// </para>
 /// </summary>
 public sealed class PromoteTenantNotificationTemplateHandler(
@@ -47,10 +53,8 @@ public sealed class PromoteTenantNotificationTemplateHandler(
                 + "can promote a tenant's template.");
         }
 
-        // Sanctioned cross-tenant read: the "Tenant" filter is ignored for ONE row, by id, in system
+        // Sanctioned cross-tenant read: the "Tenant" filter is dropped for ONE row, by id, in system
         // scope. The named-soft-delete filter still applies, so a tombstoned row cannot be promoted.
-        using var guard = tenantContextAccessor.SuppressTenantGuard();
-
         var source = await db.TenantNotificationTemplates
             .IgnoreQueryFilters(["Tenant"])
             .Include(x => x.Constraints)
@@ -78,12 +82,18 @@ public sealed class PromoteTenantNotificationTemplateHandler(
                 + "type and contact mode.");
         }
 
+        // Every argument is named because `code` and `subject` are both strings: a positional swap
+        // would compile.
         var copy = TenantNotificationTemplate.Create(
-            tenantId: null, source.Kind, source.Channel,
-            source.Title, source.Description,
-            await entityCodeGenerator.GenerateAsync(TenantNotificationTemplate.CodeRule, ct),
-            source.Subject, source.Body,
-            source.Constraints.Select(c => (c.Dimension, c.Value)).ToList());
+            tenantId: null,
+            kind: source.Kind,
+            channel: source.Channel,
+            title: source.Title,
+            description: source.Description,
+            code: await entityCodeGenerator.GenerateAsync(TenantNotificationTemplate.CodeRule, ct),
+            subject: source.Subject,
+            body: source.Body,
+            constraints: source.Constraints.Select(c => (c.Dimension, c.Value)).ToList());
 
         db.TenantNotificationTemplates.Add(copy);
 
@@ -95,7 +105,14 @@ public sealed class PromoteTenantNotificationTemplateHandler(
             newConstraints: TemplateConstraintSummary.Serialize(copy.Constraints),
             reason: command.Reason);
 
-        await db.SaveChangesAsync(ct);
+        // The sanctioned bypass wraps the WRITE that needs it — the blueprint copy's insert
+        // (TenantId = null), the one row this session writes outside its own scope. Wrapping the read
+        // above would be the no-op dotnet-best-practices.md forbids: the guard is consulted at save time
+        // only, and the cross-tenant read is the named filter suppression.
+        using (tenantContextAccessor.SuppressTenantGuard())
+        {
+            await db.SaveChangesAsync(ct);
+        }
 
         return NotificationTemplateOwnership.ToDto(copy, NotificationTemplateOwnership.SystemOwnerName);
     }

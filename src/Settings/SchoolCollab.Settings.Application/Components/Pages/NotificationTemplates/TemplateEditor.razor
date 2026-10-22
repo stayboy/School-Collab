@@ -2,6 +2,7 @@
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Authoring
 @using SchoolCollab.Admin.Shared.Components.RichText
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Core.Notifications
 @using SchoolCollab.Core.RichText
 @inject NotificationTemplateApiClient Api
@@ -78,6 +79,19 @@
                                                  Placeholder="A name you will recognise — e.g. Grade 8 Science reminder" />
                             </FormRow>
 
+                            @* Naming spec D6/D7, stories 10–12: the generated reference, shown read-only beside
+                               the name it belongs to. It is minted on save, so a create draft shows a dash
+                               and says where the code comes from — the field is never an input. *@
+                            <FormRow Label="Code" For="template-code">
+                                <FluentTextInput Id="template-code"
+                                                 Class="w-4"
+                                                 Value="@CodeDisplay"
+                                                 Disabled="true"
+                                                 ReadOnly="true"
+                                                 AriaLabel="Template code (generated)" />
+                                <p class="template-editor-hint" id="template-code-hint">@CodeHint</p>
+                            </FormRow>
+
                             <FormRow Label="Description" For="template-description">
                                 <FluentTextArea Id="template-description"
                                                 Class="w-9"
@@ -96,7 +110,7 @@
                                 <DropdownComponent TItem="KindOption" TValue="NotificationTemplateKind"
                                                    Items="KindOptions"
                                                    SelectedValue="@_model.Kind"
-                                                   SelectedValueChanged="OnKindChangedAsync"
+                                                   SelectedValueChanged="OnKindChanged"
                                                    OptionText="@(o => o.Label)"
                                                    OptionValue="@(o => o.Value)"
                                                    AriaLabel="Template type"
@@ -105,7 +119,7 @@
                                 <DropdownComponent TItem="ChannelOption" TValue="NotificationChannel"
                                                    Items="ChannelOptions"
                                                    SelectedValue="@_model.Channel"
-                                                   SelectedValueChanged="OnChannelChangedAsync"
+                                                   SelectedValueChanged="OnChannelChanged"
                                                    OptionText="@(o => o.Label)"
                                                    OptionValue="@(o => o.Value)"
                                                    AriaLabel="Preferred mode of contact"
@@ -119,7 +133,7 @@
                                     <FluentTextInput Id="template-subject"
                                                      Class="w-9"
                                                      Value="@_model.Subject"
-                                                     ValueChanged="OnSubjectChangedAsync"
+                                                     ValueChanged="OnSubjectChanged"
                                                      Immediate="true"
                                                      Disabled="@ReadOnly"
                                                      Placeholder="Subject line (tags allowed)" />
@@ -142,7 +156,7 @@
                                                     Label="Message"
                                                     Class="w-9 ta-lines-8"
                                                     Value="@_model.Body"
-                                                    ValueChanged="OnBodyChangedAsync"
+                                                    ValueChanged="OnBodyChanged"
                                                     Immediate="true"
                                                     Disabled="@ReadOnly" />
                                 }
@@ -480,6 +494,17 @@
 
     private string BodyInputId => _model.Channel == NotificationChannel.Email ? "template-body-editor" : "template-body-text";
 
+    /// <summary>
+    /// The generated code, read-only (naming spec D6/D7, stories 10 and 12): a create draft has not been
+    /// minted yet, so it shows a dash rather than an empty box the operator would read as a required input.
+    /// </summary>
+    private string CodeDisplay => string.IsNullOrWhiteSpace(_model.Code) ? "—" : _model.Code!;
+
+    /// <summary>Where the code in the row above comes from.</summary>
+    private string CodeHint => string.IsNullOrWhiteSpace(_model.Code)
+        ? "Generated when the template is saved."
+        : "Generated on save. A code is never typed, and never changes.";
+
     protected override async Task OnInitializedAsync()
     {
         _loadCts = new CancellationTokenSource();
@@ -548,18 +573,17 @@
     }
 
     /// <summary>A kind change resets the preview: the renderer's sample data is kind-sensitive.</summary>
-    private async Task OnKindChangedAsync(NotificationTemplateKind kind)
+    private void OnKindChanged(NotificationTemplateKind kind)
     {
         _model.Kind = kind;
         QueuePreview();
-        await Task.CompletedTask;
     }
 
     /// <summary>
     /// A mode change swaps the body control, so the previous body cannot simply carry over: the domain
     /// drops the subject for every non-email channel, and this keeps the draft honest about that.
     /// </summary>
-    private async Task OnChannelChangedAsync(NotificationChannel channel)
+    private void OnChannelChanged(NotificationChannel channel)
     {
         _model.Channel = channel;
         if (channel != NotificationChannel.Email && _model.Subject is not null)
@@ -570,14 +594,12 @@
         }
 
         QueuePreview();
-        await Task.CompletedTask;
     }
 
-    private async Task OnSubjectChangedAsync(string? value)
+    private void OnSubjectChanged(string? value)
     {
         _model.Subject = value;
         QueuePreview();
-        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -589,11 +611,10 @@
 
     private void OnDescriptionChanged(string? value) => _model.Description = value;
 
-    private async Task OnBodyChangedAsync(string? value)
+    private void OnBodyChanged(string? value)
     {
         _model.Body = value ?? string.Empty;
         QueuePreview();
-        await Task.CompletedTask;
     }
 
     /// <summary>Appends a tag at the end of the authored text (email: subject; plain text: body).</summary>
@@ -879,7 +900,7 @@
     /// <summary>The read-only list, shared with the landing grid's constraint-count link.</summary>
     private Task OpenConstraintListAsync() =>
         DialogService.ShowReadonlyDialogAsync<TemplateConstraintsDialog>(
-            $"{_model.Kind} · {ChannelLabel(_model.Channel)}",
+            $"{_model.Kind} · {EnumLabels.For(_model.Channel)}",
             new Dictionary<string, object?>
             {
                 [TemplateConstraintsDialog.ConstraintsKey] = _model.Constraints.ToList(),
@@ -892,15 +913,7 @@
     /// string — it is what the breadcrumb, the heading and every dialog that names this template reads.
     /// </summary>
     private string TemplateTitle => TemplateTitles.For(
-        _model.Title, _model.Subject, _model.Body, $"{_model.Kind} · {ChannelLabel(_model.Channel)}");
-
-    private static string ChannelLabel(NotificationChannel channel) => channel switch
-    {
-        NotificationChannel.Email => "Email",
-        NotificationChannel.SMS => "SMS",
-        NotificationChannel.WhatsApp => "WhatsApp",
-        _ => channel.ToString(),
-    };
+        _model.Title, _model.Subject, _model.Body, $"{_model.Kind} · {EnumLabels.For(_model.Channel)}");
 
     private static string DimensionTitle(TemplateConstraintDimension dimension) => dimension switch
     {
@@ -949,7 +962,7 @@
                 {
                     // D3: the warning names the other row by its TITLE, so the operator can go and find it.
                     var other = TemplateTitles.For(row.Title, row.Subject, row.Body,
-                        $"{row.Kind} · {ChannelLabel(row.Channel)}");
+                        $"{row.Kind} · {EnumLabels.For(row.Channel)}");
                     return $"'{other}' has the identical constraint set in this type and contact mode — "
                         + "publish-time selection cannot tell them apart.";
                 }

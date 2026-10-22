@@ -53,10 +53,10 @@ Every template is **named and coded**:
 - a **generated template code** (`TPL07`) minted by the existing entity-code-rule machinery, shown
   read-only, used wherever an exact reference is needed.
 
-Title becomes the template's identity everywhere: the landing grid's template cell (`TPL07 · Grade 8
-Science reminder`, with the description as a muted second line), the detail heading and breadcrumb,
-and the adopt / publish / reset confirmations. The subject line goes back to being what it always
-was — email content — and stops pretending to be a name.
+Title becomes the template's identity everywhere: the landing grid's template cell (the title, with the
+description as a muted second line, and the code in its own sortable column beside it — D13), the
+detail heading and breadcrumb, and the adopt / publish / reset confirmations. The subject line goes
+back to being what it always was — email content — and stops pretending to be a name.
 
 The editor surface is tidied into the repo's own shapes:
 
@@ -129,7 +129,10 @@ The editor surface is tidied into the repo's own shapes:
    `Title` (max 120 characters) and an optional `Description` (max 500 characters). Both are shown
    as form rows directly above the Template Type row: `Title` a single-line input, `Description` a
    two-line text area. `Title` is required in the create/edit form — the domain rejects a blank or
-   whitespace-only title, mirroring how the body is rejected today.
+   whitespace-only title, mirroring how the body is rejected today — and both caps are enforced by the
+   domain, not only by the column, so an over-long title is a 400, never a 500. The generated `Code`
+   also gets a read-only row beside the title: the minted code, or an em dash plus a "generated on save"
+   hint while the row is still unsaved (stories 10 and 12).
 2. **D2 — No uniqueness invariant on `Title`.** Two templates may share a title; the generated code
    is the unique identifier, and the existing identical-constraint-set warning is the ambiguity
    signal in the applicability matcher. Adding a "unique title per scope × kind × channel" rule
@@ -229,11 +232,19 @@ The editor surface is tidied into the repo's own shapes:
     staging an edit never needs a dialog regardless of count. The add-constraint menu, the chips and
     the conflict warning are unchanged.
 
+13. **D13 — The code gets its own landing column, not an in-cell prefix.** The landing grid carries a
+    narrow, sortable `Code` column (em dash when null) while the Template cell keeps the title link
+    and the muted description. This supersedes the Solution section's
+    `TPL07 · Grade 8 Science reminder` wording and the D9 clause describing the code as a prefix in
+    the landing cell: two pieces of identity in one cell read as noise, and a sortable column is what
+    makes "find TPL07" work.
+
 ### Modules touched
 
 - Settings domain: the template aggregate gains title/description/code, the create path accepts a
-  title/description and mints the code, the update path replaces title/description, and the audit
-  recorder receives the title on create and update.
+  title/description and mints the code, and the update path replaces title/description. The audit
+  entry is **not** extended (see Out of Scope): a title change is attributable through the entry's
+  actor, timestamp, change kind and reason, but it is not diffed.
 - Settings DTOs and CQRS: create/update requests gain title and description; the template DTO gains
   title, description and code; the create request keeps its optional reason field for other callers
   but the editor stops sending one.
@@ -261,9 +272,13 @@ the internals.
 1. **Server seam (existing): the Settings notification-template handlers**, exercised against an
    in-memory Settings database with the real handlers constructed directly. Prior art:
    `NotificationTemplateHandlerTests` (create/update/delete/audit through the handlers),
-   `EntityCodeGeneratorTests` (rule + generator), `NotificationTemplateOwnershipTests`. This seam
-   covers: title required, code minted and unique per scope, code untouched by update, adopt/promote
-   copies minting their own code, audit entry carrying title/reason, migration backfill shape.
+   `NotificationTemplateCodeRuleTests` (the rule + seeder shape), `NotificationTemplateOwnershipTests`,
+   `TenantNotificationTemplateTitleBackfillMigrationTests` (the shipped backfill), and the integration
+   suite `NotificationTemplateStoreApiTests` (Testcontainers Postgres: the hybrid tenant filter on the
+   adopt duplicate-check, and the filtered unique index on `(tenant_id, code)`). This seam covers: title
+   required (blank and over-long), code minted and unique per scope, code untouched by update,
+   adopt/promote copies minting their own code, and the audit entry carrying the **reason** (not the
+   title — see Out of Scope).
 2. **UI seam (existing): the fake Settings API over an `HttpMessageHandler`, with the real shared
    editor rendered by bUnit.** Prior art: `NotificationTemplateTestHarness`,
    `NotificationTemplateCreateTests`, `NotificationTemplateDetailTests`,

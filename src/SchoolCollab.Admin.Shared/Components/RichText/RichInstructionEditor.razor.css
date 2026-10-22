@@ -19,9 +19,11 @@
 
 /* The placeholder shown while the Quill assets load — the editor's height plus the 2rem the toolbar
    occupies once it arrives (8rem + 2rem = the 10rem this box always had), so the panel does not jump
-   when the real control arrives. */
+   when the real control arrives. The stroke is v5's own token --colorNeutralStroke1 (#d1d1d1); v5 defines
+   no --neutral-* property at all, so the v4 var() here left the `border` shorthand invalid and silently
+   dropped it (the FluentTabStrip lesson, 2026-10-17). */
 .rich-instruction-editor-loading {
     min-height: calc(var(--rich-instruction-editor-min-height, 8rem) + 2rem);
-    border: 1px solid var(--neutral-stroke-rest);
+    border: 1px solid var(--colorNeutralStroke1, #d1d1d1);
     border-radius: 4px;
 }

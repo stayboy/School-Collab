@@ -28,8 +28,9 @@ Three facts settled the design rather than a preference:
 ## Implementation steps (by workstream)
 
 **1 — Backend (Settings.Core + MigrationService).** The aggregate gained `Title` (required, ≤120),
-`Description` (≤500) and `Code` (nullable, write-once: `Create` takes it, `Update` has no path to it and
-returns the previous title/description for the audit row). The EF configuration pins the lengths and
+`Description` (≤500) and `Code` (nullable, write-once: `Create` takes it and `Update` has no path to
+it). Both caps are enforced by the aggregate, not only by the column, so an over-long title is a 400
+rather than a Postgres 500. The EF configuration pins the lengths and
 adds `ix_tenant_notification_templates_tenant_code` on `(tenant_id, code)` filtered
 `is_deleted = false AND code IS NOT NULL`. Migration
 `20261022135020_AddTenantNotificationTemplateTitleDescriptionAndCode` adds the three columns, backfills
@@ -58,7 +59,10 @@ cell, and `TemplateTitles` holds the one identity derivation both pages use.
 **4 — Tests.** Two existing seams, no new one: the Settings handlers against an in-memory database, and
 the fake Settings API over an `HttpMessageHandler` with the real editor/landing rendered by bUnit. A new
 `TemplateDialogs` seam records dialog opens and scripts the reason/confirm answers, so "dismissed the
-dialog ⇒ no write" is asserted through the same surface the operator uses.
+dialog ⇒ no write" is asserted through the same surface the operator uses. The migration's data
+rewrite is pinned by a regex-read of the shipped migration (the `AssignmentPolicyFieldsMigrationTests`
+precedent), and the behaviour InMemory cannot model — the hybrid tenant filter and the filtered unique
+index — is pinned by a Testcontainers Postgres suite.
 
 ## Verification results (2026-10-23)
 
@@ -68,10 +72,42 @@ dialog ⇒ no write" is asserted through the same surface the operator uses.
 | `dotnet build` — MigrationService | 0 errors |
 | `dotnet build` — Admin.Shared | 0 errors |
 | `dotnet build` — Settings.Application + Admin host | 0 errors |
-| `SchoolCollab.Settings.Tests.Unit` | 667 total, 0 failed |
-| `SchoolCollab.Admin.Tests.Unit` | 760 total, 0 failed |
+| `SchoolCollab.Settings.Tests.Unit` | 677 total, 0 failed |
+| `SchoolCollab.Admin.Tests.Unit` | 763 total, 0 failed |
+| `SchoolCollab.Settings.Tests.Integration` — notification-template suite | 3 total, 0 failed (Testcontainers Postgres) |
+| `dotnet build SchoolCollab.slnx` | 0 errors (17 pre-existing advisory warnings) |
 | Migration SQL | reviewed via `dotnet ef migrations script`; backfill + `SET NOT NULL` + index in one migration |
-| Mobile head (`src/Mobile/SchoolCollab.Mobile.slnx`) | not built this pass — Admin.Shared is touched, so run it before merging (see `AGENTS.md`) |
+| Mobile head (`src/Mobile/SchoolCollab.Mobile.slnx`) | **0 errors** (`-m:1 -p:BuildInParallel=false`; 2 pre-existing CS8603 warnings in unrelated clients) |
+
+The full integration assembly still has two environment-dependent failures
+(`OpenRouterClient_UsesApiKey_…`, `OpenRouterProvider_WithGoogleGemma4_…`) that return **402 Payment
+Required** from OpenRouter — no account credit. They are unrelated to this change and were failing
+before it.
+
+## Code review (two axes, 2026-10-23)
+
+The standards axis blocked on three findings, all fixed in one pass:
+
+1. `PromoteTenantNotificationTemplateHandler` wrapped its **read** in `SuppressTenantGuard()`; the guard
+   is consulted only at save time, so it now wraps only the `TenantId = null` insert, and the XML doc
+   says so — the exact shape `dotnet-best-practices.md` forbids.
+2. The shipped title backfill had no test; it is now pinned by
+   `TenantNotificationTemplateTitleBackfillMigrationTests` (one `Sql` block, the `COALESCE` chain, and
+   the `AlterColumn … nullable: false` ordering).
+3. No handler had an integration test although InMemory cannot enforce the hybrid tenant filter or a
+   filtered unique index; `NotificationTemplateStoreApiTests` now runs against Testcontainers Postgres.
+
+The same pass also removed the dead audit channel (`Update` no longer returns unused
+`PreviousTitle`/`PreviousDescription`), gave the editor a read-only code row (stories 10/12), extended the
+landing search to title + description, added the domain length guards, deduplicated the channel-label
+switch into `Admin.Shared.Constants.EnumLabels`, collapsed the seeder's three near-identical methods,
+named the arguments at every `Create`/`Update` call site, fixed a v4 CSS token that had no fallback, gave
+an orphan markup class its rule, made four no-op `async Task` handlers `void`, reverse-ordered the
+migration's `Down()`, and added arrange/act/assert markers to the new tests.
+
+The spec axis returned PARKED on three gaps — the missing code surface, the unamended redesign spec, and
+the landing search — all now closed. Both axes reviewed the tree at `HEAD` rather than the commit delta
+(the reviewers had no shell access), so the commit boundaries were checked by the parent instead.
 
 ## Follow-ups deliberately not taken
 

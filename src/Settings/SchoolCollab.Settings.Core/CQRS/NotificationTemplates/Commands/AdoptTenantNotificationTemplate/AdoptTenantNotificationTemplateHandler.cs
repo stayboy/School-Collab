@@ -72,12 +72,18 @@ public sealed class AdoptTenantNotificationTemplateHandler(
                 + "contact mode - edit that copy instead of adopting again.");
         }
 
+        // Every argument is named because `code` and `subject` are both strings: a positional swap
+        // would compile.
         var copy = TenantNotificationTemplate.Create(
-            tenantId, source.Kind, source.Channel,
-            source.Title, source.Description,
-            await entityCodeGenerator.GenerateAsync(TenantNotificationTemplate.CodeRule, ct),
-            source.Subject, source.Body,
-            source.Constraints.Select(c => (c.Dimension, c.Value)).ToList());
+            tenantId: tenantId,
+            kind: source.Kind,
+            channel: source.Channel,
+            title: source.Title,
+            description: source.Description,
+            code: await entityCodeGenerator.GenerateAsync(TenantNotificationTemplate.CodeRule, ct),
+            subject: source.Subject,
+            body: source.Body,
+            constraints: source.Constraints.Select(c => (c.Dimension, c.Value)).ToList());
 
         db.TenantNotificationTemplates.Add(copy);
 

@@ -49,12 +49,18 @@ public sealed class CreateTenantNotificationTemplateHandler(
         var code = await entityCodeGenerator.GenerateAsync(TenantNotificationTemplate.CodeRule, ct);
 
         // Create builds the constraint rows itself so each carries the template's generated id and
-        // scope (callers cannot know it before the row exists).
+        // scope (callers cannot know it before the row exists). Every argument is named because `code`
+        // and `subject` are both strings: a positional swap would compile.
         var template = TenantNotificationTemplate.Create(
-            ownerId, request.Kind, request.Channel,
-            request.Title, request.Description, code,
-            request.Subject, request.Body,
-            requestedConstraints.Select(c => (c.Dimension, c.Value)).ToList());
+            tenantId: ownerId,
+            kind: request.Kind,
+            channel: request.Channel,
+            title: request.Title,
+            description: request.Description,
+            code: code,
+            subject: request.Subject,
+            body: request.Body,
+            constraints: requestedConstraints.Select(c => (c.Dimension, c.Value)).ToList());
 
         db.TenantNotificationTemplates.Add(template);
 
