@@ -147,3 +147,34 @@ and `documents/rounds/README.md`; this section holds the decisions those mechani
 - Whether the structural smells from the same review - owner value object, duplicated adopt/promote
   handler bodies, the 991-line `TemplateEditor`, the test fixture's tenant default - become one
   follow-up issue or several.
+
+---
+
+## 6. Closure — acceptance closes the chain's tickets (owner, 2026-10-21)
+
+The leak this document's §1 chain exposed is now closed. The four `/to-tickets` issues of the
+notification arc (#392–#395) stayed OPEN after PR #398 merged everything they scoped — no role
+in the chain had a closing gesture; acceptance's only closing gestures targeted the backlog doc.
+Settled in the 2026-10-21 grill round, all as recommended (Q90–Q94):
+
+- **Tickets are live trackers, not publish-only** (Q90). Acceptance closes them
+  conditionally: the step fires only when the plan or round doc names ticket issues.
+- **Evidence bar** (Q91): a ticket closes only on a per-ticket acceptance row — its own
+  criteria (its `## Acceptance criteria` checkboxes or the spec sections it cites) against
+  the diff and the authoritative build/test numbers. A deferred, descoped or parked slice
+  gets the comment but stays open. Tier-independent by construction — it rides the verdict.
+- **Seats** (Q92): the acceptor seat writes the rows; the **parent** executes
+  `gh issue close N --comment` — mechanical gh work on the verdicts-never-delegate
+  precedent (commits, PR pushes), single writer on every tier, never a child run, never a
+  parent issue (`/to-tickets`'s own guard: "Do NOT close or modify any parent issue").
+- **The SKILL contradiction reworded** (Q93): the backlog doc stays the durable tracker
+  for parked follow-ups, but issues are named as the `/to-tickets` front door's artifact,
+  closed by the round's acceptance — the "not GitHub Issues" blanket is gone.
+- **Retrofit** (Q94): #392–#395 closed 2026-10-21, each close-comment citing the round
+  doc's ACCEPTED (CLOSED) verdict and PR #398 (merge 2f9117ed) — the first chain under
+  the new rule does not begin with four counterexamples.
+
+§5.1 settled with this layer: the doc changes ride `chore/review-shape`/PR #399 alongside
+the research doc itself; §5.2 became issue #397. The unattended-mechanics half of the same
+round (Q85–Q89 — the gate adjudicates the 2b frontier, a non-clean step-5 verdict parks, the
+ledger `Mode` column) is recorded in the skill, the policy's row-8 amendment, and the ledger.

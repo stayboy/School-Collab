@@ -37,10 +37,19 @@ specs that remain the source of truth**.
   re-run in isolation and then as a second full run; the round doc records the first total, the
   isolation result and the re-run total, and a flaky pass is recorded as a **flake**, not a pass
   (Q51, 2026-10-21).
+- **A round that consumed `/to-tickets` issues closes them at acceptance (owner,
+  2026-10-21).** `## Acceptance` carries one row per named ticket — the ticket's own
+  acceptance criteria (its checkboxes or the spec sections it cites) against the diff and
+  build/test — and the parent executes the closes with the row, the round-doc path and
+  the carrying PR. A deferred or descoped ticket's issue **stays open**, its row a
+  comment; never a parent issue (`/to-tickets`'s own guard).
 - **Flip the round doc's `**Status:**` line when the round closes** — set it to
   `CLOSED` and name the PR/commit that carried it, or to `PARKED` when the round was
   stopped mid-flight by the time-box rule
-  (`.pi/skills/orchestrator-worker-reviewer/SKILL.md`, step 3). A parked round names the
+  (`.pi/skills/orchestrator-worker-reviewer/SKILL.md`, step 3), or when an unattended
+  round's verdict is anything other than a clean CLOSED — the step-5 residual grill has
+  no auto-accepting seat, so its questions are recorded unratified and the round parks
+  (owner, 2026-10-21). A parked round names the
   backlog/follow-up item it was parked as and ships its `diffs-<slug>.patch` frozen at the
   point of the park, so `resume-interrupted-orchestrator-round` can pick it up. Round docs
   left at `planned`

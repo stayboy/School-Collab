@@ -259,15 +259,21 @@ the user wants to choose explicitly:
 **Unattended (a modifier on any tier — 0, 1, 2 or 3 — never a tier of its own).** The owner may
 run a round unattended **for that round only** — never a default, never inferred from
 silence, never on by absence. Asking for it is part of this menu's question, not a
-separate flag. In an unattended round the parent **still holds** the grill round; at Tiers 1–3 it
-auto-accepts the recommendations as "all as recommended", but it may **never** auto-accept the plan
-author's own recommendations. At **Tier 0 the plan's author is its only seat**, so `grill-me` is
+separate flag. In an unattended round the parent **still holds** the grill round. At step 2b the
+**plan gate** — the only non-author seat that runs on every tier — adjudicates the enumerated
+frontier in its FRONTIER block: it echoes each accepted question number and ends
+`accepted: N of N`; any refusal line, missing echo, count mismatch or silence fails the block
+and parks the round, and it may **never** auto-accept the plan author's own recommendations. At
+step 5 (acceptance) a verdict that is anything other than a clean CLOSED **parks** — the residual
+grill has no auto-accepting seat on any tier, so its questions are recorded unratified. At
+**Tier 0 the plan's author is its only seat**, so `grill-me` is
 mandatory and its answers are **recorded, not accepted**: the whole frontier goes into the round doc
 under `## Open decisions (unattended solo — recorded, NOT accepted)` and every pin is marked
 `unratified`. Migrations, contract/wire shape, security and auth, tenant isolation, and deleting a
 public route **always reach a human** unless the owner pre-authorises that specific round by name.
 Record it on round-doc line 1 as `Mode: unattended (auto-accept recommendations)` for Tiers 1–3, or
-`Mode: unattended solo (recorded frontier, unratified)` for Tier 0, and flag the ledger row — an
+`Mode: unattended solo (recorded frontier, unratified)` for Tier 0, and set the ledger row's
+`Mode` cell — one of `attended` · `unattended` · `unattended solo` (owner, 2026-10-21) — an
 unattended pin and an owner pin must never look alike. **The report repeats them:** an unattended
 round's completion message lists every pinned decision — the same entries its `## Acceptance`
 carries — as a compact table; a pin must never survive only in the round doc, which this repo

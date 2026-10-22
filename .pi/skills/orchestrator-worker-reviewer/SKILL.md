@@ -52,8 +52,8 @@ Cost rules that apply to every round (speed + token budget):
 | Tier | Use when | Child runs | Acceptance |
 |---|---|---|---|
 | 0 | **Solo** — trivial or contained work: a typo, a comment, a config tweak, a single-file non-behavioural change (or a small fix the owner explicitly puts here) | **0 — no child runs** (the agent is implementer, self-reviewer and acceptor) | **self-acceptance after the self-run two-axis `code-review`** (see "Solo still reviews" below) |
-| 1 | Small behavioural fix passing the eligibility checklist | 1 (worker) | **Plan-author acceptance after the work**: the parent checks every plan criterion against the diff + authoritative build/test and transcribes the verdict |
-| 2 | Behavioural, no UI, single-context plan | 2 (worker + static reviewer); ≤1 rework iteration (worker + reviewer) | **Plan-author acceptance after the work**: the parent adjudicates REVIEW, then checks every plan criterion against the diff + build/test and transcribes the verdict |
+| 1 | Small behavioural fix passing the eligibility checklist | 2 (plan gate + worker) | **Plan-author acceptance after the work**: the parent checks every plan criterion against the diff + authoritative build/test and transcribes the verdict |
+| 2 | Behavioural, no UI, single-context plan | 3 (plan gate + worker + static reviewer); ≤1 rework iteration (worker + reviewer) | **Plan-author acceptance after the work**: the parent adjudicates REVIEW, then checks every plan criterion against the diff + build/test and transcribes the verdict |
 | 3 | Feature rounds; anything carrying schema / endpoint / contract / multi-context risk; anything failing the Tier-1 checklist for a NON-UI reason | 4–6: orchestrator-plan, **reviewer plan-review**, worker, reviewer diff-review, then orchestrator-accept OR plan-author acceptance by the parent (**lean**, no-UI rounds) + UI tester when the UI trigger fires | the orchestrator (full) or the parent as plan author (lean) writes the verdict after checking every criterion — always before the round is reported complete (+ tester-scope handover when the tester fires) |
 
 Default to the **lowest tier that qualifies**; when ambiguous, go one tier up.
@@ -221,25 +221,41 @@ default, never inferred from silence, never on by absence. The option removes th
 `Mode: unattended (auto-accept recommendations)`.
 
 When the plan-stage grill (step 2b) or the acceptance residual grill (step 5) fires in an
-unattended round:
+unattended round, the two sites behave differently (owner, 2026-10-21):
 
-- **Still hold the round.** Enumerate the whole residual frontier in grill format — every
+- **Step 2b — the plan gate is the accepting seat.** The parent enumerates the frontier in
+  the round doc and names it in the gate's brief; the answers ride the plan-gate dispatch
+  that already runs on every tier: the gate returns its PLAN REVIEW **and a FRONTIER
+  block in the same iteration** — no second dispatch. The block echoes **each question
+  number it accepts**, one per line, and ends `accepted: N of N`. Any
+  `not accepted: Q<k> — reason` line, any missing echo, any count mismatch — or silence —
+  fails the block, and the round parks for the owner rather than proceeding on a
+  partially accepted frontier.
+- **Still hold the round.** Enumerate the whole frontier in grill format — every
   open, prerequisite-settled decision, one round, each numbered with a recommendation -
-  exactly as an attended round would. The parent then accepts them as **"all as
-  recommended"**. Only the human wait disappears; the enumeration, the recommendations
+  exactly as an attended round would; the gate adjudicates it, never the author. Only the
+  human wait disappears; the enumeration, the recommendations
   and the round itself do not.
 - **Never auto-accept the plan author's own recommendations.** Recommendations may be
   auto-accepted only from a seat OTHER than the plan author - in practice the plan gate
-  (a different, larger-tier model) or the reviewer. A plan author accepting its own
+  (a different, larger-tier model). A plan author accepting its own
   recommendations is self-review wearing a grill costume, and that case stays
   human-gated even in an unattended round.
+- **Step 5 — a non-clean verdict parks.** The acceptance residual grill has no
+  auto-accepting seat on any tier: by step 5 the gate has run, and nothing between it and
+  the verdict may accept a recommendation for the owner. An unattended round whose verdict
+  would be anything other than a clean CLOSED records the residual frontier - each
+  question echoed, marked unratified - and parks under the existing PARKED convention
+  (`documents/rounds/README.md`). Unattended runs park clean; they never accept at the
+  gate line.
 - **Hard exclusions.** Migrations, contract/wire shape, security and auth, tenant
   isolation, and deleting a public route always reach a human unless the owner has
   pre-authorized that specific round by name. The blast radius decides, not the phrasing
   of the question.
 - **Record provenance; never blur it.** Unattended decisions use a DISTINCT heading -
   `## Pinned decisions (unattended - recommendations accepted)` - never the owner-pinned
-  heading, and the round's ledger row is flagged unattended. A reader must be able to tell
+  heading, and the round's ledger row's `Mode` cell reads `unattended` (`unattended solo` at
+  Tier 0). A reader must be able to tell
   at a glance that no human confirmed those pins.
 - **Tier 0 records; it never accepts.** Because Tier 0's plan author is its only seat, the
   self-acceptance ban above makes auto-acceptance impossible there: `grill-me` is still
@@ -518,8 +534,10 @@ the tester never derives or expands its own scope.
      **backlog / follow-up item for a dedicated look at that specific issue** — a line
      in the round doc **plus** a durable follow-up note in `documents/solution/` (or a line in
      the relevant existing spec's follow-up section) plus a backlog entry in
-     `documents/specs/*backlog*.md` — this repo tracks work by PR, backlog doc and
-     `documents/solution/` note, **not** GitHub Issues, so do not write an issue clause —
+     `documents/specs/*backlog*.md` — the backlog doc is the durable tracker for parked
+     follow-ups, so never open a GitHub issue for one: issues here are the `/to-tickets`
+     front door's artifact, closed by the round's acceptance ("Ticket closure", step 5),
+     never a parked item's —
      then preserve the on-disk state (branch, round doc, whatever the pass produced) so it
      resumes via `resume-interrupted-orchestrator-round`. That skill resumes from a round doc
      **and its frozen patch**, so freeze `diffs-<slug>.patch` from the live tree *before*
@@ -575,6 +593,20 @@ the tester never derives or expands its own scope.
    the recorded owner decisions. Tier 3 full: the parent runs the grill and passes the
    answers in the orchestrator-accept brief as pinned decisions, before that run writes
    the verdict. A clean CLOSED needs no grill.
+   **Ticket closure (conditional — owner, 2026-10-21).** When the plan or round doc
+   names ticket issues — the `/to-tickets` front door publishes one GitHub issue per
+   ticket, and the round consumes them as workstreams — `## Acceptance` carries **one
+   row per named ticket**: the ticket's own acceptance criteria (its
+   `## Acceptance criteria` checkboxes or the spec sections it cites) checked against
+   the diff and the authoritative build/test numbers. A ticket closes only on a
+   fully-met row; a deferred, descoped or parked slice writes the row as a comment and
+   the issue **stays open** — residual work is never hidden. The acceptor seat writes
+   the rows (self at Tier 0, the parent at Tiers 1–2 and Tier 3 lean, the
+   orchestrator-accept run at Tier 3 full); the **parent** executes
+   `gh issue close N --comment` with the row plus the round-doc and carrying-PR links -
+   never a child run, and never a parent issue (the `/to-tickets` skill's own guard:
+   Do NOT close or modify any parent issue). An unattended round that parks closes
+   nothing. No named tickets, no step - most rounds have none.
 6. **UI tester pass (Tier 3, UI rounds).** Task = tester contract + the
    handover verbatim + patch path. The tester bug-hunts only the handed-over
    surfaces and returns UI TEST; the parent persists it into `## UI Tester`.
@@ -589,7 +621,8 @@ the tester never derives or expands its own scope.
    - At the bound, surface residuals to the user instead of looping.
 8. **Report.** Per-agent status, build/test counts, findings, rework
    iterations, round-doc path. Fold durable outcomes into the spec and update
-   the backlog.
+   the backlog; when the plan named ticket issues, list each ticket closed or left
+   open with its verdict row.
 
 ## Pitfalls
 

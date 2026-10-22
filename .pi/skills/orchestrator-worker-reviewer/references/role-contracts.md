@@ -68,7 +68,13 @@ Document owner. Read the source specs/review docs, write the `## Plan` section
 of the round doc (goal, scope, expected files, acceptance criteria), author the
 worker and reviewer task specs, and own the round doc end to end. No code
 edits. On acceptance, adjudicate the REVIEW block against your criteria and
-write the `## Acceptance` verdict (CLOSED, or remaining P1s). For UI rounds,
+write the `## Acceptance` verdict (CLOSED, or remaining P1s). When the plan named
+ticket issues (`/to-tickets`), the verdict also carries **one row per named ticket** —
+its own acceptance criteria (its `## Acceptance criteria` checkboxes or the spec
+sections it cites) checked against the diff and the parent's build/test numbers — and
+the parent closes the met ones citing that row, the round doc and the carrying PR; a
+deferred or descoped ticket's row is a comment and the issue **stays open**. Never a
+parent issue. For UI rounds,
 also derive the tester-scope handover from the changed-files list: the changed
 files, the pages/dialogs/landing pages that render them, the ApiClient methods
 they call, and navigation entry points — one line of rationale per entry. The
@@ -212,6 +218,13 @@ repo-wide sweeps, no builds, no tests; the implementation does not exist yet).
    once shipped stale reviewer rows that contradicted its own headline because the copy was
    trusted instead of diffed.
 
+**Unattended rounds: append a FRONTIER block (owner, 2026-10-21).** When the brief says
+the round is unattended, the gate — the only non-author seat that runs on every tier —
+also adjudicates the plan's enumerated frontier: echo **each Q# accepted**, one per
+line; any `not accepted: Q<k> — reason` refusal, missing echo, count mismatch or
+silence fails the block and the parent parks the round. Attended rounds carry no block —
+the owner answers the frontier.
+
 Return ONLY:
 
     PLAN REVIEW
@@ -221,3 +234,7 @@ Return ONLY:
     Open decisions: <none | Q1: <decision fork the plan leaves open> — ➡️ <recommended answer>   (genuine forks only; never a substitute for a P1)
     Gates: <UI: none|risk · contract: none|risk · migrations: none|risk · secrets: none|risk>
     Acceptance honesty: <ok | tests that cannot fail, one per line>
+    FRONTIER   (unattended rounds only)
+    accepted: Q<k> — <decision accepted as recommended>   (one per accepted question)
+    not accepted: Q<k> — <reason>   (any line parks the round)
+    accepted: N of N
