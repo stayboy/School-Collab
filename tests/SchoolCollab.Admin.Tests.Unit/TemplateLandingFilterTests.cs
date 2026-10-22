@@ -24,15 +24,20 @@ public class TemplateLandingFilterTests
         string? subject = null,
         string body = "<p>body</p>",
         params (TemplateConstraintDimension Dimension, string Value)[] constraints) =>
-        new(Guid.NewGuid(), kind, channel, subject, body,
-            constraints.Select(c => new TemplateConstraintDto(Guid.NewGuid(), c.Dimension, c.Value)).ToList(),
-            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
+        new(Guid.NewGuid(), kind, channel,
+            // The filter reads the subject and the body only (redesign spec §3.2); these fixtures carry the
+            // title the migration would have backfilled from that same label, or none for a body-only row.
+            Title: subject ?? string.Empty, Description: null, Code: null, Subject: subject, Body: body,
+            Constraints: constraints.Select(c => new TemplateConstraintDto(Guid.NewGuid(), c.Dimension, c.Value)).ToList(),
+            CreatedAt: DateTimeOffset.UnixEpoch, UpdatedAt: DateTimeOffset.UnixEpoch,
             TenantId: null, OwnerName: "System");
 
     /// <summary>A row with an explicit owner (redesign spec §3.7): null = system blueprint.</summary>
-    private static TenantNotificationTemplateDto OwnedRow(Guid? tenantId, string? subject) =>
+    private static TenantNotificationTemplateDto OwnedRow(Guid? tenantId, string title) =>
         new(Guid.NewGuid(), NotificationTemplateKind.Publish, NotificationChannel.Email,
-            subject, "<p>body</p>", [], DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
+            Title: title, Description: null, Code: null, Subject: null,
+            Body: "<p>body</p>", Constraints: [],
+            CreatedAt: DateTimeOffset.UnixEpoch, UpdatedAt: DateTimeOffset.UnixEpoch,
             tenantId, tenantId is null ? "System" : "Northfield");
 
     [TestMethod]
@@ -120,9 +125,9 @@ public class TemplateLandingFilterTests
         };
 
         TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, TemplateLandingFilter.SystemOwner, string.Empty)
-            .Should().ContainSingle().Which.Subject.Should().Be("SYSTEM-ROW");
+            .Should().ContainSingle().Which.Title.Should().Be("SYSTEM-ROW");
 
         TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, TemplateLandingFilter.TenantOwner, string.Empty)
-            .Should().ContainSingle().Which.Subject.Should().Be("TENANT-ROW");
+            .Should().ContainSingle().Which.Title.Should().Be("TENANT-ROW");
     }
 }

@@ -7,6 +7,7 @@ using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.DeleteTenan
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTemplateAuditEntries;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplate;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplateById;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplates;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
@@ -33,6 +34,7 @@ public class NotificationTemplateHandlerTests
     private TenantProvider _tenants = default!;
     private GetTenantNotificationTemplatesHandler _getAll = default!;
     private GetTenantNotificationTemplateHandler _getOne = default!;
+    private GetTenantNotificationTemplateByIdHandler _getById = default!;
     private CreateTenantNotificationTemplateHandler _create = default!;
     private UpdateTenantNotificationTemplateHandler _update = default!;
     private DeleteTenantNotificationTemplateHandler _delete = default!;
@@ -52,6 +54,7 @@ public class NotificationTemplateHandlerTests
 
         _getAll = new GetTenantNotificationTemplatesHandler(_db, _tenants);
         _getOne = new GetTenantNotificationTemplateHandler(_db);
+        _getById = new GetTenantNotificationTemplateByIdHandler(_db);
         _create = new CreateTenantNotificationTemplateHandler(_db, _tenants, generator, auditor);
         _update = new UpdateTenantNotificationTemplateHandler(_db, _tenants, auditor);
         _delete = new DeleteTenantNotificationTemplateHandler(_db, _tenants, auditor);
@@ -289,6 +292,34 @@ public class NotificationTemplateHandlerTests
         slotDefault!.Title.Should().Be(created.Title);
         slotDefault.Description.Should().Be(created.Description);
         slotDefault.Code.Should().Be(created.Code);
+
+        // The detail route's read is the editor's source: it must carry all three, or the naming rows
+        // open blank on a row that has them.
+        var byId = await _getById.HandleAsync(new GetTenantNotificationTemplateById(created.Id));
+        byId!.Title.Should().Be(created.Title);
+        byId.Description.Should().Be(created.Description);
+        byId.Code.Should().Be(created.Code);
+    }
+
+    [TestMethod]
+    public async Task Create_WithoutAReason_RecordsNoReasonOnTheAuditEntry()
+    {
+        // Naming spec D11: the editor sends no reason on create — a first write has no "why" — so the
+        // trail records the actor, the time and the created values, and invents nothing for the reason.
+        AsTenant(TenantA);
+
+        await _create.HandleAsync(new CreateTenantNotificationTemplate(
+            new CreateTenantNotificationTemplateRequest(
+                NotificationTemplateKind.Publish, NotificationChannel.Email,
+                "Grade 8 Science reminder", null, "Subject", "Body", []),
+            Reason: null));
+
+        var audit = await _audit.HandleAsync(
+            new GetTemplateAuditEntries(NotificationTemplateKind.Publish, NotificationChannel.Email));
+
+        audit.Should().ContainSingle();
+        audit[0].Reason.Should().BeNullOrWhiteSpace();
+        audit[0].ActorId.Should().Be("test:actor");
     }
 
     [TestMethod]

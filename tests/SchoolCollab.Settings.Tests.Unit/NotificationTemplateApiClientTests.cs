@@ -26,6 +26,9 @@ public class NotificationTemplateApiClientTests
           "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
           "kind": 1,
           "channel": 1,
+          "title": "Grade 8 Science reminder",
+          "description": "Sent the day before the lab.",
+          "code": "TPL07",
           "subject": null,
           "body": "Due {{DueDate}}",
           "constraints": [{ "id": "cccccccc-cccc-cccc-cccc-cccccccccccc", "dimension": 0, "value": "abcdef01-2345-6789-abcd-ef0123456789" }],
@@ -79,8 +82,40 @@ public class NotificationTemplateApiClientTests
         handler.Requests[0].RequestUri!.AbsolutePath.Should().Be(BasePath);
         rows.Should().ContainSingle();
         rows[0].Body.Should().Be("Due {{DueDate}}");
+        rows[0].Title.Should().Be("Grade 8 Science reminder",
+            "the row's identity crosses the wire (naming spec D3)");
+        rows[0].Description.Should().Be("Sent the day before the lab.");
+        rows[0].Code.Should().Be("TPL07", "the generated reference is read-only data (D6)");
         rows[0].Constraints.Should().ContainSingle()
             .Which.Dimension.Should().Be(TemplateConstraintDimension.GradeLevel);
+    }
+
+    [TestMethod]
+    public async Task ListAsync_ToleratesARowWithoutATitleOrCode()
+    {
+        // D7: a row that predates the naming columns carries a null title and a null code, and a client
+        // must not treat that as a malformed payload — the editor and the landing render the fallback.
+        var (client, _) = Build(body: """
+            [{
+              "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+              "kind": 1,
+              "channel": 1,
+              "title": null,
+              "description": null,
+              "code": null,
+              "subject": "Legacy subject",
+              "body": "Due {{DueDate}}",
+              "constraints": [],
+              "createdAt": "2026-10-19T00:00:00+00:00",
+              "updatedAt": "2026-10-19T01:00:00+00:00"
+            }]
+            """);
+
+        var rows = await client.ListAsync();
+
+        rows.Should().ContainSingle();
+        rows[0].Code.Should().BeNull();
+        rows[0].Description.Should().BeNull();
     }
 
     [TestMethod]
@@ -178,6 +213,7 @@ public class NotificationTemplateApiClientTests
 
         var created = await client.CreateAsync(new CreateNotificationTemplateRequest(
             NotificationTemplateKind.Publish, NotificationChannel.Email,
+            "Grade 8 Science reminder", "Sent the day before the lab.",
             "Subject for {{Title}}", "Due {{DueDate}}",
             [new TemplateConstraintRequest(TemplateConstraintDimension.GradeLevel, GradeLevelId.ToString("D"))],
             "initial"));
@@ -185,6 +221,9 @@ public class NotificationTemplateApiClientTests
         handler.Requests.Should().ContainSingle().Which.Method.Should().Be(HttpMethod.Post);
         handler.Requests[0].RequestUri!.AbsolutePath.Should().Be(BasePath);
         handler.Bodies[0].Should().Contain("\"body\":\"Due {{DueDate}}\"");
+        handler.Bodies[0].Should().Contain("\"title\":\"Grade 8 Science reminder\"",
+            "the naming fields are part of the create body (naming spec D1)");
+        handler.Bodies[0].Should().Contain("\"description\":\"Sent the day before the lab.\"");
         handler.Bodies[0].Should().Contain("\"kind\":0",
             "the Settings host registers no JsonStringEnumConverter, so a body carries the numeric enum value");
         created.Id.Should().Be(TemplateId);
@@ -196,11 +235,15 @@ public class NotificationTemplateApiClientTests
         var (client, handler) = Build(body: TemplateJson);
 
         await client.UpdateAsync(TemplateId, new UpdateNotificationTemplateRequest(
-            null, "Due {{DueDate}}", [], "tweak"));
+            "Renamed", null, null, "Due {{DueDate}}", [], "tweak"));
 
         handler.Requests.Should().ContainSingle().Which.Method.Should().Be(HttpMethod.Put);
         handler.Requests[0].RequestUri!.AbsolutePath.Should().Be($"{BasePath}/{TemplateId:D}");
         handler.Bodies[0].Should().Contain("\"body\":\"Due {{DueDate}}\"");
+        handler.Bodies[0].Should().Contain("\"title\":\"Renamed\"",
+            "a rename travels on the replace body (naming spec D1)");
+        handler.Bodies[0].Should().NotContain("\"code\"",
+            "the generated code is never writable, so it is not part of any request (D6)");
     }
 
     [TestMethod]
@@ -229,10 +272,11 @@ public class NotificationTemplateApiClientTests
         await FluentActions.Awaiting(() => client.GetDefaultAsync(
             NotificationTemplateKind.Publish, NotificationChannel.Email)).Should().ThrowAsync<HttpRequestException>();
         await FluentActions.Awaiting(() => client.CreateAsync(new CreateNotificationTemplateRequest(
-            NotificationTemplateKind.Publish, NotificationChannel.Email, null, "Body", [])))
+            NotificationTemplateKind.Publish, NotificationChannel.Email,
+            "Title", null, null, "Body", [])))
             .Should().ThrowAsync<HttpRequestException>();
         await FluentActions.Awaiting(() => client.UpdateAsync(
-            TemplateId, new UpdateNotificationTemplateRequest(null, "Body", [])))
+            TemplateId, new UpdateNotificationTemplateRequest("Title", null, null, "Body", [])))
             .Should().ThrowAsync<HttpRequestException>();
         await FluentActions.Awaiting(() => client.DeleteAsync(TemplateId, "reset"))
             .Should().ThrowAsync<HttpRequestException>();
@@ -252,7 +296,7 @@ public class NotificationTemplateApiClientTests
         // guard keeps the stale shape from creeping back in through the client.
         var (client, handler) = Build(body: TemplateJson);
 
-        await client.UpdateAsync(TemplateId, new UpdateNotificationTemplateRequest(null, "Body", []));
+        await client.UpdateAsync(TemplateId, new UpdateNotificationTemplateRequest("Title", null, null, "Body", []));
         await client.DeleteAsync(TemplateId, "reset");
 
         var paths = handler.Requests.Select(r => r.RequestUri!.AbsolutePath).ToList();

@@ -9,15 +9,19 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// <summary>
 /// The optimistic reset mutation (`blazor-components.md` § "Landing-page performance pattern", rule 2):
 /// the landing drops the row from the in-memory list rather than re-reading it, so the operator's sort
-/// and scroll survive the action. The reset dialog is not renderable in bUnit, so this seam is where
-/// the behaviour is proven.
+/// and scroll survive the action. This is the pure seam for that list arithmetic; the dialog half of a
+/// reset (the shared reason dialog, and no DELETE when it is dismissed) is asserted through the landing
+/// page itself in <see cref="NotificationTemplatesLandingTests"/>.
 /// </summary>
 [TestClass]
 public class TemplateLandingRowsTests
 {
-    private static TenantNotificationTemplateDto Row(Guid id, string subject) =>
-        new(id, NotificationTemplateKind.Publish, NotificationChannel.Email, subject, "<p>b</p>", [],
-            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, TenantId: null, OwnerName: "System");
+    private static TenantNotificationTemplateDto Row(Guid id, string title) =>
+        new(id, NotificationTemplateKind.Publish, NotificationChannel.Email,
+            Title: title, Description: null, Code: "TPL01", Subject: null,
+            Body: "<p>b</p>", Constraints: [],
+            CreatedAt: DateTimeOffset.UnixEpoch, UpdatedAt: DateTimeOffset.UnixEpoch,
+            TenantId: null, OwnerName: "System");
 
     [TestMethod]
     public void WithoutReset_RemovesOnlyTheResetRow_AndKeepsOrder()
@@ -28,7 +32,7 @@ public class TemplateLandingRowsTests
 
         var remaining = TemplateLandingRows.WithoutReset([a, b, c], b.Id);
 
-        remaining.Select(r => r.Subject).Should().Equal(["A", "C"],
+        remaining.Select(r => r.Title).Should().Equal(["A", "C"],
             "the reset row leaves and the grid keeps its order (rule 2: no re-read)");
     }
 

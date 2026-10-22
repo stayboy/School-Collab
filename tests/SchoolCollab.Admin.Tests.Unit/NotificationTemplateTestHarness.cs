@@ -16,6 +16,22 @@ internal sealed class TemplateRow
     public Guid Id { get; init; } = Guid.NewGuid();
     public int Kind { get; init; }
     public int Channel { get; init; }
+
+    /// <summary>
+    /// The operator's own name for the row (naming spec D1) — what every surface reads to identify it
+    /// (D3). Null models a row that predates the title column, which the UI falls back from.
+    /// </summary>
+    public string? Title { get; init; }
+
+    /// <summary>Display-only metadata under the title (D4).</summary>
+    public string? Description { get; init; }
+
+    /// <summary>
+    /// The generated reference (D6). Null models a pre-upgrade row: no backfill code, rendered as a
+    /// dash (D7).
+    /// </summary>
+    public string? Code { get; init; }
+
     public string? Subject { get; init; }
     public string Body { get; init; } = "<p>Body</p>";
     public List<(int Dimension, string Value)> Constraints { get; init; } = [];
@@ -135,6 +151,10 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
             {
                 Kind = source.Kind,
                 Channel = source.Channel,
+                Title = source.Title,
+                Description = source.Description,
+                // D7: the copy is a new live row, so the server mints it its own code.
+                Code = NextCode(),
                 Subject = source.Subject,
                 Body = source.Body,
                 Constraints = source.Constraints.ToList(),
@@ -193,6 +213,10 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
                 Id = existing.Id,
                 Kind = existing.Kind,
                 Channel = existing.Channel,
+                Title = String(root, "title") ?? existing.Title,
+                Description = String(root, "description"),
+                // D6: the code is minted once and never rewritten, so the replace keeps the stored one.
+                Code = existing.Code,
                 Subject = root.TryGetProperty("subject", out var subject) && subject.ValueKind != JsonValueKind.Null
                     ? subject.GetString()
                     : null,
@@ -202,6 +226,8 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
                         .Select(c => (c.GetProperty("dimension").GetInt32(), c.GetProperty("value").GetString() ?? string.Empty))
                         .ToList()
                     : [],
+                TenantId = existing.TenantId,
+                OwnerName = existing.OwnerName,
             };
             Rows[index] = updated;
             return Json(JsonSerializer.Serialize(ToWire(updated), Web));
@@ -221,6 +247,10 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
             {
                 Kind = root.GetProperty("kind").GetInt32(),
                 Channel = root.GetProperty("channel").GetInt32(),
+                Title = String(root, "title"),
+                Description = String(root, "description"),
+                // D5: the server mints the code on create; the editor never sends one.
+                Code = NextCode(),
                 Subject = root.TryGetProperty("subject", out var subject) && subject.ValueKind != JsonValueKind.Null
                     ? subject.GetString()
                     : null,
@@ -273,11 +303,24 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
 
         return null;
     }
+
+    /// <summary>The next generated reference the fake server would mint, shaped like the shipped rule.</summary>
+    private string NextCode() => $"TPL{Rows.Count + 1:00}";
+
+    /// <summary>A nullable string member of a JSON body, or null when absent or JSON null.</summary>
+    private static string? String(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null
+            ? value.GetString()
+            : null;
+
     private static object ToWire(TemplateRow row) => new
     {
         id = row.Id,
         kind = row.Kind,
         channel = row.Channel,
+        title = row.Title,
+        description = row.Description,
+        code = row.Code,
         subject = row.Subject,
         body = row.Body,
         constraints = row.Constraints.Select(c => new { id = Guid.NewGuid(), dimension = c.Dimension, value = c.Value }),
