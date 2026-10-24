@@ -40,6 +40,12 @@
     flex: 1 1 auto !important;
     width: 100% !important;
     height: 100%;
+    /* Belt and braces with app.css's .brand/.brand-sep/.brand-page rule: the bar is a BRAND
+       surface, so anything rendered inside it inherits the on-brand foreground. Without this,
+       a child that sets no colour of its own silently picks up the page's
+       --colorNeutralForeground1 — the light-mode #242424-on-blue the UX review caught
+       (2026-10-24). */
+    color: var(--colorNeutralForegroundOnBrand, #ffffff);
     padding-left: 1rem;
     padding-right: 1rem;
     min-width: 0;
@@ -59,21 +65,38 @@
     width: auto;
 }
 
-/* FluentStack renders an inline width:100% on its root div. The ThemeSwitcher
-   is a FluentStack child of the header row -- without this override its root
-   claims 100% of the row width and leaves no free space for the FluentSpacer
-   to absorb (which is what pushes the trailing actions to the far edge). */
-.layout-header-stack ::deep > .theme-switcher-stack {
-    flex: 0 0 auto;
-    width: auto;
+/* FluentStack renders an inline width:100% on its root div. The app-bar cluster is now
+   `display:inline-flex` and sizes to its two controls (the active-term chip and the dev tenant
+   switcher); the theme control moved to the sidebar, so the old theme-stack override is gone
+   rather than left behind as a rule that matches nothing. */
+
+/* Left cluster: brand · separator · page title as ONE flex child, so the row has an explicit
+   priority order. It is the only part of the bar that may shrink (the trailing cluster is
+   `flex: 0 0 auto`), which is what lets the page title give width back instead of being cut by
+   a cap of its own. The 12px gap reproduces the spacing the FluentStack gave the three spans
+   while they were its own children. */
+.app-bar-title-cluster {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
-.brand-page {
+/* The brand and its separator never yield -- the title is the only thing that shrinks. */
+.app-bar-title-cluster .brand,
+.app-bar-title-cluster .brand-sep {
+    flex: 0 0 auto;
+}
+
+/* No max-width here on purpose: a cap clips the title before the trailing controls have
+   yielded, which is the truncation this bar was reported for (#402). The ellipsis stays as a
+   defensive last resort for a viewport too narrow for brand + title + controls. */
+.app-bar-title-cluster .brand-page {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 32ch;
-    min-width: 0;
 }
 
 .page-toolbar-slot {

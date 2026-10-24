@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject IFeatureFlagService FeatureFlags
 
+<div class="nav-shell">
 <FluentNav Width="250"
                aria-label="@(_currentModule == "settings" ? "Settings" : _currentModule == "assignments" ? "Assignments" : _currentModule == "students" ? "Students" : "Navigation")">
 
@@ -174,6 +175,24 @@
     }
 
 </FluentNav>
+
+    @* Utility row, pinned to the bottom of the sidebar (owner, 2026-10-24). It holds the
+       portal-wide controls that are NOT page context: the theme menu and the settings
+       shortcut. They used to sit in the 50px app bar, whose fixed cost pushed the page
+       title into an ellipsis (#402). The bar now carries only context — brand, page
+       title, active term, dev tenant. *@
+    <div class="nav-footer">
+        <ThemeSwitcher />
+
+        <FluentButton Id="nav-settings"
+                      Appearance="ButtonAppearance.Subtle"
+                      Title="Settings"
+                      aria-label="Settings"
+                      OnClick="@(() => Nav.NavigateTo("/settings"))">
+            <FluentIcon Value="@FluentIcons.Settings" />
+        </FluentButton>
+    </div>
+</div>
 
 @code {
     private CodedValueDto[]? _parentValues;

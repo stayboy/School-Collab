@@ -25,7 +25,7 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// <para>Theming moved off the layout in v5 as well: <c>FluentDesignTheme</c> — and with it
 /// <c>DesignThemeModes</c>/<c>OfficeColor</c> — no longer exists
 /// (<c>MigrationFluentDesignTheme.md</c>), so the layout's whole theme wiring is now the
-/// <see cref="ThemeSwitcher"/> in the header. The assertion that counted
+/// <see cref="ThemeSwitcher"/> — hosted by the sidebar's utility row since 2026-10-24. The assertion that counted
 /// <c>&lt;FluentDesignTheme</c> literals therefore stopped discriminating anything (the
 /// literal count is 0 in v5) and is replaced here by three checks that do: the layout still
 /// hosts the switcher, it has not regained the removed v4 root, and the switcher itself
@@ -85,14 +85,24 @@ public class MainLayoutProvidersTests : BunitContext
     }
 
     [TestMethod]
-    public void Layout_Hosts_TheThemeSwitcher()
+    public void Sidebar_Hosts_TheThemeSwitcher_And_TheHeader_Does_Not()
     {
-        // The layout's theme wiring in v5 is the switcher itself: the switcher owns the
-        // mode cycle and the accent picker against IThemeService, so dropping it from the
-        // header would leave the shell with no way to change the theme at all — and no
-        // compile error would say so.
-        var source = ReadLayoutSource();
-        source.Should().Contain("<ThemeSwitcher");
+        // v5's whole theme wiring is the switcher: it owns the mode and the accent against
+        // IThemeService, so dropping it would leave the shell with no way to change the theme
+        // at all — and no compile error would say so. Since 2026-10-24 it lives in the
+        // sidebar's utility row, not the app bar, so the assertion follows it there and pins
+        // the bar's new composition at the same time (the bar carries context only).
+        var layout = ReadLayoutSource();
+        layout.Should().NotContain("<ThemeSwitcher",
+            "the theme control moved to the sidebar — a copy back in the header re-grows the " +
+            "bar's fixed width, which is what truncated the page title (#402)");
+
+        var nav = File.ReadAllText(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+            "src", "SchoolCollab.Admin", "Components", "Layout", "NavMenu.razor"));
+        nav.Should().Contain("<ThemeSwitcher", "the sidebar's utility row hosts the theme menu");
+        nav.Should().Contain("nav-footer", "the utility row is the footer, pinned at the bottom");
+        layout.Should().Contain("<NavMenu", "the layout must still render the sidebar it moved into");
     }
 
     [TestMethod]
@@ -106,36 +116,23 @@ public class MainLayoutProvidersTests : BunitContext
     }
 
     [TestMethod]
-    public void Switcher_Renders_TheModeCycle_And_TheSixAccentChoices()
+    public void Switcher_Offers_TheThreeModes_And_TheSixAccentChoices()
     {
-        // The real v5 mechanism, exercised instead of grepped: the switcher renders a mode
-        // button whose accessible name reports the current ThemeMode, plus the accent
-        // picker carrying the six Office-colour accents as hex choices.
+        // The real v5 mechanism, exercised instead of grepped: the trigger reports the active
+        // mode in its accessible name, and the menu carries the three ThemeModes plus the six
+        // Office-colour accents. A menu, not a cycle (owner, 2026-10-24).
         var cut = Render<ThemeSwitcher>();
 
-        var modeButton = cut.Find("fluent-button");
-        modeButton.GetAttribute("title").Should().Be("Mode: System — click to switch",
-            "a fresh session follows the system theme until the user cycles it");
+        cut.Find("fluent-button").GetAttribute("title").Should().Be(
+            "Theme: System — open theme menu",
+            "a fresh session follows the system theme until the user picks another");
 
-        var accentNames = cut.FindAll("fluent-option")
-            .Select(option => option.TextContent.Trim())
+        var labels = cut.FindAll("fluent-menu-item")
+            .Select(item => item.TextContent.Trim().TrimStart('\u2713').Trim())
             .ToList();
-        accentNames.Should().Contain(
+        labels.Should().Contain(["System", "Light", "Dark"]);
+        labels.Should().Contain(
             ["Teams", "Word", "Excel", "PowerPoint", "Outlook", "OneNote"]);
     }
 
-    [TestMethod]
-    public void Switcher_Cycles_LightDarkSystem()
-    {
-        var cut = Render<ThemeSwitcher>();
-
-        cut.Find("fluent-button").Click();
-        cut.Find("fluent-button").GetAttribute("title").Should().Be("Mode: Light — click to switch");
-
-        cut.Find("fluent-button").Click();
-        cut.Find("fluent-button").GetAttribute("title").Should().Be("Mode: Dark — click to switch");
-
-        cut.Find("fluent-button").Click();
-        cut.Find("fluent-button").GetAttribute("title").Should().Be("Mode: System — click to switch");
-    }
 }

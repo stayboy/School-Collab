@@ -1,46 +1,82 @@
+@using Microsoft.FluentUI.AspNetCore.Components
 @using Microsoft.JSInterop
-@inject IJSRuntime JS
 @inject IThemeService ThemeService
+@inject IJSRuntime JS
 
-@* Theme switcher (FluentUI v5). The v4 <FluentDesignTheme> root this file used to host is
-   gone from 5.0.1, together with the DesignThemeModes / OfficeColor enums it was bound
-   through; theming is CSS-variable based and driven by IThemeService
-   (MigrationFluentDesignTheme.md).
+@* Theme control as a MENU (owner, 2026-10-24): the bar-side mode cycle + accent
+   <FluentSelect> pair became one dropdown in the sidebar footer, which is where the
+   portal's utility controls now live. Two reasons this is a menu and not a pair of
+   controls:
+     • the accent select cost 120px of a 50px bar it had no business occupying
+       (measured 2026-10-24: the row overflowed and pushed the settings gear off-screen);
+     • a six-entry accent list is a *choice*, not a frequently-toggled switch — a menu
+       hides it behind one click and keeps the theme discoverable in the sidebar.
+   The trigger reports the ACTIVE mode in its accessible name, so the current theme is
+   readable without opening the menu.
 
-   Persistence belongs to the library, not to us: its own JS reads the
-   `fluentui-blazor:theme-settings` localStorage entry while Blazor starts and applies both
-   the mode and the brand colour to <body data-theme> / <body data-theme-color> before this
-   component runs. So the switcher mirrors nothing — it reads the current mode and brand
-   colour back out of IThemeService after the first render (that store is the single source
-   of truth) and writes every change straight back through the same service. Without the
-   read-back the button and the picker would keep showing this session's stale choice after
-   a reload or in a second tab. *@
+   FluentMenu 5.0.1: items MUST sit inside <FluentMenuList> — the library hides
+   `fluent-menu-list:not([popover])` and flips that state on trigger click. Bare
+   <FluentMenuItem> children render as a permanently visible inline list with an inert
+   trigger (post-merge defect 2026-10-17). *@
 
-<FluentStack Orientation="Orientation.Horizontal"
-             HorizontalGap="4"
-             VerticalAlignment="VerticalAlignment.Center"
-             class="theme-switcher-stack">
-
-    <FluentButton Appearance="ButtonAppearance.Subtle"
-                  OnClick="CycleModeAsync"
-                  Title="@($"Mode: {_mode} — click to switch")">
-        @ModeGlyph
+<span class="theme-menu">
+    <FluentButton Id="@_triggerId"
+                  Appearance="ButtonAppearance.Subtle"
+                  Title="@($"Theme: {_mode} — open theme menu")"
+                  aria-haspopup="true"
+                  aria-expanded="@_open"
+                  class="theme-menu__trigger">
+        @TriggerLabel
     </FluentButton>
 
-    <FluentSelect TOption="ThemeAccent"
-                  TValue="string"
-                  Items="@ThemeAccents.All"
-                  Value="@_accentColor"
-                  ValueChanged="@OnAccentChangedAsync"
-                  OptionText="@(accent => accent?.Name ?? string.Empty)"
-                  OptionValue="@(accent => accent?.Color)"
-                  AriaLabel="Accent colour"
-                  Style="width: 120px;" />
-</FluentStack>
+    <FluentMenu Id="@_menuId"
+                Trigger="@_triggerId"
+                OpenedChanged="@(opened => _open = opened)">
+        <FluentMenuList>
+            @foreach (var mode in Modes)
+            {
+                <FluentMenuItem Label="@(mode.Value == _mode ? $"✓ {mode.Label}" : mode.Label)"
+                                OnClick="@(async () => await SetModeAsync(mode.Value))" />
+            }
+
+            <FluentDivider />
+
+            @foreach (var accent in ThemeAccents.All)
+            {
+                <FluentMenuItem Label="@(IsCurrentAccent(accent.Color) ? $"✓ {accent.Name}" : accent.Name)"
+                                OnClick="@(async () => await SetAccentAsync(accent.Color))" />
+            }
+        </FluentMenuList>
+    </FluentMenu>
+</span>
 
 @code {
+    /// <summary>One selectable appearance: the v5 <see cref="ThemeMode"/> and its menu label.</summary>
+    private static readonly (string Label, ThemeMode Value)[] Modes =
+    [
+        ("System", ThemeMode.System),
+        ("Light", ThemeMode.Light),
+        ("Dark", ThemeMode.Dark),
+    ];
+
+    private readonly string _triggerId = $"theme-trigger-{Guid.NewGuid():N}";
+    private readonly string _menuId = $"theme-menu-{Guid.NewGuid():N}";
+
     private ThemeMode _mode = ThemeMode.System;
     private string? _accentColor;
+    private bool _open;
+
+    /// <summary>
+    /// The trigger's visible text reports the ACTIVE mode, so the current theme is readable
+    /// without opening the menu. A leading glyph replaces an icon here on purpose: the menu is
+    /// a text choice, and a tick box would imply multi-select.
+    /// </summary>
+    private string TriggerLabel => _mode switch
+    {
+        ThemeMode.Light => "☀ Light",
+        ThemeMode.Dark => "☾ Dark",
+        _ => "◐ System",
+    };
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -50,7 +86,7 @@
         }
 
         // The Admin host's v4 theme preference, if any, before we read the state back —
-        // otherwise the button would report the migrated mode only from the next click on.
+        // otherwise the trigger would report the migrated mode only from the next click on.
         await LegacyThemeMigration.RunAsync(JS, ThemeService, LegacyThemeMigration.AdminStorageKey);
         await RestoreFromThemeStoreAsync();
     }
@@ -64,7 +100,7 @@
         }
 
         _mode = settings.Mode;
-        // The store holds the brand colour in hex; the picker holds the named accents, so
+        // The store holds the brand colour in hex; the menu holds the named accents, so
         // match the two to show the applied accent again.
         _accentColor = ThemeAccents.All
             .FirstOrDefault(accent => string.Equals(accent.Color, settings.Color, StringComparison.OrdinalIgnoreCase))
@@ -73,25 +109,17 @@
         StateHasChanged();
     }
 
-    private string ModeGlyph => _mode switch
-    {
-        ThemeMode.Light => "\u2600",
-        ThemeMode.Dark  => "\uD83C\uDF19",
-        _               => "\u25D0"
-    };
+    private bool IsCurrentAccent(string color)
+        => string.Equals(_accentColor, color, StringComparison.OrdinalIgnoreCase);
 
-    private async Task CycleModeAsync()
+    /// <summary>Applies an explicit mode. The menu is a choice, so there is no cycle to step through.</summary>
+    private async Task SetModeAsync(ThemeMode mode)
     {
-        _mode = _mode switch
-        {
-            ThemeMode.Light => ThemeMode.Dark,
-            ThemeMode.Dark  => ThemeMode.System,
-            _               => ThemeMode.Light
-        };
-        await ThemeService.SetThemeAsync(_mode);
+        _mode = mode;
+        await ThemeService.SetThemeAsync(mode);
     }
 
-    private async Task OnAccentChangedAsync(string color)
+    private async Task SetAccentAsync(string color)
     {
         _accentColor = color;
         await ThemeService.SetThemeAsync(color, isExact: true);
