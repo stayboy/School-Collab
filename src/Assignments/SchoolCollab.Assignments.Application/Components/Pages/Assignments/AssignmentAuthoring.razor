@@ -47,14 +47,18 @@
 
 <ErrorBoundary>
     <ChildContent>
-        @* Shell without its own action bar (§4/§6, owner 2026-10-23): this surface's page action lives
-           in its FIRST block's sticky header row — the Details panel on the form view, the summary card
-           on the overview — so no second toolbar is needed and none renders. The shell keeps the
-           breadcrumb and the page title, which is all it is for here. *@
+        @* The page action header owns the pair (owner, 2026-10-24; #404): Cancel and the page action
+           render here, flushed to the right edge, and this page's kebab sits beside the title instead
+           of in the first block's header row. The first block keeps only its own controls. *@
         <AuthoringShell Crumbs="@ShellCrumbs"
                        Title="@HeadingText"
                        Badge="@ShellBadge"
-                       ShowActionBar="false">
+                       TitleMenu="@PageMenu"
+                       LeadingActions="@PageCancel"
+                       PrimaryId="authoring-primary-action"
+                       PrimaryLabel="@ShellPrimaryLabel"
+                       PrimaryDisabled="@_busy"
+                       OnPrimaryAction="OnPrimaryActionAsync">
 
         @if (_loading)
         {
@@ -103,18 +107,16 @@
                 @if (ShowSummary && _item is not null)
                 {
                     <section id="authoring-summary" class="authoring-summary" aria-label="Assignment summary">
-                        @* The first block's header row carries the page action (§4/§6). On the overview it
-                           is this card, so the status-matrix primary, the kebab and the Cancel live here
-                           — sticky, exactly as they are in the Details panel on the form view. *@
-                        <div class="authoring-summary__header authoring-summary__header--sticky">
+                        @* The page action header carries the primary, the Cancel and this page's kebab
+                           (owner, 2026-10-24). The summary card keeps only its own affordances: the
+                           pencil, and the return to the edit-fields view. *@
+                        <div class="authoring-summary__header">
                             <div class="authoring-title-group">
                                 <h3 class="authoring-summary__title">@_item.Title</h3>
                                 <FluentBadge Appearance="@StatusAppearance(_item.Status)">@_item.Status</FluentBadge>
                             </div>
                             <div class="authoring-summary__actions">
-                                @PageLeadingActions
-                                @PageMenu
-                                @PagePrimary
+                                @SummaryBack
                                 @if (EffectiveMode == AssignmentAuthoringMode.Edit)
                                 {
                                     @* D3: the pencil exists ONLY while the assignment still accepts
@@ -181,15 +183,14 @@
                 <div class="region-grid-host">
                 <div class="region-grid">
                 <div class="region-grid__main">
-                    <PanelSection Id="authoring-basics" Title="Details" StickyHeader="true" ShowBorder="false">
-                        @* The page's primary action, its kebab and the leave-the-surface controls live in
-                           the FIRST block's STICKY header row (§4/§6) — that row never scrolls away,
-                           which is exactly what lets it replace a separate action bar. Order per §6:
-                           leading (Back to summary, Cancel) · kebab · page action. *@
+                    <PanelSection Id="authoring-basics" Title="Details" ShowBorder="false"
+                                  ShowHeader="@(Mode != AssignmentAuthoringMode.Create)">
+                        @* The block header carries only this block's own control: the return to the
+                           summary view. The page action, the Cancel and the kebab moved to the page
+                           action header (owner, 2026-10-24; #404), and the header row is no longer
+                           sticky — the page header is the only pinned row. *@
                         <HeaderActions>
-                            @PageLeadingActions
-                            @PageMenu
-                            @PagePrimary
+                            @SummaryBack
                         </HeaderActions>
 
                         <ChildContent>
@@ -1366,11 +1367,15 @@
             ? ChildrenUnavailableReason
             : null;
 
+    /// <summary>
+    /// The page action header's title, in Title Case (owner, 2026-10-24): the header is a page heading,
+    /// and it must read like the app bar's page title above it rather than as a sentence fragment.
+    /// </summary>
     private string HeadingText => EffectiveMode switch
     {
-        AssignmentAuthoringMode.Create => "New assignment",
-        AssignmentAuthoringMode.Edit => "Edit assignment",
-        _ => "Assignment overview"
+        AssignmentAuthoringMode.Create => "New Assignment",
+        AssignmentAuthoringMode.Edit => "Edit Assignment",
+        _ => "Assignment Overview"
     };
 
     // ── Summary-first draft edit (assignment-create-edit-redesign D1/D2/D3) ────
@@ -1441,14 +1446,24 @@
     /// guard is introduced.
     /// </para>
     /// </summary>
-    private RenderFragment PageLeadingActions => @<text>@if (ShellShowsSummaryBack)
+    /// <summary>
+    /// The return to the summary view — a BLOCK control: it changes how the same draft is displayed
+    /// without leaving it, so it stays in the block header.
+    /// </summary>
+    private RenderFragment SummaryBack => @<text>@if (ShellShowsSummaryBack)
         {
             <FluentButton Id="authoring-summary-back"
                           Appearance="ButtonAppearance.Outline"
                           IconStart="@FluentIcons.ArrowLeft"
                           Disabled="@_busy"
                           OnClick="ExitEditFieldsView">Back to summary</FluentButton>
-        }
+        }</text>;
+
+    /// <summary>
+    /// The leave-the-surface control, rendered in the page action header's leading slot — immediately
+    /// left of the primary (owner, 2026-10-24; issue #404 moved the pair out of the first block).
+    /// </summary>
+    private RenderFragment PageCancel => @<text>
         <FluentButton Id="authoring-cancel"
                       Appearance="ButtonAppearance.Outline"
                       Disabled="@_busy"
@@ -1466,15 +1481,6 @@
                             AriaLabel="More assignment actions" />
         }</text>;
 
-    /// <summary>The header row's page action, last on the row (§6). It keeps the id the shell used to
-    /// emit, so every existing id-based assertion still addresses the same button.</summary>
-    private RenderFragment PagePrimary => @<text>@if (ShellPrimaryLabel is { } label)
-        {
-            <FluentButton Id="authoring-primary-action"
-                          Appearance="ButtonAppearance.Primary"
-                          Disabled="@_busy"
-                          OnClick="OnPrimaryActionAsync">@label</FluentButton>
-        }</text>;
 
     /// <summary>The Content &amp; Resources panel's header count: the attachments plus the reference links,
     /// the number the old <c>.cq-count</c> chip carried inside the section's own header. The panel owns the

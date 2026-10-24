@@ -23,12 +23,11 @@
     border-color: transparent;
 }
 
-/* A borderless panel is not a card, so its sticky head must not paint a rounded card corner. */
 .panel-section--borderless > .panel-section__head {
     border-radius: 0;
 }
 
-/* The header group: the header row AND its rule, so `--sticky` can pin the two together (§6). */
+/* The header group: the header row AND its rule, so the two can never separate. */
 .panel-section__head {
     display: flex;
     flex-direction: column;
@@ -111,12 +110,3 @@
    and carries its own bottom rule, so a pinned header reads as the panel's header and not as a
    toolbar floating above it. The negative margins let the pinned surface span the panel's full width
    instead of stopping at the padding box, so content cannot slide past its sides. */
-.panel-section--sticky > .panel-section__head {
-    position: sticky;
-    top: var(--app-bar-sticky-offset, 0px);
-    z-index: 5;
-    margin: -16px -16px 0;
-    padding: 16px 16px 0;
-    background: var(--neutral-layer-1, #ffffff);
-    border-radius: 8px 8px 0 0;
-}

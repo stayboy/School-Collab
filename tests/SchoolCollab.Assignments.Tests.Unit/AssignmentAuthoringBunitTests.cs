@@ -2342,27 +2342,29 @@ public class AssignmentAuthoringBunitTests : BunitContext
     /// </summary>
     // ── Round panel-layout-pattern (owner, 2026-10-23): one skeleton, one box, opt-in collapse ──
 
-    /// <summary>§4/§6: the page action belongs to the FIRST block's sticky header row, so the shell
-    /// renders no separate action bar on this surface. The main region carries no collapse control, and
-    /// the compartment chrome that used to frame the blocks is gone (§2/§3).</summary>
+    /// <summary>Owner, 2026-10-24 (#404): the page action header owns the pair — Cancel and the primary
+    /// render there, flushed right — and no block header is sticky, because two pinned rows overlapped
+    /// the block as it expanded. The kebab moved beside the page title. The main region still carries no
+    /// collapse control, and the compartment chrome stays deleted (§2/§3).</summary>
     [TestMethod]
-    public void PanelLayout_FirstBlockOwnsThePageAction_AndTheShellRendersNoActionBar()
+    public void PageActionHeader_OwnsThePair_AndNoBlockHeaderIsSticky()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindAll(".authoring-actionbar").Should().BeEmpty(
-                "§4/§6: the actions live in the first block's header row, not in a second toolbar");
+            var bar = cut.Find(".authoring-actionbar");
+            bar.QuerySelectorAll("#authoring-primary-action").Should().ContainSingle(
+                "the page action renders in the page action header");
+            bar.QuerySelectorAll("#authoring-cancel").Should().ContainSingle(
+                "Cancel renders beside it, left of the primary");
 
             var details = cut.Find("#authoring-basics");
             details.ClassList.Should().Contain("panel-section", "the block is the shared box (§3)");
-            details.ClassList.Should().Contain("panel-section--sticky",
-                "§6: that first header row is sticky, which is what lets it own the page action");
-            details.QuerySelectorAll(".panel-section__actions #authoring-primary-action").Should().ContainSingle(
-                "the status-matrix primary action renders on the title's row");
-            details.QuerySelectorAll(".panel-section__actions #authoring-cancel").Should().ContainSingle(
-                "§16: Cancel renders beside it, left of the primary");
+            details.ClassList.Should().NotContain("panel-section--sticky",
+                "no block header is sticky any more — the page action header is the only pinned row");
+            details.QuerySelectorAll(".panel-section__actions #authoring-primary-action").Should().BeEmpty(
+                "the block must not duplicate the page action");
             details.QuerySelectorAll(".panel-section__chevron").Should().BeEmpty(
                 "§6: the main region is never collapsible");
 
@@ -2480,11 +2482,11 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             cut.FindAll("#authoring-summary").Should().ContainSingle();
             cut.FindAll("#authoring-cancel").Should().ContainSingle(
-                "§16/the consent table: the overview's first header row carries the same controls");
-            cut.Find("#authoring-summary .authoring-summary__header #authoring-primary-action").Should().NotBeNull(
-                "§4: the page action is on the first block's header row in this view as well");
-            cut.FindAll(".authoring-actionbar").Should().BeEmpty(
-                "no separate action bar exists on this surface in any view");
+                "the overview shows the same Cancel as the form view (owner, 2026-10-24)");
+            cut.FindAll("#authoring-summary #authoring-primary-action").Should().BeEmpty(
+                "the page action lives in the page action header in this view too, not in the summary card");
+            cut.FindAll(".authoring-actionbar").Should().ContainSingle(
+                "the page action header is the one host in every view of this surface");
         });
     }
 

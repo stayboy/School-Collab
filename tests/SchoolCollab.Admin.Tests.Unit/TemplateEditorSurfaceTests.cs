@@ -100,25 +100,39 @@ public class TemplateEditorSurfaceTests : BunitContext
     /// pins the restored contract: three titled panels, each with its rule.
     /// </summary>
     [TestMethod]
-    public void EveryPanelOnTheEditor_CarriesItsHeading()
+    public void OnCreate_TheMessageBlock_RendersHeaderless()
     {
-        // Arrange
+        // Owner, 2026-10-24: on CREATE the Message block renders headerless — the page action header
+        // says "New Notification Template" and the form has one visible block, so a "Message" caption
+        // above the fields says it twice. ShowHeader=false renders no header DOM at all.
         Register();
 
-        // Act
-        var cut = RenderCreate();
-        cut.WaitForAssertion(() => cut.FindAll("#template-title").Should().ContainSingle());
+        var create = RenderCreate();
+        create.WaitForAssertion(() => create.FindAll("#template-title").Should().ContainSingle());
 
-        // Assert — the Message panel is titled and ruled like its neighbours.
-        var message = cut.Find("#template-editor-message");
+        var message = create.Find("#template-editor-message");
         message.ClassList.Should().Contain("panel-section", "the card chrome is the shared component's");
-        cut.Find("#template-editor-message-title").TextContent.Trim().Should().Be("Message");
-        message.QuerySelectorAll(".panel-section__rule").Should().ContainSingle(
-            "the rule separates a header from its content, so it comes with the heading");
+        message.QuerySelectorAll("#template-editor-message-title").Should().BeEmpty(
+            "ShowHeader=false renders no header DOM at all — not an empty row");
+        message.QuerySelectorAll(".panel-section__rule").Should().BeEmpty(
+            "the rule belongs to the header, so it goes with it");
         message.QuerySelector("#template-title").Should().NotBeNull("the fields stay inside the panel");
+        create.FindAll("#template-constraints-title").Should().ContainSingle("the rail keeps its headings");
+        create.FindAll("#template-preview-title").Should().ContainSingle();
+    }
 
-        cut.Find("#template-constraints-title").TextContent.Trim().Should().Be("Constraints");
-        cut.Find("#template-preview-title").TextContent.Trim().Should().Be("Preview");
+    [TestMethod]
+    public void OnEdit_TheMessageBlock_KeepsItsHeading()
+    {
+        // …and on EDIT it returns: the page now holds a record, so the caption is what names the block.
+        var handler = Register();
+        var row = new TemplateRow { Kind = 0, Channel = 1, Title = "Grade 8 Science reminder", Body = "BODY" };
+        handler.Rows.Add(row);
+
+        var edit = RenderEdit(row.Id);
+        edit.WaitForAssertion(() => edit.FindAll("#template-editor-message-title").Should().ContainSingle());
+        edit.Find("#template-editor-message-title").TextContent.Trim().Should().Be("Message");
+        edit.Find("#template-editor-message").QuerySelectorAll(".panel-section__rule").Should().ContainSingle();
     }
 
     /// <summary>
@@ -395,7 +409,7 @@ public class TemplateEditorSurfaceTests : BunitContext
     /// breadcrumb only.
     /// </summary>
     [TestMethod]
-    public void ThePageHeader_RepeatsNeitherTheKindNorThePagesAddress_AndCarriesNoActions()
+    public void ThePageHeader_RepeatsNeitherTheKindNorThePagesAddress_AndCarriesThePair()
     {
         // Arrange
         Register();
@@ -404,13 +418,15 @@ public class TemplateEditorSurfaceTests : BunitContext
         var cut = RenderCreate();
         cut.WaitForAssertion(() => cut.FindAll("#template-save").Should().ContainSingle());
 
-        // Assert — no separate action bar on this surface: the actions live in the first block's header.
-        cut.FindAll(".authoring-actionbar").Should().BeEmpty(
-            "the page action belongs to the Message panel's sticky header row (§4/§6)");
-        cut.Find("#template-editor-message .panel-section__actions #template-save").Should().NotBeNull(
-            "…which is where it now renders, inside the FIRST block");
-
-        var titleBlock = cut.Find(".authoring-page-title");
+        // Assert — owner, 2026-10-24 (#404): the page action header owns the pair again, and it is
+        // still not a second place that repeats the kind or the address.
+        var titleBlock = cut.Find(".authoring-actionbar");
+        titleBlock.QuerySelectorAll("#template-save").Should().ContainSingle(
+            "the page action renders in the page action header");
+        titleBlock.QuerySelectorAll("#template-cancel").Should().ContainSingle(
+            "Cancel renders beside it");
+        cut.FindAll("#template-editor-message .panel-section__actions #template-save").Should().BeEmpty(
+            "the Message block must not duplicate the page action");
 
         titleBlock.QuerySelectorAll(".kind-banner").Should().BeEmpty(
             "the kind is chosen a few centimetres below the header, so a banner there says it twice (D9)");

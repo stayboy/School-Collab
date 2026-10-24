@@ -30,13 +30,17 @@
 *@
 <ErrorBoundary>
     <ChildContent>
-        @* No shell action bar (owner, 2026-10-23; panel-layout-pattern §4/§6): the page action,
-           Reset and the new Cancel live in the Message panel's STICKY header row, so the actions never
-           scroll away and no second toolbar is needed. The shell keeps the crumb trail and the title
-           (with the owner chip). *@
+        @* The page action header owns the pair (owner, 2026-10-24; #404): Cancel and the page action
+           render here, flushed to the right edge. The Message panel keeps only its own Reset, and its
+           header row is no longer sticky — this header is the only pinned row. *@
         <AuthoringShell Crumbs="@ShellCrumbs"
+                       Title="@(Mode == TemplateEditorMode.Create ? "New Notification Template" : null)"
                        TitleContent="@ShellTitle"
-                       ShowActionBar="false">
+                       LeadingActions="@CancelAction"
+                       PrimaryId="@(ReadOnly ? "template-adopt" : "template-save")"
+                       PrimaryLabel="@ShellPrimaryLabel"
+                       PrimaryDisabled="@ShellPrimaryDisabled"
+                       OnPrimaryAction="OnShellPrimaryAsync">
         @if (_loading)
         {
             <div class="template-editor__loading"><FluentSpinner /></div>
@@ -73,23 +77,12 @@
                     <PanelSection Title="Message"
                                   Id="template-editor-message"
                                   TitleId="template-editor-message-title"
-                                  StickyHeader="true"
-                                  ShowBorder="false">
-                        @* §6 header order: leading (Cancel) · this panel's own secondary (Reset) · the
-                           page action. The page action is FIRST-block-owned precisely because this row
-                           is sticky. *@
+                                  ShowBorder="false"
+                                  ShowHeader="@(Mode != TemplateEditorMode.Create)">
+                        @* The block header keeps only this block's own control (Reset); the Cancel and
+                           the page action moved to the page action header (owner, 2026-10-24; #404). *@
                         <HeaderActions>
-                            <FluentButton Id="template-cancel"
-                                          Appearance="ButtonAppearance.Outline"
-                                          OnClick="BackToListAsync">Cancel</FluentButton>
                             @ShellSecondaryActions
-                            @if (ShellPrimaryLabel is { } primaryLabel)
-                            {
-                                <FluentButton Id="@(ReadOnly ? "template-adopt" : "template-save")"
-                                              Appearance="ButtonAppearance.Primary"
-                                              Disabled="@ShellPrimaryDisabled"
-                                              OnClick="OnShellPrimaryAsync">@primaryLabel</FluentButton>
-                            }
                         </HeaderActions>
 
                         <ChildContent>
@@ -496,9 +489,10 @@
         _loading ? "…" : _notFound ? "Not found" : TemplateTitle;
 
     /// <summary>
-    /// The action bar's title content (naming spec D9): the template's own TITLE on Edit, nothing at all on
-    /// Create — the breadcrumb already says "New template", and the form below shows the kind, so neither a
-    /// caption nor a kind banner belongs here. The owner chip stays on Edit, where it says whose row this is.
+    /// The action bar's title content (naming spec D9, narrowed 2026-10-24): the template's own TITLE and
+    /// owner chip on Edit. On Create this is null and the shell falls back to its plain <c>Title</c>
+    /// ("New notification template") — the bar is the page header again, so it must name the page; what
+    /// D9 keeps out of it is the kind banner and a second address, not the page's name.
     /// </summary>
     private RenderFragment? ShellTitle => Mode == TemplateEditorMode.Create
         ? null
@@ -536,6 +530,15 @@
     /// invent one for it.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The leave-the-surface control, rendered in the page action header's leading slot — immediately
+    /// left of the primary (owner, 2026-10-24; issue #404 moved the pair out of the Message block).
+    /// </summary>
+    private RenderFragment CancelAction => @<text>
+        <FluentButton Id="template-cancel"
+                      Appearance="ButtonAppearance.Outline"
+                      OnClick="BackToListAsync">Cancel</FluentButton></text>;
+
     private RenderFragment ShellSecondaryActions => @<text>@if (Mode == TemplateEditorMode.Edit
         && !ReadOnly && !_loading && !_notFound)
         {

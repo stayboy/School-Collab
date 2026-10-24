@@ -101,17 +101,18 @@ public class PanelSectionTests : BunitContext
     }
 
     [TestMethod]
-    public void StickyHeader_PinsTheHeaderGroupAndKeepsItsRule()
+    public void HeaderGroup_KeepsTheRule_AndThePanelIsNeverSticky()
     {
+        // Sticky was removed from PanelSection on 2026-10-24 (owner, #404): the page action header is
+        // the only pinned row, because two stacked pinned rows overlapped the block as it expanded.
         var cut = Render<PanelSection>(p => p
             .Add(x => x.Title, "Details")
-            .Add(x => x.StickyHeader, true)
             .AddChildContent("<p>fields</p>"));
 
-        cut.Find(".panel-section").ClassList.Should().Contain("panel-section--sticky",
-            "the first block's header row is what lets it own the page action (§6)");
+        cut.Find(".panel-section").ClassList.Should().NotContain("panel-section--sticky",
+            "a block header is a label, not a second toolbar — pinning belongs to the page action header");
         cut.Find(".panel-section__head").QuerySelector(".panel-section__rule").Should().NotBeNull(
-            "the pinned row keeps its bottom rule, so it reads as the panel's header and not a toolbar");
+            "the header row and its rule still travel together inside one element");
         cut.FindAll(".panel-section__actions").Should().BeEmpty(
             "no HeaderActions supplied — the slot renders nothing rather than an empty box");
     }
