@@ -30,7 +30,9 @@ not reintroduce the deprecated `SchoolCollab.Config` HTTP overlay
 6. Run the local pre-flight checks:
    - code review
    - `dotnet build`
-   - `dotnet test`
+   - `scripts/round/gates.sh --no-maui --no-integration` — the full gate, no flags, when
+     the diff touches shared chrome, a migration, a contract or auth
+     (`AGENTS.md` § Pre-flight 3)
 7. Wait for GitHub Actions CI to pass on the PR.
 8. Merge with a squash merge, deleting the source branch. The command and the
    retention rule are canonical in **Merge strategy** below — do not restate them

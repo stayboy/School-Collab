@@ -200,8 +200,12 @@ under test (e.g. `ChatClientFactoryTests.cs` for `ChatClientFactory.cs`).
    - **Contract Testing**: Assert on the exact JSON structure of the response and the correct HTTP status code.
    - **Tenant Isolation**: For operational data, verify that requests with different tenant headers/claims do not leak data between tenants.
 
-6. **Run tests before committing.** `dotnet test` must pass with 0 failures before a PR
-   is submitted. If existing tests break, fix them in the same commit.
+6. **Run the gate before a PR, not no-arg `dotnet test`.** Run
+   `scripts/round/gates.sh --no-maui --no-integration` (full gate, no flags, when the diff
+   touches shared chrome, a migration, a contract or auth) and fix any failure in the same commit. It fails
+   on "zero tests ran", which no-arg `dotnet test` does not — see `AGENTS.md` § Pre-flight 3.
+   This rule is about *which tests run* at the gate; "add tests alongside new code"
+   above is unaffected.
 
 7. **Reference the production project.** Ensure the test project references
    the relevant production project via `<ProjectReference>`.

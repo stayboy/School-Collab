@@ -27,7 +27,9 @@ Follow these steps **in order**. Do not skip a step unless the user explicitly a
 ### 3. Build & test locally
 
 - Run `dotnet restore`, then `dotnet build --no-restore --configuration Release`.
-- Run unit tests: `dotnet test --no-build --configuration Release --filter "FullyQualifiedName~Tests.Unit"`.
+- Run the CI-parity gate: `scripts/round/gates.sh --no-maui --no-integration` (full gate,
+  no flags, when the diff touches shared chrome, a migration, a contract or auth). Not a hand-picked filter —
+  `AGENTS.md` § Pre-flight 3 explains why, and it fails on "zero tests ran".
 - If the build or tests fail, **stop and fix the errors** before continuing. Re-run tests after each fix until they pass.
 
 ### 4. Run code review

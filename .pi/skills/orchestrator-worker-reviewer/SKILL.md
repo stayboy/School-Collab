@@ -686,9 +686,12 @@ the tester never derives or expands its own scope.
    `diffs-<slug>.patch` (`git diff`, or `git diff <base-sha>` when the tree
    was dirty at start), then concurrently:
    - (a) The parent runs the authoritative `dotnet build SchoolCollab.slnx`
-     (incremental after the worker) and `dotnet test` on the affected
-     projects **plus `SchoolCollab.ArchitectureTests.Unit`** (repo-wide
-     scanner — always include it). A parent verification run that exceeds the time box
+     (incremental after the worker), then **`scripts/round/gates.sh --no-maui --no-integration`** — the
+     CI-parity gate, never a hand-picked project list: it carries the unit + integration
+     filter legs, the repo-wide `ArchitectureTests.Unit` scanner, the wiring guard and both
+     portal suites, and it fails on "zero tests ran" (`AGENTS.md` § Pre-flight 3). Run the
+     full gate, no flags, when the round touches shared chrome, a migration, a contract or
+     auth. A parent verification run that exceeds the time box
      is parked the same way (interrupt, probe with the `grill-me` skill, park) — see step 3.
    - (b) Tiers 2–3: dispatch the static reviewer with the plan + patch path +
      WORKER REPORT; the reviewer returns the REVIEW block. **Brief requirements
@@ -884,9 +887,9 @@ the tester never derives or expands its own scope.
 1. All child runs completed (subagent status completed, exit 0) — a parked round is exempt
    (see the time-box rule in step 3).
 2. Parent-run `dotnet build SchoolCollab.slnx -c Debug`: 0 errors.
-3. Parent-run `dotnet test` — affected projects **plus
-   `SchoolCollab.ArchitectureTests.Unit`**: 0 failures; pass counts recorded
-   in the round doc.
+3. Parent-run `scripts/round/gates.sh --no-maui --no-integration` (full gate, no flags, on shared-chrome /
+   migration / contract / auth rounds): 0 failures, and every leg it did not check is named
+   in the round doc; pass counts recorded there.
 4. The round doc exists with tier-appropriate sections filled and an explicit
    verdict (CLOSED, PARKED with the follow-up reference, or remaining P1s listed), plus
    the provider/models header — and a written `## Acceptance` section produced by the
