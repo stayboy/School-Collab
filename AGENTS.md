@@ -138,20 +138,12 @@ exactly how `grill-me` got polluted before its 2026-10-05 refresh from
 - **Wrong or stale skill?** Re-fetch from the upstream URL (frontmatter
   `source:`, or the lock entry's `sourceUrl` for installer-managed skills), bump
   `version` / `updated` — do not patch in place.
-- **Enforcement (deny-ACL):** a write-locked skill file carries a deny `(W)` —
-  which `icacls` renders as *Write, Synchronize*, and since
-  almost every open requests Synchronize it refuses **reads as well as writes**
-  (verified 2026-10-05: `.NET OpenRead`, `OpenText`, `Get-Content -ErrorAction
-  Stop` and `cmd /c type` all fail with *Access denied*, while an undenyed skill
-  such as `gh-stack` reads fine). To keep the skill usable, prefer the write-only
-  mask `(WD,AD)`, verified to allow `OpenRead`/`OpenText` while still refusing
-  `OpenWrite` and `Add-Content`. **Do not re-add a deny on the folder:** the
-  folder-level `(W,D,DC)` deny was removed on 2026-10-05 after the skill tooling
-  began failing against it (`skill_manage create` reported `EPERM … scandir
-  '<…>/<skill-folder>'`) — that is the strongly-indicated cause, though the failing
-  `create` was never retried. With it gone, delete-and-recreate is no longer
-  blocked; the file deny is the whole enforcement. Nothing was write-locked as of
-  2026-10-12 — the sequence below is the convention to use *if* you lock one.
+- **Enforcement (deny-ACL):** a write-locked skill file carries a deny on the file
+  only — **never on its folder** — and the mask is the write-only `(WD,AD)`, never a
+  bare `(W)`. Why those two choices matter (a `(W)` deny refuses *reads*, a folder
+  deny breaks the skill tooling) is a durable lesson, not a rule you should have to
+  rediscover: `.github/copilot/rules/agent-lessons.md`. Nothing was write-locked as
+  of 2026-10-12 — the sequence below is the convention to use *if* you lock one.
   Unlock → refresh → re-apply:
   ```powershell
   $file = "<skill-folder>/SKILL.md"
@@ -187,6 +179,14 @@ lessons are durable (a lessons grill round; "all as recommended" settles it).
 restated in a repo-owned file carrying the same trigger. Cite the incident
 date in one clause (evidence, not a changelog); the round doc holds the full
 story.
+
+**A durable lesson gets its own file, never a paragraph here (owner, 2026-10-24).** Lessons from
+sessions accumulate in one place — **`.github/copilot/rules/agent-lessons.md`**, newest first, each
+entry carrying the date, the rule, the evidence and the trigger that should have caught it. This
+file (and the specialty rules) **point to it and never restate a lesson inline**: an inline copy
+drifts from its evidence and buries the manifest's actual job, which is orientation. Write a lesson
+there only after the owner accepts it (the rule below), and prefer promoting a recurring lesson into
+a deterministic check or a specialty rule once it has fired twice.
 
 **Propose, never pre-write (owner, 2026-10-23).** A durable lesson is **proposed in the reply** as a
 candidate — what to write, where it goes, and the evidence — and reaches a repo-owned file **only
@@ -386,9 +386,9 @@ section below.
   deliberately not registered in `SchoolCollab.slnx` (it builds only from
   `src/Mobile/SchoolCollab.Mobile.slnx`), so a change to a shared component —
   `SchoolCollab.Admin.Shared` in particular — can break the mobile head with **no** signal from the
-  main build. That is not hypothetical: the FluentUI 4.14.2 → 5.0.1 bump (2026-10-16) left the head
-  with 22 v5-invalid sites while `SchoolCollab.slnx` stayed green. When a change touches a shared
-  component or any package version, also run:
+  main build. That is not hypothetical (a package bump once left 22 invalid sites in the head while
+  `SchoolCollab.slnx` stayed green — `.github/copilot/rules/agent-lessons.md`). When a change touches
+  a shared component or any package version, also run:
   `dotnet build src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj -f net10.0-windows10.0.19041.0 -m:1 -p:BuildInParallel=false`
   The `-m:1 -p:BuildInParallel=false` flags are **not** optional: the default parallel build exhausts
   memory on this machine and has repeatedly killed the agent process (~`0xC0000409`) instead of
@@ -404,13 +404,14 @@ section below.
   Playwright can re-assert without a restart. Full recipe, observed caveats and
   recovery: `documents/runbooks/dev-loop-hot-reload.md`. Hot reload accelerates
   observation; it never replaces the build/test gates below.
-- **Tests green but the preview "doesn't work" ⇒ stale circuit, not code.** Hot
-  reload cannot apply "rude edits" — a new component `[Parameter]`, a changed
-  record's shape, new `@implements`/`@inject`, or a **new static asset** (a
-  collocated `*.razor.js`, served from `_content/...` only after rebuild).
-  Restart the preview (full stop/start) before debugging the code; bUnit loose
-  mode masks the missing-asset 404 (observed 2026-10-12, recorder pill round —
-  the runbook's failure-modes list carries the full symptom set).
+- **Tests green but the preview "doesn't work" ⇒ restart the preview before
+  debugging the code.** Hot reload cannot apply "rude edits" — a new component
+  `[Parameter]`, a changed record's shape, new `@implements`/`@inject`, or a **new
+  static asset** (a collocated `*.razor.js`, which is served from `_content/...` only
+  after a rebuild) — and bUnit's loose mode hides the missing-asset 404, so the tests
+  stay green while the page is blank. The runbook's failure-modes list carries the
+  symptom set: `documents/runbooks/dev-loop-hot-reload.md`. The incident behind this
+  is in `.github/copilot/rules/agent-lessons.md`.
 - **Locks (MSB3021 / MSB3027).** `dotnet build` can fail because a running
   service — a plain `dotnet run` (AppHost, API, worker), an IDE-launched debugger
   session, or a detached `dotnet watch` — is still holding output binaries (an
@@ -418,8 +419,9 @@ section below.
   dirs locks its own outputs**: before a full-solution build, stop them all
   (`taskkill /PID <pid> /T /F` on the watcher/apphost, close the IDE session);
   a project-scoped build (`dotnet build <proj.csproj>`) is safe while unrelated
-  services run. Don't retry the build in a loop — surface the lock to
-  the user and let them choose how to stop the offending process.
+  services run. Who stops them — and the test-verdict trap that goes with the same
+  class of mistake — is a durable lesson, not a build fact: **read
+  `.github/copilot/rules/agent-lessons.md` before your first full-solution build.**
 
 ## Central Package Management (CPM)
 
@@ -661,11 +663,10 @@ orchestrator's own work, never a delegate's.
 **Keep delegate briefs short and bounded.** Multi-minute waits (CI polling,
 sleeps) belong in the **parent**, which survives an interrupted call or a
 compaction; hand the subagent only the quick git/gh legs (stage/commit/push/PR,
-or merge + pull). A brief containing a poll is the fragile shape: on 2026-09-25 a
-delegate was aborted mid-poll by a session compaction, and only its
-already-completed steps (commit, push, PR) had persisted. Recover by reading the
-live state (`git log`, `git ls-remote`, `gh pr view`, `gh pr checks`) and resuming
-from the first unfinished step — never by re-running the whole brief.
+or merge + pull). A brief containing a poll is the fragile shape — the incident is
+in `.github/copilot/rules/agent-lessons.md`. When a brief *is* cut short, recover by
+reading the live state (`git log`, `git ls-remote`, `gh pr view`, `gh pr checks`) and
+resuming from the first unfinished step — never by re-running the whole brief.
 
 **Local commit/push hold (the enforcement layer for commits):** Do not
 commit, push, open a PR, or merge without an explicit user instruction
