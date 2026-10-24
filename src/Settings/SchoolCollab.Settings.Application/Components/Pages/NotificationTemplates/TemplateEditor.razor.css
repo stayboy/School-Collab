@@ -1,25 +1,27 @@
-/* Template editor (redesign spec §3.3; naming spec D10): the assignment-authoring proportions — content on
-   the left, the rail on the right — stacking to one column where the assignment page stacks.
-   Only the LAYOUT lives here; every panel keeps its own chrome (PanelSection owns the box, the rule and the
-   header split), including the left column, which is a panel now too. */
+/* Template editor (redesign spec §3.3; naming spec D10, and the layout contract is
+   documents/solution/panel-layout-pattern.md).
+
+   LAYOUT ONLY lives here. The region grid itself — its single track definition, its sticky rail and
+   its container-query collapse — is the shared `.region-grid` / `.region-grid-host` pair in
+   src/SchoolCollab.Admin.Shared/wwwroot/app.css, so this surface and the assignment authoring surface
+   cannot diverge and neither carries a viewport breakpoint of its own (§2, lesson L5).
+
+   Every panel keeps its own chrome: PanelSection owns the box, the rule and the header split.
+   `.template-editor-message-panel` and `.template-editor-rail` are the two REGIONS — layout hooks and
+   test seams only, drawing nothing. */
 .template-editor__loading {
     display: flex;
     justify-content: center;
     padding: 48px 0;
 }
 
-.template-editor-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
-    grid-template-areas: "message rail";
-    gap: 16px;
-    align-items: start;
-}
-
-/* The left column: the grid AREA only — the box is the PanelSection inside it (D10), so this element
+/* The main region: the grid AREA only — the box is the PanelSection inside it (D10), so this element
    must never draw one of its own. */
 .template-editor-message-panel {
-    grid-area: message;
+    min-width: 0;
+}
+
+.template-editor-rail {
     min-width: 0;
 }
 
@@ -35,22 +37,9 @@
     font-size: 0.9em;
 }
 
-.template-editor-rail {
-    grid-area: rail;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
 .template-editor-panel__empty {
     margin: 0;
     color: var(--colorNeutralForeground3, #616161);
-}
-
-.template-editor-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
 }
 
 .template-editor-preview {
@@ -70,24 +59,12 @@
     white-space: pre-wrap;
 }
 
-.template-editor-preview__actions {
-    display: flex;
-    justify-content: flex-end;
-}
-
-/* The trailing action row inside a panel body (the constraints panel's "View all constraints"):
-   the same right-aligned treatment as the preview's refresh row. */
+/* The trailing action row inside a panel body (the constraints panel's "View all constraints"). */
 .template-editor-panel__actions {
     display: flex;
     justify-content: flex-end;
 }
 
-@media (max-width: 1400px) {
-    .template-editor-layout {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-areas: "message" "rail";
-    }
-}
 /* Owner label in the title row (redesign spec 3.2/3.7): the badge carries the system scope, this is the
    tenant's name. Theme-neutral - no literal colours (the PanelSection surface lesson). */
 .template-editor__owner {

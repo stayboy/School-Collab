@@ -9,6 +9,13 @@
 > precedence) and §5 (API surface). Data model, renderer, tag vocabulary, constraints semantics and
 > audit remain governed by `assignment-notification-templates.md` except where this file says
 > otherwise. Execution mode: **Full four-agent round (Tier 3, attended)**, three workstreams — §9.
+>
+> **Layout & chrome (superseded 2026-10-23 in part).** The editor surface's chrome — the panel box,
+> the header order, the page action's placement and the rail membership (Constraints · Preview) — now
+> follows **`documents/solution/panel-layout-pattern.md`**, the single source of truth for create /
+> edit surfaces. This spec keeps the landing grid, the ownership model, the constraints semantics and
+> the audit contract; the editor's box/border/padding, sticky header and collapsible rail panels are
+> the pattern doc's, not restated here.
 
 ## 1. Findings (substrate inventory, 2026-10-20)
 
@@ -179,11 +186,25 @@ assignment surface's UX-7 guard protects a forty-field form — decision 5 of th
 (grade levels / topics / activity groups) + `CodedValuesApiClient` (`Streams` children); a lookup failure
 disables **adding** constraints and shows the existing warning, never drops stored values.
 
+**Each dimension loads independently** (amended 2026-10-23, defect pass). The lookups span two hosts and
+three feature postures, so one absent route costs only its own dimension:
+
+- A dimension whose lookup **failed** (an outage) disables adding **for that dimension** and is named in
+  the warning; the other dimensions keep working.
+- A dimension the host **does not serve** — 404, the `FEATURE:EnableActivityGroups` posture, since
+  `StudentEndpoints` maps `/activity-groups` only when the flag is on — is **not offered** in the menu and
+  is **not** reported as a failure. That is a feature the school does not have, not a fault.
+- `AssignmentType` is a closed set with no lookup, so no failure can reach it.
+
+The wording this replaces ("a lookup failure disables adding constraints") described one try/catch around
+all four reads; it made an optional feature being off read as every constraint name having been lost.
+
 **Interactions.**
 
 1. The Constraints `PanelSection` header carries `RowActionsMenu ForceKebab UseMenuService="false"` with one
-   item per dimension, all carrying `FluentIcons.Add` (the Targets-&-Audience precedent: the glyph names the
-   action). A disabled editor disables every item with its reason.
+   item per dimension the host **offers**, all carrying `FluentIcons.Add` (the Targets-&-Audience precedent:
+   the glyph names the action). A dimension the host does not serve is absent rather than empty; one that
+   failed is present and disabled with its reason. A disabled editor disables every item with its reason.
 2. Each item opens `ConstraintEditDialog` (`DialogShellBase<ConstraintEditModel, ConstraintEditResult>`)
    preset to that dimension (`CategoryLocked` — the dimension selector is hidden, as `TargetsAndAudienceDialog`
    does). The operator appends values; each pick renders as a dismissible `Chip` inside the dialog; Submit

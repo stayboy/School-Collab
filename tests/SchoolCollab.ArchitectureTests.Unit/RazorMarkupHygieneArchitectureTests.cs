@@ -221,12 +221,12 @@ public class RazorMarkupHygieneArchitectureTests
     /// <c>MarkupString</c> is a never (question-response-types §8 Q15): rich text is sanitised on write
     /// and again on render by ONE shared render component + sanitiser helper, never injected ad hoc.
     ///
-    /// <para>TWO files are allowed, by name, each for a reason the round doc records (G3):
-    /// <c>RichInstruction.razor</c> <b>is</b> the shared render component — the single place a sanitised
-    /// value becomes markup, which is where this rule is enforced rather than broken; and
-    /// <c>RichInstructionEditor.razor</c> hands the editor wrapper its TOOLBAR, which is our own constant
-    /// markup and never user input. Everything else stays banned: do not extend this list to admit a
-    /// convenience — that is exactly what the ban exists to prevent.</para>
+    /// <para>ONE file is allowed, by name: <c>RichInstruction.razor</c> <b>is</b> the shared render
+    /// component — the single place a sanitised value becomes markup, which is where this rule is
+    /// enforced rather than broken. Everything else stays banned: do not extend this list to admit a
+    /// convenience — that is exactly what the ban exists to prevent. (<c>RichInstructionEditor.razor</c>
+    /// was the second entry while it handed the editor wrapper its toolbar as a <c>MarkupString</c>
+    /// constant; that toolbar is real Razor markup since the tag button moved into it, 2026-10-23.)</para>
     /// </summary>
     [TestMethod]
     public void NoMarkupString_InSource()
@@ -235,7 +235,6 @@ public class RazorMarkupHygieneArchitectureTests
         string[] allowed =
         [
             "Components/RichText/RichInstruction.razor",
-            "Components/RichText/RichInstructionEditor.razor",
         ];
 
         var failures = SourceFiles([".cs", ".razor"])
@@ -246,7 +245,7 @@ public class RazorMarkupHygieneArchitectureTests
 
         failures.Should().BeEmpty(
             "MarkupString is a never — rich/HTML content must go through the shared sanitiser + render " +
-            "component (question-response-types §8 Q15), except the two files named in this test. Files:\n" +
+            "component (question-response-types §8 Q15), except the file named in this test. Files:\n" +
             string.Join("\n", failures));
     }
 

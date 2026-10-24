@@ -15,6 +15,12 @@
 > `documents/solution/adr-authoring-surface-pattern.md` (the authoring shell),
 > `documents/solution/dialog-parameter-binding.md` (dialog plumbing), the entity-code rule pattern
 > (`specs/…` seeding in `MigrationService`, generator in Settings).
+>
+> **Layout & chrome (superseded 2026-10-23 in part).** The editor surface's chrome — the Message
+> panel, the Constraints / Preview rail panels, the header order and the page action's placement —
+> now follows **`documents/solution/panel-layout-pattern.md`**. This spec keeps the naming,
+> code-generation and field-content requirements; the box/border/padding, sticky header and
+> collapsible rail panels are the pattern doc's, not restated here.
 
 ---
 
@@ -179,32 +185,46 @@ The editor surface is tidied into the repo's own shapes:
 
 ### Template Type row and action bar (D9)
 
-9. **D9 — One `FormRow` labelled "Template Type" holds both dropdowns inline, and the action bar
-   stops repeating the form.** The kind and preferred-mode-of-contact dropdowns become children of a
-   single form row — the shared row primitive's input cell already lays children out inline with a
-   gap, so no new container and no new CSS. Each dropdown is sized on the existing field-width
-   ladder (a mid step that fits the longest option text), and the "type and contact mode are fixed
-   per template" sentence becomes the row label's help tooltip rather than an inline paragraph. On
-   edit the dropdowns stay disabled exactly as today and the owner badge (System, or the tenant's
-   name) stays in the action bar. The kind banner and the "New template" caption are removed from the
-   editor's action bar in both modes; on edit the heading becomes the template's title. The
-   colour-coded kind banner remains in the landing grid, which is where at-a-glance kind scanning
-   actually happens; the template code prefix in the landing cell also names the kind via the title.
+9. **D9 — One `FormRow` labelled "Template Type" holds both dropdowns, each named by its own caption
+   underneath, and the action bar stops repeating the form.** The two dropdowns live in ONE
+   `FormRow`, each inside a `FormRowCell` whose `Caption` (`Type` / `Preferred mode of contact`) sits
+   **under** its control — the shared paired-input pattern from the assignment authoring surface
+   (`Grading` / `Score` rows), so the row's short group label keeps the 180px gutter that lines every
+   other field up, while each picker is still named. `RowLabelPosition.Below` is deliberately NOT
+   used (it drops that gutter). Each dropdown is `FieldWidth.W5` (240px) — superseded 2026-10-23: it
+   was `W3` (160px), the clamp floor, which the owner found too small for the values it must show
+   (`Publish`, `Email`) — and the "type and contact mode are fixed per
+   template" rule rides the row/cell `Help` tooltips rather than an inline paragraph. On edit the
+   dropdowns stay disabled exactly as today and the owner badge (System, or the tenant's name) stays
+   in the action bar. The kind banner and the "New template" caption are removed from the editor's
+   action bar in both modes; on edit the heading becomes the template's title. The colour-coded kind
+   banner remains in the landing grid, which is where at-a-glance kind scanning actually happens; the
+   template code column also names the kind via the title.
 
 ### Left panel and editor sizing (D10)
 
-10. **D10 — The left column wears the shared panel chrome and the message editor fills it.** The left
-    column becomes a titled panel rendered by the shared panel component already used by Constraints
-    and Preview, so border, radius and the full-width header rule come from one implementation
-    instead of a second hand-rolled box. Consequently the earlier "exactly two panels on this
-    surface" rule is retired — the surface now has three bounded panels, and the audit trail section
-    below the grid keeps its plain heading (it is not a panel). The message editor gains a height
-    parameter on the shared rich-text editor component (default unchanged, so the assignment
-    authoring surface is untouched), and the template editor passes a taller value so the body fills
-    the panel it now sits in. The subject input takes the field-width ladder's fill step. Because the
-    audit section currently borrows the left column's heading style, the heading style must survive
-    the panel conversion (a shared panel title supersedes it for the panel, and the audit section
-    keeps its own heading treatment).
+10. **D10 — The left column wears the shared panel chrome and the message editor fills its WIDTH, not
+    its height.** The left column becomes a titled panel rendered by the shared panel component
+    already used by Constraints and Preview, so border, radius and the full-width header rule come
+    from one implementation instead of a second hand-rolled box. Consequently the earlier "exactly
+    two panels on this surface" rule is retired — the surface now has three bounded panels, and the
+    audit trail section below the grid keeps its plain heading (it is not a panel). The shared
+    rich-text editor gained **both** knobs: its root is `width: 100%` (it previously sized to the
+    Quill toolbar's intrinsic width and floated short of the panel), and a `MinHeight` parameter
+    whose default keeps the assignment authoring surface pixel-identical. The template editor passes
+    a **modest** height (`12rem`) — the editor is a writing area, not the tallest thing on the page —
+    so the panel's height is driven by its fields rather than by an oversized body box.
+
+    Field widths in the left panel ride the W1–W9 ladder: `Title` **W7** (320px), `Description` fill
+    (W9), `Code` W4 (200px), `Subject` **W7** (320px — as wide as the Title above it, the owner's
+    rule). `Title` is a deliberate bounded field, not a bug: it is narrower than the panel on
+    purpose, and the ladder step is the record of that choice. Superseded 2026-10-23: this read
+    `Title` W8 (400px) / `Subject` W6 (280px). W8 was a shrinkable flex item, so a narrow panel
+    squeezed it down to the width of `Code`'s fixed W4 and the two read as the same size; the fill
+    step (W9) was tried next and rejected as too wide, which is why the pair settled on W7. Because
+    the audit section previously borrowed the left column's heading style, the
+    heading style had to survive the panel conversion (a shared panel title supersedes it for the
+    panel, and the audit section keeps its own treatment).
 
 ### Audit reason leaves the page (D11)
 
@@ -238,6 +258,48 @@ The editor surface is tidied into the repo's own shapes:
     `TPL07 · Grade 8 Science reminder` wording and the D9 clause describing the code as a prefix in
     the landing cell: two pieces of identity in one cell read as noise, and a sortable column is what
     makes "find TPL07" work.
+
+### Placeholder-tag menu (D14)
+
+14. **D14 — The tag chips are retired for ONE grouped menu with two entry points, and the token lands
+    at the caret.** Replaces the D3-era chip row in the body area, which grew linearly with the
+    vocabulary (ten chips already wrapped across the panel).
+    - **One definition, two surfaces.** `PlaceholderTagGroups` declares the grouping — *Assignment*
+      (Title, Description, DueDate), *Content* (Instructions), *Recipients* (StudentName,
+      GuardianName, GuardianRole), *School & links* (SchoolName, Link, LinkExpiry) — plus a trailing
+      *Other* group that catches any tag added to `NotificationTemplateTags` but not yet placed, so
+      nothing becomes unreachable. `PlaceholderTagMenu` renders those items once; the editor's
+      right-click menu and the `Insert tag` trigger both use it.
+    - **Groups collapse** as native `FluentMenuItem` sub-menus (`MenuItems`) — the library's only
+      collapsible shape; flat-with-separators is the fallback if it feels slow in use.
+    - **Insertion is at the caret**, not at the end: a capture-phase `contextmenu` listener on the
+      editor root resolves the pointer to a Quill index (`caretPositionFromPoint` /
+      `caretRangeFromPoint` → `Quill.find` → `quill.getIndex`) and stores it; the menu item inserts
+      there and places the caret after the token. With no captured index it falls back to the live
+      selection, then to the end of the document. All of it lives in the RCL's own
+      `quillAssets.js` — the vendored Quill is never patched, and the wrapper's non-unique inner ids
+      are never addressed.
+    - **Placement is the editor's box, not the page.** FluentUI 5.0.1's `FluentMenu` has no anchor
+      parameter (only `Trigger`, `OpenOnHover`, `OpenOnContext`, `PersistOnItemClick`), and the menu
+      element is an empty inline sibling of the editor wrapper — so the popover anchored to that
+      sliver and opened outside the text area (owner report 2026-10-23). The editor root is now
+      `position: relative` and the `fluent-menu` element is overlaid on it (`inset: 0`,
+      `pointer-events: none`, with the popover list re-enabling pointer events), so the anchor box is
+      the text area under either mechanism the library uses.
+    - **Read-only rows get no menu**, no trigger and no caret tracking. A host that passes no
+      `PlaceholderTags` (the assignment instruction editor) renders nothing new at all.
+    - **Subject insertion is deliberately out of scope.** The retired chips wrote into the subject on
+      the email channel; the tag menu targets the message **body** only, because the body is the one
+      surface with a caret. A subject tag is typed by hand (the token shape is unchanged), and
+      re-introducing an affordance for it is a separate decision.
+    - **Token insertion is validated, not trusted.** The menu's click payload is DOM text, so one
+      shared helper accepts only a strict `{{Name}}` token and returns null for anything else — a
+      group parent's own label, or a parent's concatenated sub-menu text, can never reach a message
+      body.
+    - **If the placement fix does not hold in the browser**, the ratified fallback is: delete the
+      right-click menu, put a tag button in the Quill toolbar (which is inside the editor box, so its
+      anchor is unambiguous), remove the page-level trigger, and convert the toolbar from its
+      `MarkupString` constant to Razor markup so the button can carry an id and a handler.
 
 ### Modules touched
 

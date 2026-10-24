@@ -14,6 +14,15 @@
 > - `assignment-authoring-compartments.md` — compartment model, modes, §11 action matrix (behaviour).
 > - `assignment-authoring-content-questions-modern-ui.md` — Content/Questions presentation (unchanged).
 > - `assignment-creation-with-ai.md` — AI generation as an action (unchanged).
+>
+> **Layout & chrome (superseded 2026-10-23).** The surface's *presentation* here — the reordered
+> Create field order, the summary-first draft edit, the strand/lesson pickers — is unchanged, but the
+> *chrome* it describes (`.authoring-compartment`, the sticky action bar, the jump-nav, and the
+> box/border/padding) now follows **`documents/solution/panel-layout-pattern.md`**, the single source
+> of truth for create / edit surfaces. The compartment sections are `PanelSection` blocks placed by
+> the pattern doc's main/rail region grid, so the **`.authoring-compartment` class no longer exists**
+> in markup or CSS. Element ids (`#authoring-basics`, `-targets`, `-rules`, `-questions`, …) are kept
+> as test seams; header order, rail membership and the page action's home are the pattern doc's.
 
 ---
 
@@ -87,9 +96,10 @@ Inside `#authoring-basics` (all ids unchanged — this is markup order only):
 
 ### 3.2 New compartment: Instructions
 
-- New `<section id="authoring-instructions" class="authoring-compartment">` with
-  `<h3 class="authoring-compartment-title">Instructions</h3>`, rendered **last on
-  the page** (after the Content/Questions row).
+- New section for the **Instructions** fields (id `authoring-instructions`), rendered **last on
+  the page** (after the Content/Questions row). Its box chrome — border, radius, padding and
+  header — comes from `PanelSection` per `documents/solution/panel-layout-pattern.md` (the
+  `.authoring-compartment` class this spec used to name is retired there).
 - Contains Description (`authoring-basics-description` — id kept for test seams)
   and Instructions (`authoring-basics-instructions`) **side by side (inline)**:
   a page-scoped two-column wrapper (`.authoring-instructions-grid`: two `flex: 1`
@@ -233,9 +243,11 @@ values. **New ids:** `authoring-breadcrumb`, `authoring-summary`,
 `authoring-add-strand`, `authoring-add-lesson`, `authoring-targets-accordion`.
 There is **no jump-nav** (D12). The compartment SECTIONS are stacked in the
 canonical order and their ids are the anchors: `#authoring-basics`,
-`#authoring-targets`, `#authoring-rules` (the Rules card's container, in the
-right-hand column), `#authoring-content`, `#authoring-questions`,
-`#authoring-instructions`. On **Create** the Content & Resources and Questions &
+`#authoring-targets`, `#authoring-rules` (the Rules panel's container, in the
+rail column — `documents/solution/panel-layout-pattern.md` §5), `#authoring-content`,
+`#authoring-questions`, `#authoring-instructions`. *(The sections are `PanelSection` blocks,
+not `.authoring-compartment` sections — that class is retired by the pattern doc; the ids are
+what survive as test seams.)* On **Create** the Content & Resources and Questions &
 AI sections are absent, so only basics/targets/rules/instructions exist (D10);
 the ids resolve for the `Generate questions` kebab action wherever the section
 renders.

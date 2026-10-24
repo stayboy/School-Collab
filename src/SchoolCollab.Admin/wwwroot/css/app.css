@@ -62,15 +62,20 @@
    render at 160px on the select — resetting that part is a separate decision.
    w-9 is the "fill" step (flex grow) — matches the existing
    .student-form-input--email / --name pattern. */
-.w-1 { width:  80px; min-width: 0; max-width: 100%; }
-.w-2 { width: 120px; min-width: 0; max-width: 100%; }
-.w-3 { width: 160px; min-width: 0; max-width: 100%; }
-.w-4 { width: 200px; min-width: 0; max-width: 100%; }
-.w-5 { width: 240px; min-width: 0; max-width: 100%; }
-.w-6 { width: 280px; min-width: 0; max-width: 100%; }
-.w-7 { width: 320px; min-width: 0; max-width: 100%; }
-.w-8 { width: 400px; min-width: 0; max-width: 100%; }
-.w-9 { width: 100%; min-width: 0; max-width: 100%; flex: 1 1 0; }
+.w-1 { width:  80px; min-width: 0; max-width: 100%; flex: 0 0 auto; }
+.w-2 { width: 120px; min-width: 0; max-width: 100%; flex: 0 0 auto; }
+.w-3 { width: 160px; min-width: 0; max-width: 100%; flex: 0 0 auto; }
+.w-4 { width: 200px; min-width: 0; max-width: 100%; flex: 0 0 auto; }
+.w-5 { width: 240px; min-width: 0; max-width: 100%; flex: 0 0 auto; }
+.w-6 { width: 280px; min-width: 0; max-width: 100%; flex: 0 0 auto; }
+.w-7 { width: 320px; min-width: 0; max-width: 100%; flex: 0 0 auto; }
+.w-8 { width: 400px; min-width: 0; max-width: 100%; flex: 0 0 auto; }
+/* w-9 is the fill step. `flex: 1 1 auto` (not the old `1 1 0`): inside the flex form row a
+   zero basis resolved the width from the flex algorithm rather than from the 100%, so a
+   narrow cell could size the field from its content and the title read as the same width
+   as a fixed w-4 sibling. With an `auto` basis the 100% width is honoured and the item
+   still grows to fill the line; in a non-flex parent the 100% alone fills the block. */
+.w-9 { width: 100%; min-width: 0; max-width: 100%; flex: 1 1 auto; }
 /* FluentUI v5 dark-theme flash mitigation — the guide's "Flash effect (optional)" snippet
    (ThemeLightDark.md), kept here instead of inline in App.razor because this repo forbids
    inline style/script elements in Razor. The library applies the stored theme from its own

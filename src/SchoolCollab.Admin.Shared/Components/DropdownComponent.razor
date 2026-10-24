@@ -79,7 +79,8 @@
               Placeholder="@(Placeholder ?? "Select…")"
               Disabled="@Disabled"
               Style="@EffectiveStyle"
-              class="@EffectiveClass" />
+              class="@EffectiveClass"
+              @attributes="IdAttributes" />
 
 @code {
     /// <summary>
@@ -93,6 +94,15 @@
 
     /// <summary>Label shown above the dropdown.</summary>
     [Parameter] public string? Label { get; set; }
+
+    /// <summary>
+    /// The DOM id of the underlying control, forwarded verbatim to <see cref="FluentSelect"/>.
+    /// <para>Set it when something names this control from outside — the <c>&lt;label for&gt;</c> a
+    /// <see cref="FormRowCell"/> caption renders, or a page-level test seam. Without it a caption labels
+    /// nothing and clicking the caption does nothing. The AssignmentAuthoring "Grading" row is the
+    /// precedent.</para>
+    /// </summary>
+    [Parameter] public string? Id { get; set; }
 
     /// <summary>
     /// Accessible name for the control, forwarded to
@@ -164,6 +174,15 @@
     [Parameter] public EventCallback<TValue?> SelectedValueChanged { get; set; }
 
     private TItem? _selectedOption;
+
+    /// <summary>
+    /// <see cref="Id"/> splatted onto <see cref="FluentSelect"/> rather than written as an attribute:
+    /// that component REJECTS a null <c>Id</c> at render time ("Omit the parameter to use the component
+    /// default value") instead of ignoring it, so the parameter must be absent — not null — when the
+    /// caller set none, and the control then keeps its own generated id.
+    /// </summary>
+    private Dictionary<string, object>? IdAttributes =>
+        Id is null ? null : new Dictionary<string, object> { ["Id"] = Id };
 
     private string EffectiveClass => string.IsNullOrWhiteSpace(Class)
         ? "dropdown-component"

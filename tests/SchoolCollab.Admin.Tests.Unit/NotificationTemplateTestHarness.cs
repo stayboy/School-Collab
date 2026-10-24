@@ -70,6 +70,14 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
 
     public bool PreviewFails { get; set; }
     public bool LookupsFail { get; set; }
+
+    /// <summary>
+    /// Paths this fake does NOT map, answering 404 — the shape of a host whose feature flag is off,
+    /// because <c>FEATURE:EnableActivityGroups</c> leaves <c>/activity-groups</c> unregistered
+    /// (<c>StudentEndpoints</c> maps it inside the flag check). Distinct from <see cref="LookupsFail"/>,
+    /// which is an outage (500) and must still be reported.
+    /// </summary>
+    public HashSet<string> UnmappedPaths { get; } = [];
     public string PreviewJson { get; set; } =
         """{ "subject": "Sample subject: Grade 8 Science", "body": "<p>Rendered body</p>" }""";
 
@@ -112,6 +120,9 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
 
         if (path is "/students/grade-levels" or "/students/topics" or "/activity-groups" or "/api/coded-values/by-parent")
         {
+            if (UnmappedPaths.Contains(path))
+                return Status(HttpStatusCode.NotFound, $"no endpoint matched {path}");
+
             if (LookupsFail)
                 return Status(HttpStatusCode.InternalServerError, "lookup down");
 

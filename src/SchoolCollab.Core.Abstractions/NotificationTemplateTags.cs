@@ -8,10 +8,10 @@ namespace SchoolCollab.Core.Notifications;
 /// <para>The Round-A working spellings (<c>AssignmentTitle</c>, <c>DescriptionExcerpt</c>,
 /// <c>ContactName</c>) survive as render aliases — see <see cref="Aliases"/> — so a template
 /// authored against the earlier vocabulary still renders; <see cref="All"/> carries the spec
-/// set only, because the editor's tag chips read it.</para>
+/// set only, because the editor's placeholder-tag menu reads it.</para>
 /// <para>Round <c>notification-templates-b3b</c> (Q90a) moved this set here from
 /// <c>Assignments.Core/Domain</c>: it is this feature's cross-context vocabulary beside
-/// <see cref="NotificationChannel"/>, so the Settings editor can offer the chips without a
+/// <see cref="NotificationChannel"/>, so the Settings editor can offer the tags without a
 /// reference to Assignments and the renderer keeps its canonical spelling. The class is
 /// zero-dependency and static — the move changes no wire and no behaviour.</para>
 /// </summary>
@@ -48,7 +48,7 @@ public static class NotificationTemplateTags
     /// <summary>The link's expiry date — empty when there is none.</summary>
     public const string LinkExpiry = "LinkExpiry";
 
-    /// <summary>The spec §3.2 vocabulary, in spec order — the source for the editor's tag chips.</summary>
+    /// <summary>The spec §3.2 vocabulary, in spec order — the source for the editor's placeholder-tag menu.</summary>
     public static readonly IReadOnlyList<string> All =
     [
         Title, Description, DueDate, Instructions, StudentName, GuardianName, GuardianRole, SchoolName, Link, LinkExpiry,

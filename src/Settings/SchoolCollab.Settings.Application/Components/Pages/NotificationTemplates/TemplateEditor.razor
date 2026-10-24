@@ -23,20 +23,20 @@
    wearing the shared PanelSection chrome. The audit trail (edit mode) keeps its own plain heading BELOW
    the grid: it is a section, not a panel.
 
-   Staging contract (Q9): the title, description, type, subject, body and chips only mutate the draft; ONE
-   Save persists them with one audited reason — asked for in the shared reason dialog when editing a row,
-   and never sent on create, where a first write has no "why" (naming spec D11). Resetting is the detail
-   page's separate audited action and uses the same dialog.
+   Staging contract (Q9): the title, description, type, subject, body and placeholder tags only mutate
+   the draft; ONE Save persists them with one audited reason — asked for in the shared reason dialog when
+   editing a row, and never sent on create, where a first write has no "why" (naming spec D11). Resetting
+   is the detail page's separate audited action and uses the same dialog.
 *@
 <ErrorBoundary>
     <ChildContent>
+        @* No shell action bar (owner, 2026-10-23; panel-layout-pattern §4/§6): the page action,
+           Reset and the new Cancel live in the Message panel's STICKY header row, so the actions never
+           scroll away and no second toolbar is needed. The shell keeps the crumb trail and the title
+           (with the owner chip). *@
         <AuthoringShell Crumbs="@ShellCrumbs"
                        TitleContent="@ShellTitle"
-                       PrimaryId="@(ReadOnly ? "template-adopt" : "template-save")"
-                       PrimaryLabel="@ShellPrimaryLabel"
-                       PrimaryDisabled="@ShellPrimaryDisabled"
-                       OnPrimaryAction="OnShellPrimaryAsync"
-                       SecondaryActions="@ShellSecondaryActions">
+                       ShowActionBar="false">
         @if (_loading)
         {
             <div class="template-editor__loading"><FluentSpinner /></div>
@@ -58,19 +58,47 @@
             @if (_lookups?.Error is not null)
             {
                 <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-2" id="template-lookup-warning">
-                    Constraint names are unavailable (@_lookups.Error) — stored values are shown instead.
+                    Some constraint names are unavailable (@_lookups.Error) — those constraints show their stored values instead.
                 </FluentMessageBar>
             }
 
-            <div class="template-editor-layout">
-                <div class="template-editor-message-panel">
+            @* ONE region grid for every create / edit surface (panel-layout-pattern §2): main region =
+               the entity's own fields (Message), rail = one panel per relationship (Constraints,
+               Preview). Regions draw nothing, so the single frame per block is the PanelSection
+               inside them. The container query lives on `.region-grid-host` — a grid cannot query its
+               own width — which is why this surface carries no viewport breakpoint of its own. *@
+            <div class="region-grid-host">
+            <div class="region-grid template-editor-layout">
+                <div class="region-grid__main template-editor-message-panel">
                     <PanelSection Title="Message"
                                   Id="template-editor-message"
-                                  TitleId="template-editor-message-title">
+                                  TitleId="template-editor-message-title"
+                                  StickyHeader="true"
+                                  ShowBorder="false">
+                        @* §6 header order: leading (Cancel) · this panel's own secondary (Reset) · the
+                           page action. The page action is FIRST-block-owned precisely because this row
+                           is sticky. *@
+                        <HeaderActions>
+                            <FluentButton Id="template-cancel"
+                                          Appearance="ButtonAppearance.Outline"
+                                          OnClick="BackToListAsync">Cancel</FluentButton>
+                            @ShellSecondaryActions
+                            @if (ShellPrimaryLabel is { } primaryLabel)
+                            {
+                                <FluentButton Id="@(ReadOnly ? "template-adopt" : "template-save")"
+                                              Appearance="ButtonAppearance.Primary"
+                                              Disabled="@ShellPrimaryDisabled"
+                                              OnClick="OnShellPrimaryAsync">@primaryLabel</FluentButton>
+                            }
+                        </HeaderActions>
+
                         <ChildContent>
                             <FormRow Label="Title" Required For="template-title">
+                                @* w-7 (320px), the owner's call (2026-10-23): wide enough to read a real
+                                   template name, deliberately not full width — the field no longer
+                                   claims the whole row. *@
                                 <FluentTextInput Id="template-title"
-                                                 Class="w-9"
+                                                 Class="w-7"
                                                  MaxLength="120"
                                                  Value="@_model.Title"
                                                  ValueChanged="OnTitleChanged"
@@ -105,33 +133,46 @@
 
                             @* D9: type and preferred mode of contact are ONE decision, so they share one
                                labelled row; the "fixed per template" rule moved from a paragraph into the
-                               row label's help hint. *@
-                            <FormRow Label="Template Type" Required Help="@TemplateTypeHelp">
-                                <DropdownComponent TItem="KindOption" TValue="NotificationTemplateKind"
-                                                   Items="KindOptions"
-                                                   SelectedValue="@_model.Kind"
-                                                   SelectedValueChanged="OnKindChanged"
-                                                   OptionText="@(o => o.Label)"
-                                                   OptionValue="@(o => o.Value)"
-                                                   AriaLabel="Template type"
-                                                   Disabled="@LockedMeta"
-                                                   Width="FieldWidth.W4" />
-                                <DropdownComponent TItem="ChannelOption" TValue="NotificationChannel"
-                                                   Items="ChannelOptions"
-                                                   SelectedValue="@_model.Channel"
-                                                   SelectedValueChanged="OnChannelChanged"
-                                                   OptionText="@(o => o.Label)"
-                                                   OptionValue="@(o => o.Value)"
-                                                   AriaLabel="Preferred mode of contact"
-                                                   Disabled="@LockedMeta"
-                                                   Width="FieldWidth.W4" />
+                               row label's help hint. Each picker names itself in its own cell caption under
+                               the group label (the AssignmentAuthoring "Grading" row pattern) — do NOT use
+                               LabelPosition="Below" here: it drops the 180px label gutter that lines every
+                               row's input up on one axis. *@
+                            <FormRow Label="Template Type" Required AlignTop
+                                     For="template-kind" Help="@TemplateTypeHelp">
+                                <FormRowCell Caption="Type" For="template-kind" Help="@KindCellHelp">
+                                    <DropdownComponent TItem="KindOption" TValue="NotificationTemplateKind"
+                                                       Id="template-kind"
+                                                       Items="KindOptions"
+                                                       SelectedValue="@_model.Kind"
+                                                       SelectedValueChanged="OnKindChanged"
+                                                       OptionText="@(o => o.Label)"
+                                                       OptionValue="@(o => o.Value)"
+                                                       AriaLabel="Template type"
+                                                       Disabled="@LockedMeta"
+                                                       Width="FieldWidth.W5" />
+                                </FormRowCell>
+                                <FormRowCell Caption="Preferred mode of contact" For="template-channel"
+                                             Help="@ChannelCellHelp">
+                                    <DropdownComponent TItem="ChannelOption" TValue="NotificationChannel"
+                                                       Id="template-channel"
+                                                       Items="ChannelOptions"
+                                                       SelectedValue="@_model.Channel"
+                                                       SelectedValueChanged="OnChannelChanged"
+                                                       OptionText="@(o => o.Label)"
+                                                       OptionValue="@(o => o.Value)"
+                                                       AriaLabel="Preferred mode of contact"
+                                                       Disabled="@LockedMeta"
+                                                       Width="FieldWidth.W5" />
+                                </FormRowCell>
                             </FormRow>
 
                             @if (_model.Channel == NotificationChannel.Email)
                             {
                                 <FormRow Label="Subject" For="template-subject">
+                                    @* As wide as the Title above it (the owner's rule): the subject is the
+                                       message's second identity line, not a narrow side field. *@
                                     <FluentTextInput Id="template-subject"
-                                                     Class="w-9"
+                                                     Class="w-7"
                                                      Value="@_model.Subject"
                                                      ValueChanged="OnSubjectChanged"
                                                      Immediate="true"
@@ -148,6 +189,7 @@
                                                            Value="@_model.Body"
                                                            ReadOnly="@ReadOnly"
                                                            MinHeight="@BodyEditorMinHeight"
+                                                           PlaceholderTags="@NotificationTemplateTags.All"
                                                            Placeholder="Write the message body..." />
                                 }
                                 else
@@ -162,18 +204,6 @@
                                 }
                             </FormRow>
 
-                            <div class="template-editor-tags" id="template-tag-chips">
-                                @foreach (var tag in NotificationTemplateTags.All)
-                                {
-                                    <FluentButton Appearance="ButtonAppearance.Subtle"
-                                                  Disabled="@ReadOnly"
-                                                  Title="@($"Insert {{{{{tag}}}}}")"
-                                                  OnClick="@(() => InsertTag(tag))">
-                                        @($"{{{tag}}}")
-                                    </FluentButton>
-                                }
-                            </div>
-
                             @if (_model.Channel != NotificationChannel.Email)
                             {
                                 <p class="template-editor-hint" id="template-length-hint">@LengthHint</p>
@@ -182,8 +212,8 @@
                     </PanelSection>
                 </div>
 
-                <div class="template-editor-rail" id="template-editor-rail">
-                    <PanelSection Title="Constraints" TitleId="template-constraints-title">
+                <div class="region-grid__rail template-editor-rail" id="template-editor-rail">
+                    <PanelSection Title="Constraints" TitleId="template-constraints-title" Collapsible="true">
                         <HeaderActions>
                             @if (!ReadOnly)
                             {
@@ -238,7 +268,16 @@
                         </ChildContent>
                     </PanelSection>
 
-                    <PanelSection Title="Preview" TitleId="template-preview-title">
+                    <PanelSection Title="Preview" TitleId="template-preview-title" Collapsible="true">
+                        @* Refresh lives in the HEADER (owner, 2026-10-23): it is this panel's own action on
+                           its own content — §6 puts a panel's controls on the header line, and the body
+                           footer it used to sit in was a second action row inside one box. *@
+                        <HeaderActions>
+                            <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="OnRefreshPreviewAsync" id="template-preview-refresh">
+                                Refresh
+                            </FluentButton>
+                        </HeaderActions>
+
                         <ChildContent>
                             <div class="template-editor-preview" id="template-preview-body">
                                 @if (_previewUnavailable)
@@ -263,14 +302,10 @@
                                     }
                                 }
                             </div>
-                            <div class="template-editor-preview__actions">
-                                <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="OnRefreshPreviewAsync" id="template-preview-refresh">
-                                    Refresh
-                                </FluentButton>
-                            </div>
                         </ChildContent>
                     </PanelSection>
                 </div>
+            </div>
             </div>
 
             @if (Mode == TemplateEditorMode.Edit)
@@ -335,13 +370,26 @@
     /// D10: the message editor's minimum height. Tall enough that the largest input on the page is not the
     /// smallest box on it, and short enough that the message panel stays level with the
     /// Constraints/Preview rail on a 1920×1080 screen and still stacks sensibly once the two columns become
-    /// one below 1400px.
+    /// one below 1400px. The SMS/WhatsApp textarea keeps the shared <c>ta-lines-8</c> class instead.
     /// </summary>
-    private const string BodyEditorMinHeight = "22rem";
+    private const string BodyEditorMinHeight = "12rem";
 
     /// <summary>D9: the row label's help hint — the "fixed per template" rule, without the paragraph.</summary>
     private const string TemplateTypeHelp =
         "Type and contact mode are fixed per template — create a new template to change them.";
+
+    /// <summary>
+    /// D9: the two pickers sit side by side under ONE group label, so each carries its own caption and its
+    /// own help hint (the shared FormRowCell pattern). These say what the choice means; the group label's
+    /// hint above says that the pair is fixed once the template exists.
+    /// </summary>
+    private const string KindCellHelp =
+        "The kind of notification this template covers — its type, never its content.";
+
+    /// <summary>D9: the second cell's hint — what the contact mode decides for the message body.</summary>
+    private const string ChannelCellHelp =
+        "How the message reaches recipients: Email keeps a subject line and rich text; SMS and WhatsApp are "
+        + "plain text with a 160-character guide.";
 
     private static readonly TimeSpan PreviewDebounce = TimeSpan.FromMilliseconds(300);
 
@@ -374,6 +422,7 @@
     [Parameter] public EventCallback<TenantNotificationTemplateDto> Saved { get; set; }
 
     private readonly TemplateFormModel _model = new();
+
     private TemplateConstraintLookups? _lookups;
     private RichInstructionEditor? _editor;
     private bool _loading = true;
@@ -477,7 +526,16 @@
 
     private bool ShellPrimaryDisabled => _adopting || _saving;
 
-    /// <summary>Reset is the bar's secondary action on a writable Edit row (spec §3.2/§3.5).</summary>
+    /// <summary>
+    /// Reset is the Message panel header's own secondary control on a writable Edit row (spec
+    /// §3.2/§3.5): the header row now carries it, right of Cancel and left of the page action,
+    /// because the shell's action bar is off on this surface. Its pinned id does not move.
+    /// <para>
+    /// It stays a real button rather than a kebab item: <c>#template-reset</c> is a pinned test seam and
+    /// <see cref="RowAction"/> carries no id, so hiding Reset behind a menu would either move the seam or
+    /// invent one for it.
+    /// </para>
+    /// </summary>
     private RenderFragment ShellSecondaryActions => @<text>@if (Mode == TemplateEditorMode.Edit
         && !ReadOnly && !_loading && !_notFound)
         {
@@ -614,18 +672,6 @@
     private void OnBodyChanged(string? value)
     {
         _model.Body = value ?? string.Empty;
-        QueuePreview();
-    }
-
-    /// <summary>Appends a tag at the end of the authored text (email: subject; plain text: body).</summary>
-    private void InsertTag(string tag)
-    {
-        var token = "{{" + tag + "}}";
-        if (_model.Channel == NotificationChannel.Email)
-            _model.Subject = (_model.Subject ?? string.Empty) + token;
-        else
-            _model.Body += token;
-
         QueuePreview();
     }
 
@@ -836,15 +882,27 @@
         }
     }
 
-    /// <summary>The add-constraint menu (redesign spec §3.6): one item per dimension, verb-first labels,
-    /// every item carrying the shared Add glyph — the Targets &amp; Audience kebab treatment.</summary>
+    /// <summary>The add-constraint menu (redesign spec §3.6): one item per dimension this host OFFERS,
+    /// verb-first labels, every item carrying the shared Add glyph — the Targets &amp; Audience kebab
+    /// treatment. A dimension the school does not serve is absent rather than empty (a 404 route, the
+    /// <c>FEATURE:EnableActivityGroups</c> posture); one that failed stays, disabled with its reason.
+    /// See <see cref="TemplateConstraintLookups.IsOffered"/>.</summary>
     private IReadOnlyList<RowAction> ConstraintActions =>
     [
-        ConstraintAction(TemplateConstraintDimension.GradeLevel, "Add grade levels"),
-        ConstraintAction(TemplateConstraintDimension.Stream, "Add streams"),
-        ConstraintAction(TemplateConstraintDimension.ActivityGroup, "Add activity groups"),
-        ConstraintAction(TemplateConstraintDimension.Subject, "Add subjects"),
-        ConstraintAction(TemplateConstraintDimension.AssignmentType, "Add assignment types"),
+        .. ConstraintDimensions
+            .Where(dimension => _lookups?.IsOffered(dimension) == true)
+            .Select(dimension => ConstraintAction(dimension, DimensionTitle(dimension))),
+    ];
+
+    /// <summary>The dimensions an author may constrain, in menu order. One list, so the menu and the
+    /// dialog titles cannot drift apart (the labels ARE <see cref="DimensionTitle"/>).</summary>
+    private static readonly TemplateConstraintDimension[] ConstraintDimensions =
+    [
+        TemplateConstraintDimension.GradeLevel,
+        TemplateConstraintDimension.Stream,
+        TemplateConstraintDimension.ActivityGroup,
+        TemplateConstraintDimension.Subject,
+        TemplateConstraintDimension.AssignmentType,
     ];
 
     private RowAction ConstraintAction(TemplateConstraintDimension dimension, string label) =>
@@ -852,10 +910,11 @@
         {
             Label = label,
             Icon = FluentIcons.Add,
-            Disabled = _lookups?.Loaded != true,
-            DisabledReason = _lookups?.Loaded == true
+            Disabled = _lookups?.IsAvailable(dimension) != true,
+            DisabledReason = _lookups?.IsAvailable(dimension) == true
                 ? null
-                : $"Constraint lookups are unavailable ({_lookups?.Error}) — adding is disabled until they return.",
+                : _lookups?.UnavailableReason(dimension)
+                  ?? "Constraint lookups have not loaded yet.",
             OnClick = () => OpenConstraintDialogAsync(dimension),
         };
 

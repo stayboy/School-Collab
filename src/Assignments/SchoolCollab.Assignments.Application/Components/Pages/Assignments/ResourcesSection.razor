@@ -8,17 +8,13 @@
 @inject ILogger<ResourcesSection> Logger
 
 <section class="resources-section">
-    @* CR-1 (spec §5, round content-questions-modern-ui): on the live surface this
-       section owns compartment 5's card header — the page renders no duplicate h3
-       (X-1 still holds: the h3 is a descendant of #authoring-content). The + reveals
-       the link-input row, hidden by default so the narrow rail stays clean. *@
-    <div class="cq-header">
-        <h3 class="authoring-compartment-title">Content &amp; Resources</h3>
-        <span class="cq-count">@(Model.Attachments.Count + Model.ResourceUrls.Count)</span>
-        @* CR-1/CR-8's header "+" (and the hidden link input it revealed) is RETIRED into the
-           Instructions compartment's kebab (spec instructional-materials D1/§0); CR-2…CR-6,
-           CR-10…CR-12 and every X-6 string stay in force. *@
-    </div>
+    @* BODY ONLY (owner, 2026-10-23; panel-layout-pattern §3/§4). This section no longer draws a
+       heading: the rail's Content & Resources PanelSection owns the title, the count and the kebab,
+       and a second heading inside it would be two titles for one block. The old `.cq-header` band
+       (title + `.cq-count`) is gone with the duplicate Content & Resources region it belonged to.
+       CR-1/CR-8's header "+" (and the hidden link input it revealed) stays retired into the
+       Instructions kebab (spec instructional-materials D1/§0); CR-2…CR-6, CR-10…CR-12 and every
+       X-6 string stay in force. *@
 
     @* Owner pill rework (2026-10-12): while the authoring page's recorder takeover shows, the upload
        tile hides with it (a drop target must not compete with a live capture surface) — the section's

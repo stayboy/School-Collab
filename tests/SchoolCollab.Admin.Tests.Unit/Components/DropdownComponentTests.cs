@@ -236,10 +236,12 @@ public class DropdownComponentTests : BunitContext
     /// (<c>_content/SchoolCollab.Admin.Shared/app.css</c>). bUnit cannot compute
     /// CSS, so this reads that stylesheet and requires the declaration to be
     /// present — deleting or renaming it re-breaks the ladder and fails here.
-    /// LIMIT: this pins the declared mechanism, not the rendered pixels. The
-    /// control's own shadow CSS still clamps — <c>fluent-dropdown</c>'s inner
-    /// <c>.control</c> carries <c>min-width: 160px</c>, so a W1/W2 host renders at
-    /// 160px until that part is reset too. Only a live browser can confirm widths.
+    /// LIMIT: this pins the declared mechanism, not the rendered pixels. The rule must say
+    /// <c>width: 100%</c>, never <c>inherit</c>: measured in the running app 2026-10-23, `inherit`
+    /// takes the host's COMPUTED width (the `w-N` percentage) and the percentage then resolves
+    /// against the slotted grid area, leaving a `fluent-text-input` at its intrinsic 185px inside
+    /// a 655px field. The control's own shadow CSS can still clamp a step; only a live browser
+    /// confirms pixels.
     /// </summary>
     private static void AssertSlottedControlSizesFromFieldHost()
     {
@@ -251,10 +253,10 @@ public class DropdownComponentTests : BunitContext
             $"the shared global stylesheet should exist at '{stylesheetPath}' — check the path resolution");
 
         var css = File.ReadAllText(stylesheetPath);
-        Regex.IsMatch(css, @"fluent-field\s*>\s*fluent-dropdown\s*,[^{}]*\{\s*width:\s*inherit\s*;")
+        Regex.IsMatch(css, @"fluent-field\s*>\s*fluent-dropdown\s*,[^{}]*\{\s*width:\s*100%\s*;")
             .Should().BeTrue(
                 "the slotted control must size from the fluent-field host that carries the inline width style "
-                + "(fluent-field > fluent-dropdown { width: inherit; } in src/SchoolCollab.Admin.Shared/wwwroot/app.css)");
+                + "(fluent-field > fluent-dropdown { width: 100%; } in src/SchoolCollab.Admin.Shared/wwwroot/app.css)");
     }
 
     [TestMethod]

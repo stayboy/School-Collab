@@ -1,0 +1,66 @@
+@using SchoolCollab.Admin.Shared.Components.RichText
+@* PlaceholderTagMenu — the placeholder-tag items of the rich instruction editor's tag menu, kept in its own
+   component so the vocabulary is listed once: RichInstructionEditor renders it inside the FluentMenu that
+   its toolbar's "Insert tag" button opens.
+
+   The host renders the <FluentMenu> and its <FluentMenuList> (v5 hides a list that is not a popover, so
+   the list wrapper is mandatory); this component renders only the ITEMS. Each group is a FluentMenuItem
+   with a nested sub-menu (FluentMenuItem.MenuItems renders the library's own collapsible FluentMenuList):
+   collapsed until hovered or opened from the keyboard, which is the "collapsible group" the brief asks
+   for. Item labels ARE the literal token the editor inserts — the menu's click handler reads the item
+   text and inserts it verbatim, so nothing has to map a label back to a tag. *@
+@foreach (var group in PlaceholderTagGroups.For(Tags))
+{
+    <FluentMenuItem @key="group.Name" Label="@group.Name">
+        <MenuItems>
+            @foreach (var tag in group.Tags)
+            {
+                <FluentMenuItem @key="tag" Label="@Token(tag)" />
+            }
+        </MenuItems>
+    </FluentMenuItem>
+}
+
+@code {
+    /// <summary>The tags the menu may offer — grouping and the trailing "Other" group come from
+    /// <see cref="PlaceholderTagGroups.For"/>.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<string> Tags { get; set; } = [];
+
+    /// <summary>
+    /// The literal text an item shows and the editor inserts for <paramref name="tag"/>, e.g.
+    /// <c>{{Title}}</c> — the template's own placeholder syntax.
+    /// </summary>
+    public static string Token(string tag) => "{{" + tag + "}}";
+
+    /// <summary>
+    /// Reads a menu item's reported text back into the token it stands for, or <c>null</c> when it is not
+    /// one. The menu's one entry point for a click.
+    /// <para><see cref="FluentMenu.OnClick"/> is menu-scoped, so selecting a GROUP parent ("Assignment",
+    /// "Recipients") reaches the handler too, and a parent's reported text can even carry its whole
+    /// nested sub-menu — either would land prose in a customer-facing message body. Only the strict
+    /// shape <see cref="Token"/> produces is admitted: <c>{{</c>, one or more ASCII letters or digits
+    /// (the <c>NotificationTemplateTags</c> PascalCase spelling), <c>}}</c> — after trimming, and with
+    /// nothing before, after or inside.</para>
+    /// </summary>
+    /// <param name="text">The item text the library reported (<c>MenuItemEventArgs.Text</c>).</param>
+    public static string? TokenFromText(string? text)
+    {
+        var candidate = text?.Trim();
+        if (candidate is not { Length: > 4 }
+            || candidate[0] != '{' || candidate[1] != '{'
+            || candidate[^1] != '}' || candidate[^2] != '}')
+        {
+            return null;
+        }
+
+        for (var i = 2; i < candidate.Length - 2; i++)
+        {
+            if (!char.IsAsciiLetterOrDigit(candidate[i]))
+            {
+                return null;
+            }
+        }
+
+        return candidate;
+    }
+}

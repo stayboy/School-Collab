@@ -50,15 +50,25 @@
 > compartment design **is** the authoring surface, not a way-station toward a portal-side
 > authoring experience. `documents/solution/portal-scope-decision.md`.)*
 
+> **Layout & chrome (superseded 2026-10-23).** The compartment *chrome* — the box, border, padding,
+> radius, the sticky action bar, the jump-nav and the `.authoring-compartment` framed container —
+> now lives in **`documents/solution/panel-layout-pattern.md`**, the single source of truth for every
+> create / edit surface. That pattern replaces the six stacked `SectionCard` compartments with a
+> main/rail region grid of `PanelSection` blocks, so **`.authoring-compartment` no longer exists in
+> markup or CSS**. This spec keeps the compartment *contents* (§3), ordering, the targeting model (§7)
+> and the lifecycle/behaviour contract (§11); header order, rail membership, collapsibility and the
+> page action's home are the pattern doc's, not restated here.
+
 ---
 
 ## 1. Summary
 
 Assignment authoring becomes **one compartmentalized page** used in three modes —
 **Create**, **Edit** and read-only **View** — instead of a create wizard plus a
-divergent edit form. The page splits an assignment into **six compartments**
-rendered as stacked, always-visible section cards with a sticky compartment
-jump-nav and a sticky action bar.
+divergent edit form. The page splits an assignment into **six compartments**.
+*(The compartments' placement, chrome and header order now follow
+`documents/solution/panel-layout-pattern.md` — this spec names the six compartments and their
+contents; the pattern doc owns the main/rail region grid and the `PanelSection` box.)*
 
 Two things are added by this spec beyond presentation:
 
@@ -107,11 +117,12 @@ authoring.
 **UX-1** — The six compartments are the canonical assignment information
 architecture; the same ordering and grouping is used in Create, Edit and View.
 
-**UX-1a — Chrome (owner, 2026-10-21).** Compartment 1 renders as a **headerless panel**: no visible
-title, the `PanelSection` box shape (1px border, radius 8, padding 12) drawn with the theme's divider
-token — never a literal colour — and `aria-label="Basics"` as its accessible name. Every other
-compartment keeps its visible title, so the invariant is **at most one** title per compartment, not
-exactly one: the code comment that called it "X-1: exactly one" had no spec behind it
+**UX-1a — Chrome (owner, 2026-10-21; superseded 2026-10-23).** Compartment 1 renders as a
+**headerless panel** with `aria-label="Basics"` as its accessible name. The box shape — border,
+radius, padding, the surface token — comes from `PanelSection` per
+`documents/solution/panel-layout-pattern.md` §3 (never a literal colour). Every other compartment
+keeps its visible title, so the invariant is **at most one** title per compartment, not exactly one:
+the code comment that called it "X-1: exactly one" had no spec behind it
 (`documents/solution/adr-authoring-surface-pattern.md`, decision 4).
 
 **UX-2** — Compartment 1's Type/Grading choice gates the *consequences* shown in
@@ -122,7 +133,13 @@ a compartment (§12).
 
 ## 4. Layout and interaction contract
 
-**UX-3** — A single page renders **all six compartments stacked** in one scroll.
+> *(Superseded 2026-10-23 in part.)* The sticky jump-nav and the sticky action bar below are
+> replaced by `documents/solution/panel-layout-pattern.md`: the page's primary action lives in the
+> FIRST block's sticky header row (§4), there is no separate action bar, and the jump-nav is gone
+> (`assignment-create-edit-redesign.md` D12). The six-compartment contents and ordering (§3) are
+> unchanged; only their chrome and placement move to the pattern doc.
+
+**UX-3** — A single page renders **all six compartments** in one scroll.
 No step gating, no "Next", no tab-hiding of authoring config.
 
 **UX-4** — A **sticky compartment jump-nav** (six anchor links) is present at all
