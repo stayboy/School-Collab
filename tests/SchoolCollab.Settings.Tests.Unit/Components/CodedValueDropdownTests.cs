@@ -113,15 +113,22 @@ public class CodedValueDropdownTests : BunitContext
             .Add(p => p.SelectedId, typeId)
             .Add(p => p.SelectedIdChanged, EventCallback.Factory.Create<Guid?>(this, value => selectedId = value)));
 
-        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
+        // Wait on the state we ASSERT, not on the shell. The shell renders before OnInitializedAsync's
+        // fetch lands, so `WaitForState(() => Find("fluent-dropdown") is not null)` returns while the
+        // option list is still empty — a race that only loses when the machine is busy, which is why
+        // this passed alone and failed under full-suite load (#396, filed 2026-10-20, reproduced in
+        // the Release gate leg 2026-10-24). See the `fix-flaky-bunit-fluentui-after-cascade` skill.
+        cut.WaitForAssertion(() =>
+        {
+            // Assert: FluentUI 5.x no longer renders the bound value as a `current-value`
+            // attribute on the dropdown (that was the v4 <fluent-select> DOM); the selection
+            // is expressed on the resolved option instead — the pre-selected id resolves to
+            // the loaded item and that option alone renders as `selected`.
+            var selectedOptions = cut.FindAll("fluent-option").Where(o => o.HasAttribute("selected")).ToList();
+            selectedOptions.Should().ContainSingle("SelectedId resolves to exactly one loaded option");
+            selectedOptions[0].TextContent.Should().Contain("Essay");
+        }, TimeSpan.FromSeconds(5));
 
-        // Assert: FluentUI 5.x no longer renders the bound value as a `current-value`
-        // attribute on the dropdown (that was the v4 <fluent-select> DOM); the selection
-        // is expressed on the resolved option instead — the pre-selected id resolves to
-        // the loaded item and that option alone renders as `selected`.
-        var selectedOptions = cut.FindAll("fluent-option").Where(o => o.HasAttribute("selected")).ToList();
-        selectedOptions.Should().ContainSingle("SelectedId resolves to exactly one loaded option");
-        selectedOptions[0].TextContent.Should().Contain("Essay");
         handler.LastRequest?.RequestUri?.PathAndQuery.Should().Be("/api/coded-values/by-parent?parentCode=SUBJECT");
     }
 
