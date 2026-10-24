@@ -379,7 +379,7 @@ section below.
 - **Fix compiler errors before continuing.** If the build fails, treat the
   failures as the next task — do not move on to feature work, do not mark the
   step complete, and do not commit.
-- **Targets:** run `dotnet build SchoolCollab.slnx` from the repo root — the solution uses the **`.slnx`** XML format. Do **not** re-add a `SchoolCollab.sln`: CI runs no-arg `dotnet build` / `dotnet test` and relies on single-solution discovery (two solution files in one directory is an error). Tests
+- **Targets:** run `dotnet build SchoolCollab.slnx` from the repo root — the solution uses the **`.slnx`** XML format. Do **not** re-add a `SchoolCollab.sln`: CI runs no-arg `dotnet build` and a filtered `dotnet test` and relies on single-solution discovery (two solution files in one directory is an error). Tests
   aren't required for the in-session check unless the change touches test
   files directly.
 - **Second target — the MAUI head is NOT in that solution.** `src/Mobile/SchoolCollab.Mobile` is
@@ -542,14 +542,35 @@ This catches issues early and avoids back-and-forth on the PR.
 - If the PR introduces new behavioural code without tests, **do not create the PR** —
   write the tests first.
 
-### 3. Run tests and confirm they pass
+### 3. Run the CI-parity test gate
+
+Run the repo's gate, not no-arg `dotnet test` (owner, 2026-10-24):
 
 ```bash
-dotnet test
+scripts/round/gates.sh --no-maui --no-integration   # baseline
+scripts/round/gates.sh                              # escalation — every leg, no skips
 ```
 
-- `dotnet test` must complete with **0 failures** before the PR is created.
-- If any test fails, fix the issue in the same branch before proceeding.
+- **0 failures on every leg that ran.** `gates.sh` mirrors CI's filter legs (unit +
+  integration), the repo-wide `ArchitectureTests.Unit` scanner, the cross-module wiring
+  guard and both portal suites. A hand-picked per-project list is false confidence —
+  `scripts/round/README.md` says why, and `LocalGateCiParityTests` pins it.
+- **A leg that matches nothing is a failure, never a pass.** `gates.sh` fails on "zero tests
+  ran"; CI tolerates that exit code (`--ignore-exit-code 8`, `Directory.Build.props`) and the
+  repo has paid for the tolerance twice (2026-10-12, 2026-10-15).
+- **Escalate to the full gate — no flags — when the diff touches** shared chrome
+  (`SchoolCollab.Admin.Shared`, `SchoolCollab.Core`, `SchoolCollab.ServiceDefaults`), a
+  migration, an integration contract, or auth. A filter cannot see the consumers it broke,
+  and "the diff is three lines" is not a risk argument.
+- **`--no-maui` and `--no-integration` are baseline flags, never escalations.** The MAUI
+  head is outside `SchoolCollab.slnx`, so it is the only tripwire for a shared-component
+  break — the same case that already forces the full gate. The integration leg is skipped
+  locally because its two OpenRouter live tests fail here (HTTP 400) while CI self-skips them
+  for lack of a key, so the leg cannot reach green on a developer machine; CI owns it.
+- **A skipped leg is recorded, never implied**: one line in the PR body (and the round doc)
+  naming each leg that did not run and why. `gates.sh` prints that list — paste it.
+- This gate decides *which tests run*, never *whether they are written*: §2 above and
+  `.github/copilot/rules/testing.md` are unchanged.
 
 ### 4. Build must succeed
 
@@ -565,7 +586,7 @@ dotnet build
 |-------|---------|---------|
 | Code review | Review branch changes for bugs/security/logic | No issues found |
 | Tests exist | New behavioural code has corresponding test files | Yes |
-| Tests pass | `dotnet test` | 0 failures |
+| Tests pass | `scripts/round/gates.sh --no-maui --no-integration` (full gate, no flags, on shared-chrome / migration / contract / auth diffs) | 0 failures; every skipped leg named |
 | Build succeeds | `dotnet build` | 0 errors |
 
 **Do not skip these checks.** If any check fails, fix the issue on the branch before
