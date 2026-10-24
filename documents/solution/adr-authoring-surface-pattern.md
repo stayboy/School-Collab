@@ -44,13 +44,13 @@ of the two it finds first.
    `TemplateEditor` both consume it. `Admin.Shared` is the only legal home: Settings may not reference
    `Assignments.Application`, and a second copy is the drift this ADR exists to prevent.
 
-   > **Superseded 2026-10-23 (the sticky-action-bar half).**
-   > `documents/solution/panel-layout-pattern.md` §4 now owns the page action's placement: the
-   > primary/secondary controls live in the **first block's sticky header row**, not in a separate
-   > action bar, so the shell keeps the breadcrumb and page title (and its ownership of *which* actions
-   > exist) but no longer renders a sticky action bar on the create / edit surfaces. The
-   > shell-owns-the-bar half of this decision is retained here as history; the breadcrumb half, the
-   > `Admin.Shared`-only home and the drift rationale are unchanged.
+   > **Amended 2026-10-23, restored 2026-10-24 (the action-bar half).**
+   > `documents/solution/panel-layout-pattern.md` §4 owns the page action's *placement*. On
+   > 2026-10-23 the pair moved into the first block's sticky header row and the shell stopped
+   > rendering a bar; the owner then reported that the in-block placement overlapped the block, so on
+   > 2026-10-24 the shell renders the **page action header** again (title · kebab · `Cancel` · primary,
+   > flush right) and `PanelSection`'s sticky header was removed. The breadcrumb half, the
+   > `Admin.Shared`-only home and the drift rationale are unchanged throughout.
 2. **`LandingPage` owns its bars; the page owns its grid tracks.** A page's `GridTemplateColumns`
    budgets one track per rendered column, **including** the Actions column the wrapper appends.
    `LandingGridSettings` states the contract; the template landing appends `auto`.

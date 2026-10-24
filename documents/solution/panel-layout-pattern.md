@@ -136,13 +136,17 @@ no workaround is needed and no future block can re-introduce the second frame.
 - The thin rule sits **under the whole header row** — spanning the title *and* the
   actions — never as the title's own border.
 - **Actions are right-aligned on the title's row**, vertically centred with it.
-- **The page's primary action lives in the FIRST block's header row**, not in a separate
-  action bar (`Save as draft`, `Create template`, with `Cancel` beside it). The shell
-  keeps the breadcrumb and page title; the buttons belong to the block they save.
-  **That header row is sticky** (§6), which is what makes this safe on a long form — the
-  actions never scroll away, so no second toolbar is needed.
+- **The page's primary action and `Cancel` live in the page action header** owned by
+  `AuthoringShell`, flushed to the content's right edge (`Save as draft`, `Create template`,
+  with `Cancel` immediately to their left). The page action header is the **only** pinned
+  row. *Superseded 2026-10-24 (owner, issue #404): an earlier revision put the pair in the
+  first block's sticky header row; the owner reported that it restricted and overlapped the
+  block as it expanded, so the pair moved back up and `PanelSection`'s `StickyHeader` was
+  removed rather than kept as a second pinned row. Two stacked pinned rows was the defect.*
+- **That page's own kebab sits beside the title**, after the status badge — block menus
+  belong to the block, page menus to the page.
 - Row-level actions (add, edit, remove inside a rail panel) use `RowActionsMenu` as a
-  kebab in the same header slot.
+  kebab in the panel's header slot.
 
 ---
 
@@ -250,17 +254,17 @@ that list together with the layout. Current list:
 | Rules | rail | **yes** |
 | Constraints · Preview | rail | **yes** |
 
-### Sticky behaviour (owner, 2026-10-23)
+### Sticky behaviour (owner, 2026-10-23; amended 2026-10-24)
 
-Both the rail and the **main block's header row** stick to the top of the scroll port:
+Two things stick to the top of the scroll port, and only two:
 
+- The **page action header** (title · kebab · `Cancel` · page action) — `AuthoringShell`.
+  It is the only row that carries the page's commit, so it is the only row that pins.
 - The **rail column** is `position: sticky; top: <below the app bar>; align-self: start`,
   so relationships stay reachable while the form scrolls.
-- The **main block's header row** (its title *and* its action buttons) is sticky at the
-  same offset. This is what makes the first block own the page's primary action (§4)
-  without Q11(a)'s earlier cost: the actions no longer scroll out of view.
-- The header row keeps the box's surface token and carries its bottom rule, so the sticky
-  row reads as the panel's own header, not as a second toolbar.
+- **No block header pins.** `PanelSection.StickyHeader` was **removed** on 2026-10-24
+  (owner, #404): with the page action back in the page header, a pinned block header was a
+  second pinned row that overlapped the block as it expanded. A block header is a label.
 - Both offsets come from **one** custom property for the app-bar height. A page may not
   invent its own offset.
 

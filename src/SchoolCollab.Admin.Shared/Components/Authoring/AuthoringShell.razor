@@ -36,33 +36,27 @@
         }
     </nav>
 
-    @if (ShowActionBar)
-    {
-        <header class="authoring-actionbar">
-            @TitleGroup
-            <div class="authoring-actionbar-controls">
-                @LeadingActions
-                @if (PrimaryLabel is not null)
-                {
-                    <FluentButton Id="@PrimaryId"
-                                  Appearance="ButtonAppearance.Primary"
-                                  Disabled="@PrimaryDisabled"
-                                  OnClick="OnPrimaryAction">
-                        @PrimaryLabel
-                    </FluentButton>
-                }
-                @SecondaryActions
-            </div>
-        </header>
-    }
-    else
-    {
-        @* The page owns its actions and renders them into its FIRST block's sticky header row
-           (documents/solution/panel-layout-pattern.md §4/§6), so this shell renders NO action bar —
-           not an empty one. The title group stays: the page title and its badge slot are the shell's
-           identity, and the bar is the only part whose PLACEMENT moved. *@
-        <div class="authoring-page-title">@TitleGroup</div>
-    }
+    @* The page action header is ALWAYS rendered (owner, 2026-10-24): there is no longer an
+       in-block alternative — the pair belongs here, and the first block's header row carries only
+       that block's own controls. Order: title group, this block's own menu beside it (owner: the
+       kebab sits after the badge, next to the title), then the actions flushed to the right edge. *@
+    <header class="authoring-actionbar">
+        @TitleGroup
+        @TitleMenu
+        <div class="authoring-actionbar-controls">
+            @LeadingActions
+            @if (PrimaryLabel is not null)
+            {
+                <FluentButton Id="@PrimaryId"
+                              Appearance="ButtonAppearance.Primary"
+                              Disabled="@PrimaryDisabled"
+                              OnClick="OnPrimaryAction">
+                    @PrimaryLabel
+                </FluentButton>
+            }
+            @SecondaryActions
+        </div>
+    </header>
 
     @ChildContent
 </div>
@@ -99,18 +93,10 @@
     [Parameter] public RenderFragment? SecondaryActions { get; set; }
 
     /// <summary>
-    /// Whether the shell renders its own sticky action bar. <b>True by default</b> — the bar is this
-    /// shell's original contract (ADR <c>adr-authoring-surface-pattern.md</c>, decision 1, amended
-    /// 2026-10-23).
-    /// <para>
-    /// A surface on the panel layout pattern sets it to <b>false</b> and renders the SAME controls —
-    /// it already supplies them through the parameters above — into the FIRST block's header row,
-    /// which is sticky for exactly this reason (§4/§6). That row never scrolls away, so nothing is
-    /// lost by dropping the separate bar; what changes is only WHERE the controls render. The shell
-    /// keeps ownership of the crumb trail and the page title either way.
-    /// </para>
+    /// This page's own menu (its kebab), rendered beside the title group — after the badge — instead of
+    /// in the first block's header row (owner, 2026-10-24). Null renders nothing.
     /// </summary>
-    [Parameter] public bool ShowActionBar { get; set; } = true;
+    [Parameter] public RenderFragment? TitleMenu { get; set; }
 
     /// <summary>The page body, rendered below the action bar (or below the title block).</summary>
     [Parameter] public RenderFragment? ChildContent { get; set; }

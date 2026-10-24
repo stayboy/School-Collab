@@ -29,18 +29,24 @@
 
 /* ── Sticky action bar (UX-4/UX-5) ─────────────────────────────────── */
 
+/* The page action header (owner, 2026-10-24). It owns the page's primary action and the Cancel pair
+   for every authoring surface, so it pins — and it is the ONLY pinned row: PanelSection's sticky
+   header was removed with the same decision, because two stacked pinned rows is the overlap the
+   owner reported (#404).
+
+   No border and no card radius: the line that used to sit under the title is gone, and the bar reads
+   as the page's own header rather than a panel. It keeps the page surface colour so scrolled content
+   cannot bleed through while it is pinned. Padding is 0 on the right and 0 at the top/bottom so the
+   action pair lands flush on the content edge and the heading sits on the grid's top line. */
 .authoring-actionbar {
     position: sticky;
     top: 0;
     z-index: 6;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 8px 16px;
+    gap: 12px;
+    padding: 0 0 6px 0;
     background-color: var(--neutral-layer-1);
-    border: 1px solid var(--neutral-stroke-divider-rest);
-    border-radius: 6px;
 }
 
 .authoring-title-group {
@@ -61,4 +67,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    /* Flush to the edge: the pair is the page's commit, so it sits on the content's right edge
+       instead of floating at the end of a padded bar (owner, 2026-10-24). */
+    margin-left: auto;
 }

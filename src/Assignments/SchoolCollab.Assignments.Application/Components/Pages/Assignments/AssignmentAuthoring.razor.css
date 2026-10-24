@@ -112,24 +112,14 @@
     scroll-margin-top: calc(var(--app-bar-height) + 6px);
 }
 
-/* §6: the FIRST block of the overview is this card, so its header row carries the page action and
-   pins to the same offset as every other sticky row on an authoring surface. It keeps the card's
-   surface token, so a pinned header reads as the card's header and not as a toolbar above it. */
+/* The overview card's header row carries only its own affordances (the pencil, the return to the
+   edit-fields view). The page action and the Cancel moved to the page action header, and no block
+   header pins any more (owner, 2026-10-24; #404). */
 .authoring-summary__header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-}
-
-.authoring-summary__header--sticky {
-    position: sticky;
-    top: var(--app-bar-sticky-offset, 0px);
-    z-index: 5;
-    margin: -16px -16px 0;
-    padding: 16px 16px 0;
-    background-color: var(--neutral-layer-1);
-    border-radius: 8px 8px 0 0;
 }
 
 .authoring-summary__actions {

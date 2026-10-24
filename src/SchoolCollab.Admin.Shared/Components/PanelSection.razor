@@ -15,10 +15,10 @@
    box, with the margin that separates the header from the content beneath. Owner-corrected
    2026-10-10: the first pass drew it as the title's own border, which stopped short of the kebab.
 
-   THE HEAD GROUP (2026-10-23, §6 sticky behaviour): the header row and its rule are wrapped in ONE
-   element so `StickyHeader` can pin both together. Without the wrapper the rule would scroll away
-   from the title it belongs to and the pinned row would read as a second toolbar instead of as the
-   panel's own header.
+   THE HEAD GROUP: the header row and its rule are wrapped in ONE element so the rule can never
+   scroll away from the title it belongs to. Sticky was REMOVED from this component on 2026-10-24
+   (owner, #404): the page action header owns pinning now, and two stacked pinned rows was the
+   overlap the owner reported. A panel header is a label, not a second toolbar.
 
    COLLAPSIBILITY IS OPT-IN (owner, 2026-10-23; §6). `Collapsible` defaults to false and a false
    panel renders **no chevron element at all** — not a disabled one, not a CSS-hidden one. Showing a
@@ -29,7 +29,9 @@
    rule alone; the rail's blocks keep the box, because a stack of unboxed panels in a narrow column
    has no edge to read. The rule is `border-color: transparent` — never `border: none` — so the two
    variants keep the same box model and switching one does not shift the layout by a pixel. *@
-<div class="panel-section @(StickyHeader ? "panel-section--sticky" : null) @(ShowBorder ? null : "panel-section--borderless")" id="@Id">
+<div class="panel-section @(ShowBorder ? null : "panel-section--borderless")" id="@Id">
+    @if (ShowHeader)
+    {
     <div class="panel-section__head">
         <div class="panel-section__header">
             @* The chevron LEADS: it is part of the title's affordance, not a trailing control
@@ -54,13 +56,16 @@
 
         <span class="panel-section__rule" aria-hidden="true"></span>
     </div>
+    }
 
     @* Collapsing hides the BODY, never the panel: title, count, chevron and kebab stay visible, so
        a relationship's existence is never a click away. The body element is ALWAYS rendered and
        merely marked `hidden` while collapsed — that keeps the chevron's `aria-controls` pointing at
        an element that exists (a dangling reference announces nothing to a screen reader) and keeps
        the children's state across a collapse. *@
-    <div class="panel-section__body" id="@_bodyId" hidden="@(!_expanded)">@ChildContent</div>
+    @* A hidden header cannot host the chevron, so a headerless panel is always expanded — otherwise the
+       body would be collapsed with no affordance that could ever reopen it. *@
+    <div class="panel-section__body" id="@_bodyId" hidden="@(ShowHeader && !_expanded)">@ChildContent</div>
 </div>
 
 @code {
@@ -93,6 +98,19 @@
     /// means a caller has to ask for the affordance, and forgetting to ask can never silently add a
     /// control the owner did not consent to. The main region is never collapsible.
     /// </summary>
+    /// <summary>
+    /// Whether the panel renders its header row (title, count, actions and the rule) at all.
+    /// <b>True by default.</b>
+    /// <para>
+    /// Set it to <see langword="false"/> only where the block's subject is already unambiguous from the
+    /// page itself — the create forms, where the page title and the single visible block say the same
+    /// thing (owner, 2026-10-24). A hidden header renders no DOM at all: no empty row, no orphan rule,
+    /// and no <c>HeaderActions</c> slot. Do not use it to "tidy" a block whose subject a reader would
+    /// otherwise have to infer — the title is what names the block.
+    /// </para>
+    /// </summary>
+    [Parameter] public bool ShowHeader { get; set; } = true;
+
     [Parameter] public bool Collapsible { get; set; }
 
     /// <summary>
@@ -100,7 +118,6 @@
     /// shared app-bar offset (§6). This is what lets the FIRST block own the page's primary action:
     /// the actions never scroll out of view, so no second toolbar is needed.
     /// </summary>
-    [Parameter] public bool StickyHeader { get; set; }
 
     /// <summary>
     /// Whether the block draws its frame (§3). Defaults to <b>true</b> — a panel is a box unless the

@@ -41,7 +41,7 @@ public class PanelLayoutSurfaceTests : BunitContext
     };
 
     [TestMethod]
-    public void TheMessagePanel_CarriesThePageActionInItsStickyHeader_AndNoSeparateActionBar()
+    public void ThePageActionHeaderCarriesThePair_AndTheMessagePanelIsNotSticky()
     {
         // Arrange
         Register();
@@ -50,14 +50,18 @@ public class PanelLayoutSurfaceTests : BunitContext
         var cut = RenderCreate();
         cut.WaitForAssertion(() => cut.FindAll("#template-save").Should().ContainSingle());
 
-        // Assert — §4/§6: the FIRST block's header row owns the page action, and no toolbar duplicates it.
-        cut.FindAll(".authoring-actionbar").Should().BeEmpty(
-            "the shell renders no separate sticky action bar on a panel-layout surface");
+        // Assert — owner, 2026-10-24 (#404): the page action header owns the pair, and the block
+        // header is no longer sticky — it is the only pinned row.
+        var bar = cut.Find(".authoring-actionbar");
+        bar.QuerySelectorAll("#template-save").Should().ContainSingle(
+            "the page action renders in the page action header");
+        bar.QuerySelectorAll("#template-cancel").Should().ContainSingle(
+            "Cancel sits beside it, left of the primary");
         var message = cut.Find("#template-editor-message");
-        message.ClassList.Should().Contain("panel-section--sticky",
-            "that header row is sticky, which is what makes owning the page action safe");
-        message.QuerySelectorAll(".panel-section__actions #template-save").Should().ContainSingle(
-            "the page action renders on the title's row, inside the first block");
+        message.ClassList.Should().NotContain("panel-section--sticky",
+            "the block header is a label now — pinning it too is the overlap #404 reported");
+        message.QuerySelectorAll(".panel-section__actions #template-save").Should().BeEmpty(
+            "nothing duplicates the page action inside the block");
         message.QuerySelectorAll(".panel-section__chevron").Should().BeEmpty(
             "the main region is never collapsible (§6)");
     }
@@ -75,10 +79,10 @@ public class PanelLayoutSurfaceTests : BunitContext
             cut.WaitForAssertion(() => cut.FindAll("#template-cancel").Should().ContainSingle(
                 "§16: Cancel is on all four surfaces — template create and template edit included"));
 
-            var header = cut.Find("#template-editor-message .panel-section__actions").InnerHtml;
+            var header = cut.Find(".authoring-actionbar-controls").InnerHtml;
             header.IndexOf("template-cancel", StringComparison.Ordinal)
                 .Should().BeLessThan(header.IndexOf("template-save", StringComparison.Ordinal),
-                    "Cancel sits LEFT of the primary action");
+                    "Cancel sits LEFT of the primary action, both in the page action header");
         }
 
         var create = RenderCreate();
@@ -120,8 +124,8 @@ public class PanelLayoutSurfaceTests : BunitContext
             "…and the main region carries no collapse control at all");
 
         var mainPanel = cut.Find(".region-grid__main .panel-section");
-        mainPanel.ClassList.Should().Contain("panel-section--sticky",
-            "the main region's block is the page action's sticky first block (§3/§6)");
+        mainPanel.ClassList.Should().NotContain("panel-section--sticky",
+            "no block header is sticky any more (owner, 2026-10-24; #404)");
 
         // The frame is regional (owner, 2026-10-24): the main block is the page's own content and
         // carries no box — its only edge is the header rule — while every rail block keeps the box,
