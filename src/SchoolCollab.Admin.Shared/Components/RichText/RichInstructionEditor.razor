@@ -9,15 +9,79 @@
    once Quill exists. Hosts declare nothing.
 
    The wrapper IS the interop (owner, 2026-10-11) — we write no JS bridge. What we read at submit is
-   sanitised by the caller, and what we seed is a plain string. *@
-<div class="rich-instruction-editor" id="@Id">
+   sanitised by the caller, and what we seed is a plain string.
+
+   HEIGHT: the panel's height is a caller knob (the MinHeight parameter) but the sizing itself stays in
+   the component's scoped CSS. The root carries the value as the --rich-instruction-editor-min-height
+   custom property; the scoped rules consume it with the assignment surface's 8rem as their fallback,
+   so a host that passes nothing renders exactly as before.
+
+   PLACEHOLDER TAGS (template-editor round, B3): a host that passes PlaceholderTags gets a tag button in
+   the Quill TOOLBAR — inside the editor's own box, so its menu anchors where the operator is typing —
+   and the chosen token is inserted at the current caret. A host that passes nothing (the assignment
+   authoring surface) renders none of it: no button, no menu, and no interop beyond the asset load it
+   already did. *@
+<div class="rich-instruction-editor" id="@_rootElementId" style="--rich-instruction-editor-min-height: @MinHeight">
     @if (_assetsReady)
     {
         <BlazoredTextEditor @ref="_editor"
                             Theme="snow"
                             Placeholder="@Placeholder"
                             ReadOnly="@ReadOnly">
-            <ToolbarContent>@((MarkupString)ToolbarMarkup)</ToolbarContent>
+            @* Real Razor markup, not an HTML-string constant: the tag button needs an id and a menu
+               anchor, which a string cannot carry. The formats stay tag-based only (G4) — no colour,
+               background, font or size, because those emit inline `style` that RichInstructionSanitizer
+               refuses to admit — and no image, because Q14 keeps media as instruction ITEMS rather than
+               inline embeds. *@
+            <ToolbarContent>
+                <span class="ql-formats">
+                    <select class="ql-header">
+                        <option selected></option>
+                        <option value="1"></option>
+                        <option value="2"></option>
+                        <option value="3"></option>
+                        <option value="4"></option>
+                    </select>
+                </span>
+                <span class="ql-formats">
+                    <button class="ql-bold"></button>
+                    <button class="ql-italic"></button>
+                    <button class="ql-underline"></button>
+                    <button class="ql-strike"></button>
+                </span>
+                <span class="ql-formats">
+                    <button class="ql-list" value="ordered"></button>
+                    <button class="ql-list" value="bullet"></button>
+                </span>
+                <span class="ql-formats">
+                    <button class="ql-link"></button>
+                    <button class="ql-clean"></button>
+                </span>
+                @if (HasPlaceholderMenu)
+                {
+                    @* OUR button, not a Quill format: Quill attaches a handler only to a class it knows,
+                       so it ignores this one and the FluentMenu owns the click. The menu is anchored to
+                       the button (FluentMenu.Trigger points its CSS anchor at that element), which is why
+                       it opens in the toolbar rather than beside the editor. *@
+                    <span class="ql-formats">
+                        <button type="button"
+                                id="@_tagButtonId"
+                                class="rich-instruction-editor__tag-button"
+                                aria-label="Insert tag"
+                                aria-haspopup="menu"
+                                aria-expanded="@(_tagMenuOpen ? "true" : "false")">
+                            @TagButtonText
+                        </button>
+                        <FluentMenu Trigger="@_tagButtonId"
+                                    OpenedChanged="OnTagMenuOpenedChanged"
+                                    OnClick="OnPlaceholderTagClickedAsync">
+                            <FluentMenuList>
+                                <PlaceholderTagMenu Tags="@(PlaceholderTags ?? Array.Empty<string>())" />
+                            </FluentMenuList>
+                        </FluentMenu>
+                    </span>
+                }
+            </ToolbarContent>
         </BlazoredTextEditor>
     }
     else
@@ -42,6 +106,28 @@
     [Parameter] public string Placeholder { get; set; } = "Write the instructions…";
 
     /// <summary>
+    /// The editor surface's minimum height, as a CSS length — the panel-fill knob (naming spec D10:
+    /// the template editor passes a taller value so the body fills the panel it sits in). Emitted on
+    /// the root as the <c>--rich-instruction-editor-min-height</c> custom property and consumed by this
+    /// component's scoped CSS; the loading placeholder follows the same value so the panel does not jump
+    /// when the real control arrives.
+    /// <para>Defaults to <see cref="DefaultMinHeight"/> (8rem), so the assignment authoring surface —
+    /// which passes nothing — renders exactly as it always has.</para>
+    /// </summary>
+    [Parameter] public string MinHeight { get; set; } = DefaultMinHeight;
+
+    /// <summary>The <see cref="MinHeight"/> a host gets by default (the pre-D10 behaviour).</summary>
+    public const string DefaultMinHeight = "8rem";
+
+    /// <summary>
+    /// The placeholder tags this editor offers in its toolbar menu (template-editor round, B3).
+    /// <para>Null or empty — the default, and what every pre-existing host passes — renders no tag
+    /// button and no menu, so the assignment authoring surface is unchanged. Read-only editors get
+    /// neither: there is nothing to insert into.</para>
+    /// </summary>
+    [Parameter] public IReadOnlyList<string>? PlaceholderTags { get; set; }
+
+    /// <summary>
     /// The asset loader in THIS library — the reason no host declares a tag.
     /// The <c>./</c> prefix is MANDATORY, not stylistic: blazor.web.js's "import" interop handler
     /// rewrites only specifiers starting with <c>./</c> to absolute URLs (via document.baseURI)
@@ -55,42 +141,18 @@
     public const string AssetsModulePath = "./_content/SchoolCollab.Admin.Shared/js/quillAssets.js";
 
     /// <summary>
-    /// The toolbar. This constant is the round's one <b>named</b> MarkupString exception (G3): it is OUR
-    /// markup, never user input. The formats are tag-based only (G4) — no colour, background, font or
-    /// size, because those emit inline <c>style</c> that <c>RichInstructionSanitizer</c> refuses to
-    /// admit — and no image, because Q14 keeps media as instruction ITEMS rather than inline embeds.
+    /// What the tag button says. It is a WORD, not a glyph: the two-brace mark this button used to
+    /// carry was unreadable at toolbar size (owner, 2026-10-23), and a toolbar-wide label needs no
+    /// legend. Same wording as the page-level trigger it replaced, so nothing has to be relearned.
     /// </summary>
-    private const string ToolbarMarkup = """
-        <span class="ql-formats">
-            <select class="ql-header">
-                <option selected></option>
-                <option value="1"></option>
-                <option value="2"></option>
-                <option value="3"></option>
-                <option value="4"></option>
-            </select>
-        </span>
-        <span class="ql-formats">
-            <button class="ql-bold"></button>
-            <button class="ql-italic"></button>
-            <button class="ql-underline"></button>
-            <button class="ql-strike"></button>
-        </span>
-        <span class="ql-formats">
-            <button class="ql-list" value="ordered"></button>
-            <button class="ql-list" value="bullet"></button>
-        </span>
-        <span class="ql-formats">
-            <button class="ql-link"></button>
-            <button class="ql-clean"></button>
-        </span>
-        """;
+    private const string TagButtonText = "Insert tag";
 
     private BlazoredTextEditor? _editor;
     private IJSObjectReference? _assetsModule;
     private bool _assetsReady;
     private bool _seeded;
     private string? _seededValue;
+    private bool _tagMenuOpen;
 
     /// <summary>Whether the render pass that gives the WRAPPER its initialisation turn has run —
     /// see <see cref="OnAfterRenderAsync"/> for why the seed must not share the mount batch.</summary>
@@ -102,6 +164,29 @@
 
     private const int MaxSeedAttempts = 3;
 
+    /// <summary>
+    /// The editor ROOT element's DOM id — two roles: the root div's <c>id</c> attribute, and the editor
+    /// the insert call addresses.
+    /// <para><see cref="Id"/> when the host pins one (the template editor pins
+    /// <c>#template-body-editor</c>, the bUnit suites address the same id); otherwise one generated per
+    /// instance, because the wrapper's inner ids are NOT unique and two editors on one page must never
+    /// share an id. Null when the host passed no <see cref="Id"/> and no tags, so a tag-less host's
+    /// markup is byte-for-byte what it always was.</para>
+    /// </summary>
+    private string? _rootElementId;
+
+    /// <summary>The generated half of <see cref="_rootElementId"/>, created at most once per instance.</summary>
+    private string? _generatedId;
+
+    /// <summary>
+    /// The tag button's DOM id, and the element the <see cref="FluentMenu"/> anchors to — derived from the
+    /// root id so two editors on one page can never share a trigger.
+    /// </summary>
+    private string? _tagButtonId => _rootElementId is null ? null : $"{_rootElementId}-insert-tag";
+
+    /// <summary>Whether this instance's tag button and menu exist — the gate for their markup.</summary>
+    private bool HasPlaceholderMenu => !ReadOnly && PlaceholderTags is { Count: > 0 };
+
     /// <summary>A new value (the dialog reopening on another row) re-seeds, rather than leaving the
     /// previous row's prose on screen.</summary>
     protected override void OnParametersSet()
@@ -112,6 +197,12 @@
             _seeded = false;
             _seedAttempts = 0;
         }
+
+        // Stable from the first render pass on, so the root never changes id mid-flight: a pinned id wins,
+        // and a tag-less host keeps no id at all.
+        _rootElementId = Id ?? (HasPlaceholderMenu
+            ? _generatedId ??= $"rich-instruction-editor-{Guid.NewGuid():N}"
+            : null);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -173,7 +264,7 @@
         try
         {
             _seeded = true; // cleared in the catch so the next render pass may retry
-            await _editor.LoadHTMLContent(Value); // G6: a string seed, so no MarkupString is needed.
+            await _editor.LoadHTMLContent(Value); // G6: a string seed, so no markup injection is needed.
         }
         catch (JSException ex)
         {
@@ -211,20 +302,91 @@
         }
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>
+    /// Inserts a placeholder token at the editor's current caret (B2), falling back in JS to the end of
+    /// the body when the editor has no selection.
+    /// <para>The toolbar menu's items call THIS. A no-op when the editor is unavailable (assets never
+    /// loaded, or the module already released) or the host offers no tags.</para>
+    /// </summary>
+    /// <returns><c>true</c> only when the token was actually inserted — so a caller can tell a real body
+    /// change (worth a preview) from a no-op.</returns>
+    public async Task<bool> InsertPlaceholderAsync(string token)
     {
-        if (_assetsModule is null)
+        if (_assetsModule is not { } module
+            || _rootElementId is null
+            || !HasPlaceholderMenu
+            || string.IsNullOrEmpty(token))
         {
-            return;
+            return false;
         }
 
         try
         {
-            await _assetsModule.DisposeAsync();
+            return await module.InvokeAsync<bool>("insertPlaceholderAtSelection", _rootElementId, token);
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone; nothing left to insert into.
+        }
+        catch (ObjectDisposedException)
+        {
+            // The module was released by DisposeAsync — a menu click racing the page's teardown.
+            Logger.LogDebug("The instruction editor's script module was already released; the token was not inserted.");
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Inserting the placeholder tag into the instruction editor failed.");
+        }
+
+        return false;
+    }
+
+    /// <summary>The menu's click handler. <see cref="FluentMenu.OnClick"/> is MENU-scoped, so a group
+    /// parent ("Assignment", "Recipients") and a parent whose reported text carries its whole nested
+    /// sub-menu both arrive here — hence <see cref="PlaceholderTagMenu.TokenFromText"/>, which admits
+    /// nothing but the strict token shape and so can never let a label land in a customer-facing
+    /// message body.</summary>
+    private async Task OnPlaceholderTagClickedAsync(MenuItemEventArgs args)
+    {
+        if (PlaceholderTagMenu.TokenFromText(args.Text) is not { } token)
+        {
+            return;
+        }
+
+        await InsertPlaceholderAsync(token);
+    }
+
+    /// <summary>
+    /// Keeps the button's <c>aria-expanded</c> true to the menu's real state — the menu opens and closes
+    /// from its own JS, so only its callback can tell us.
+    /// </summary>
+    private void OnTagMenuOpenedChanged(bool opened) => _tagMenuOpen = opened;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_assetsModule is not { } module)
+        {
+            return;
+        }
+
+        _assetsModule = null;
+
+        try
+        {
+            await module.DisposeAsync();
         }
         catch (JSDisconnectedException)
         {
             // The circuit is gone; there is nothing left to release.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already released; nothing to do.
+        }
+        catch (JSException ex)
+        {
+            // The module reference outlived its circuit or the page navigated away mid-teardown.
+            Logger.LogWarning(ex, "Releasing the instruction editor's script module failed.");
         }
     }
 }

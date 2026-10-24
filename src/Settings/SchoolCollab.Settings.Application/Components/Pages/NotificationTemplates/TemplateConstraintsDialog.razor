@@ -13,7 +13,7 @@
 <DialogShellBody>
     <ReadOnlyDialogShell Class="template-constraints-dialog">
         <ChildContent>
-            <p class="template-constraints-dialog__subject">@TemplateLabel</p>
+            <p class="template-constraints-dialog__template">@TemplateLabel</p>
 
             @if (_loading)
             {
@@ -30,7 +30,7 @@
                 @if (_lookups?.Error is not null)
                 {
                     <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-2">
-                        Constraint names are unavailable (@_lookups.Error) — the stored values are shown instead.
+                        Some constraint names are unavailable (@_lookups.Error) — those constraints show their stored values instead.
                     </FluentMessageBar>
                 }
 

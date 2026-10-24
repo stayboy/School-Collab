@@ -36,7 +36,7 @@ public class ApplicableNotificationTemplatesHandlerTests
     private GetApplicableNotificationTemplatesHandler _applicable = default!;
 
     [TestInitialize]
-    public void Setup()
+    public async Task Setup()
     {
         _tenants = new TenantProvider();
         var options = new DbContextOptionsBuilder<SettingsDbContext>()
@@ -46,8 +46,9 @@ public class ApplicableNotificationTemplatesHandlerTests
         _db = new SettingsDbContext(options, _tenants);
         var repository = new CodedValueRepository(_db);
         var auditor = new TemplateAuditRecorder(new SystemActorAccessor("test:actor", "Test Actor"));
+        var generator = await TestEntityCodeSetup.SeedAndCreateGeneratorAsync(options, _tenants);
 
-        _create = new CreateTenantNotificationTemplateHandler(_db, _tenants, auditor);
+        _create = new CreateTenantNotificationTemplateHandler(_db, _tenants, generator, auditor);
         _applicable = new GetApplicableNotificationTemplatesHandler(
             _db, repository, new CodedValueResolver(repository), _tenants);
     }
@@ -64,7 +65,7 @@ public class ApplicableNotificationTemplatesHandlerTests
         params (TemplateConstraintDimension Dimension, string Value)[] constraints) =>
         _create.HandleAsync(new CreateTenantNotificationTemplate(
             new CreateTenantNotificationTemplateRequest(
-                kind, channel, $"Subject for {kind}", "Body for {{Title}}",
+                kind, channel, $"{kind} {channel} reminder", null, $"Subject for {kind}", "Body for {{Title}}",
                 constraints.Select(c => new TemplateConstraintRequest(c.Dimension, c.Value)).ToList(),
                 "test"),
             "test"));

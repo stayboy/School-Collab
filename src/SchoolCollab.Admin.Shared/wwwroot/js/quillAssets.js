@@ -55,3 +55,51 @@ export function ensureQuillAssets() {
 
     return window.__quillAssetsPromise;
 }
+
+// ── Placeholder-tag insertion ────────────────────────────────────────────────────────────────────────
+//
+// The tag menu is anchored to a button in the editor's own Quill toolbar, so there is no pointer to
+// track and no right-click to capture: the token goes where the operator's caret already is. Every call
+// is addressed by the EDITOR ROOT element's id — the component's own root, never the wrapper's
+// `QuillToolBar`/`QuillEditor` ids, which repeat across the several editors one page can host (the
+// assignment authoring page mounts more than one).
+
+/// The Quill instance mounted inside an editor ROOT element, or null when the root is missing or Quill
+/// has not been mounted inside it yet.
+function findQuill(root) {
+    if (!root) return null;
+
+    const editorElement = root.querySelector('.ql-editor');
+    if (!editorElement) return null;
+
+    // The wrapper stores its Quill instance on the element it mounted into (`element.__quill = new
+    // Quill(element, …)`), which is an ancestor of `.ql-editor` and a descendant of this root.
+    for (let element = editorElement; element; element = element.parentElement) {
+        const candidate = element.__quill;
+        if (window.Quill && candidate instanceof window.Quill) {
+            return candidate;
+        }
+        if (element === root) break;
+    }
+
+    return null;
+}
+
+/// Inserts `text` at the editor's CURRENT selection — the caret the operator last had in the body, which
+/// Quill keeps as its saved range while the toolbar button has focus — then places the caret after the
+/// token. With no selection at all it appends at the end of the document, so the button still does
+/// something sensible in an empty body.
+/// Returns false when there was nothing to insert into (no Quill under `rootId`, or empty `text`), so the
+/// component does not treat a failed insert as a change and queue a preview of it.
+export function insertPlaceholderAtSelection(rootId, text) {
+    const quill = findQuill(document.getElementById(rootId));
+    if (!quill || !text) return false;
+
+    const selection = quill.getSelection();
+    // getLength() counts the document's trailing newline, so the last insertable index is one before it.
+    const index = selection ? selection.index : Math.max(0, quill.getLength() - 1);
+
+    quill.insertText(index, text, 'user');
+    quill.setSelection(index + text.length, 0);
+    return true;
+}

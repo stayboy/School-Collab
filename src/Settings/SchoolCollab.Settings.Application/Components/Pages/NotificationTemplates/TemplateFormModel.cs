@@ -20,6 +20,18 @@ public sealed class TemplateFormModel
     /// <summary>The preferred mode of contact (immutable once the row exists).</summary>
     public NotificationChannel Channel { get; set; } = NotificationChannel.Email;
 
+    /// <summary>
+    /// The template's own name (naming spec D1) — the operator's words for the row, and the identity every
+    /// surface reads (D3). Required: a blank one is refused here and by the domain.
+    /// </summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>One or two sentences saying what the template is for (D1); display-only metadata (D4).</summary>
+    public string? Description { get; set; }
+
+    /// <summary>The generated reference (<c>TPL07</c>), minted on create and never writable (D6).</summary>
+    public string? Code { get; set; }
+
     /// <summary>Subject line — email only; cleared for the plain-text modes by the domain.</summary>
     public string? Subject { get; set; }
 
@@ -28,9 +40,6 @@ public sealed class TemplateFormModel
 
     /// <summary>The staged constraint set (one row per dimension value).</summary>
     public List<TemplateConstraintDto> Constraints { get; } = [];
-
-    /// <summary>Optional free-text reason, copied onto the audit entry.</summary>
-    public string Reason { get; set; } = string.Empty;
 
     /// <summary>When the row was created (edit mode only).</summary>
     public DateTimeOffset? CreatedAt { get; set; }

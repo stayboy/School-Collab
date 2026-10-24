@@ -5,8 +5,10 @@ namespace SchoolCollab.Settings.Application.Components.Pages.NotificationTemplat
 
 /// <summary>
 /// The landing grid's filtering, extracted so it is testable at a pure seam (redesign spec 3.2): the
-/// grade-deep-link rule, the type / contact-mode / owner filters and the subject-and-body search all
-/// live here, once, instead of inside the page's render path.
+/// grade-deep-link rule, the type / contact-mode / owner filters and the name-and-content search all
+/// live here, once, instead of inside the page's render path. The search reads the row's NAME (its
+/// title and description, naming spec D1/D3) as well as its subject and plain body text, so an operator
+/// who knows a template by the name they gave it can find it.
 /// <para>
 /// The grade rule is the 3.11 applicability rule the old page carried: a template applies to a grade
 /// when it has <b>no</b> GradeLevel constraint, or one of them is that grade (trimmed, case-insensitive -
@@ -56,12 +58,16 @@ public static class TemplateLandingFilter
         if (search.Length > 0)
         {
             filtered = filtered.Where(r =>
-                (r.Subject?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                (r.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (r.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (r.Subject?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
                 || RichInstructionSanitizer.ToPlainText(r.Body)?.Contains(search, StringComparison.OrdinalIgnoreCase) == true);
         }
 
         return filtered.ToArray();
-    }    /// <summary>Whether the template can apply to <paramref name="gradeLevelId"/> (spec 3.11).</summary>
+    }
+
+    /// <summary>Whether the template can apply to <paramref name="gradeLevelId"/> (spec 3.11).</summary>
     public static bool AppliesToGrade(TenantNotificationTemplateDto row, Guid gradeLevelId)
     {
         var grade = gradeLevelId.ToString("D");

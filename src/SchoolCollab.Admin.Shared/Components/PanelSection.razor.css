@@ -1,46 +1,122 @@
-/* PanelSection: header text on the left, its actions on the right, and the thin rule underneath the
-   header row (see PanelSection.razor).
-   The CARD BOX lives here too (owner, 2026-10-10): when Rules moved off SectionCard it lost the
-   rounded border, because SectionCard's chrome — border + radius + surface — used to supply it. Any
-   panel wearing this component now looks like a panel, from one rule, which is the whole point of
-   sharing it.
-   NO SURFACE OF ITS OWN (owner, 2026-10-17 — round targets-panel-kebab): the hardcoded off-white
-   `background: #fafafa` is REMOVED. A literal surface fights the theme — it ignores the light/dark
-   tokens every other container resolves through — and it drew a second, differently-coloured box
-   inside a compartment that already draws one. The border and the radius stay: they ARE the box. */
+/* PanelSection — the ONLY framed thing on a create / edit surface
+   (documents/solution/panel-layout-pattern.md §3). One box language: this rule is the box, and no
+   other container on those surfaces may define a second frame.
+
+   TOKEN COLOURS ONLY. A literal ignores light/dark; the off-white surface literal produced an
+   off-white-on-off-white defect removed on 2026-10-17, and the `#e1e1e1` border literal survived that
+   pass and is retired here (the rule's own literal with it). */
 .panel-section {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px;
-    border: 1px solid #e1e1e1;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+    background: var(--neutral-layer-1, #ffffff);
     border-radius: 8px;
+}
+
+/* Borderless variant (owner, 2026-10-24): the MAIN region's blocks. The frame goes transparent
+   rather than absent, so the box model is identical in both variants and nothing shifts when a
+   panel changes region. The header rule above is the only separator left — that is deliberate:
+   the title block and the body are still divided, which is what the owner asked to keep. */
+.panel-section--borderless {
+    border-color: transparent;
+}
+
+/* A borderless panel is not a card, so its sticky head must not paint a rounded card corner. */
+.panel-section--borderless > .panel-section__head {
+    border-radius: 0;
+}
+
+/* The header group: the header row AND its rule, so `--sticky` can pin the two together (§6). */
+.panel-section__head {
+    display: flex;
+    flex-direction: column;
 }
 
 .panel-section__header {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    align-items: center;
     gap: 8px;
 }
 
-.panel-section__title {
+/* The chevron LEADS (§6): it sits immediately before the title, on the left. A real <button> — the
+   header row itself is NOT clickable, because a clickable row overlaps the kebab's hit area and
+   hides a target. */
+.panel-section__chevron {
     display: inline-flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 2px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--neutral-foreground-1, #242424);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.panel-section__chevron:hover {
+    background: var(--neutral-fill-rest, #f5f5f5);
+}
+
+.panel-section__chevron:focus-visible {
+    outline: 2px solid var(--neutral-stroke-focus, #0f6cbd);
+    outline-offset: 1px;
+}
+
+/* The title takes the free space so the actions land on the right edge of the same row (§4). */
+.panel-section__title {
+    flex: 1 1 auto;
+    min-width: 0;
     margin: 0;
     font-size: 1.17em;
     font-weight: 600;
 }
 
+/* The rule runs under the WHOLE header row — title AND actions — never as the title's own border. */
 .panel-section__rule {
     display: block;
     width: 100%;
-    border-bottom: 1px solid #e1e1e1;
-    margin-top: 4px;
+    margin-top: 8px;
+    border-bottom: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
 }
 
 .panel-section__actions {
     display: flex;
     align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
 }
 
+.panel-section__body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* `hidden` is how a collapsed panel hides its body now that the element is always rendered (so the
+   chevron's `aria-controls` never dangles). The UA rule alone is not enough: this file's own
+   `display: flex` above is an author rule and would beat the UA `[hidden] { display: none }`. */
+.panel-section__body[hidden] {
+    display: none;
+}
+
+/* ── Sticky header row (§6, owner 2026-10-23) ──────────────────────────────────────────────────
+   The FIRST block's header row — its title text AND its action buttons — sticks to the top of the
+   page's scroll port, which is what makes it safe for that row to own the page's primary action: the
+   actions never scroll away, so no second toolbar is needed. The row keeps the box's surface token
+   and carries its own bottom rule, so a pinned header reads as the panel's header and not as a
+   toolbar floating above it. The negative margins let the pinned surface span the panel's full width
+   instead of stopping at the padding box, so content cannot slide past its sides. */
+.panel-section--sticky > .panel-section__head {
+    position: sticky;
+    top: var(--app-bar-sticky-offset, 0px);
+    z-index: 5;
+    margin: -16px -16px 0;
+    padding: 16px 16px 0;
+    background: var(--neutral-layer-1, #ffffff);
+    border-radius: 8px 8px 0 0;
+}

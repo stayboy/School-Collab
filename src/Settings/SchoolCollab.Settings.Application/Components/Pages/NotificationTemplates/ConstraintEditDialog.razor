@@ -13,7 +13,7 @@
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
 
-        <p class="constraint-edit__subject">@Model.TemplateLabel</p>
+        <p class="constraint-edit__template">@Model.TemplateLabel</p>
 
         <p class="constraint-edit__dimension" id="constraint-edit-dimension">
             @TemplateConstraintLookups.DimensionLabel(Model.Dimension)

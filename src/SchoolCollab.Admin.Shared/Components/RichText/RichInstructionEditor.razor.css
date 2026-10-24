@@ -1,22 +1,51 @@
-/* The rich instruction editor's box. Sizing lives here (never an inline style): the wrapper renders a
-   bare contenteditable surface, which would otherwise collapse to nothing inside a dialog. */
+/* The rich instruction editor's box. Sizing lives here (never an inline height): the wrapper renders a
+   bare contenteditable surface, which would otherwise collapse to nothing inside a dialog.
+
+   The height is the caller's knob (the component's MinHeight parameter): the root emits it as
+   --rich-instruction-editor-min-height, and every rule below reads that property with 8rem — the
+   pre-parameter behaviour — as its fallback, so an untouched host is pixel-identical. */
+/* The width: the root is a block in the form row's input cell, and the wrapper inside it sizes to the
+   Quill TOOLBAR's intrinsic width unless the root says otherwise — which left a wide editor floating
+   short of its panel. `min-width: 0` keeps the cell's flex/grid track from being blown out by the
+   editor's content. */
+.rich-instruction-editor {
+    width: 100%;
+    min-width: 0;
+}
+
+/* The tag button is OUR button inside Quill's toolbar, not a Quill format (an unknown class gets no
+   Quill handler, so the FluentMenu owns the click). Quill's own toolbar rules give it the shared button
+   box; this widens it to fit the two-brace glyph it shows instead of an icon. */
+.rich-instruction-editor ::deep .rich-instruction-editor__tag-button {
+    width: auto;
+    /* A word, not a glyph (owner, 2026-10-23): the label keeps the toolbar's own font, shrunk to
+       the toolbar's 12px so it sits on the same baseline as the ql- format buttons. */
+    font-family: inherit;
+    font-size: 12px;
+    padding-inline: 6px;
+    white-space: nowrap;
+}
+
 .rich-instruction-editor ::deep .ql-toolbar,
 .rich-instruction-editor ::deep .ql-container {
     font-family: inherit;
 }
 
 .rich-instruction-editor ::deep .ql-container {
-    min-height: 8rem;
+    min-height: var(--rich-instruction-editor-min-height, 8rem);
 }
 
 .rich-instruction-editor ::deep .ql-editor {
-    min-height: 8rem;
+    min-height: var(--rich-instruction-editor-min-height, 8rem);
 }
 
-/* The placeholder shown while the Quill assets load — the same height as the editor, so the dialog does
-   not jump when the real control arrives. */
+/* The placeholder shown while the Quill assets load — the editor's height plus the 2rem the toolbar
+   occupies once it arrives (8rem + 2rem = the 10rem this box always had), so the panel does not jump
+   when the real control arrives. The stroke is v5's own token --colorNeutralStroke1 (#d1d1d1); v5 defines
+   no --neutral-* property at all, so the v4 var() here left the `border` shorthand invalid and silently
+   dropped it (the FluentTabStrip lesson, 2026-10-17). */
 .rich-instruction-editor-loading {
-    min-height: 10rem;
-    border: 1px solid var(--neutral-stroke-rest);
+    min-height: calc(var(--rich-instruction-editor-min-height, 8rem) + 2rem);
+    border: 1px solid var(--colorNeutralStroke1, #d1d1d1);
     border-radius: 4px;
 }

@@ -47,14 +47,14 @@
 
 <ErrorBoundary>
     <ChildContent>
+        @* Shell without its own action bar (§4/§6, owner 2026-10-23): this surface's page action lives
+           in its FIRST block's sticky header row — the Details panel on the form view, the summary card
+           on the overview — so no second toolbar is needed and none renders. The shell keeps the
+           breadcrumb and the page title, which is all it is for here. *@
         <AuthoringShell Crumbs="@ShellCrumbs"
                        Title="@HeadingText"
                        Badge="@ShellBadge"
-                       LeadingActions="@ShellLeadingActions"
-                       PrimaryLabel="@ShellPrimaryLabel"
-                       PrimaryDisabled="@_busy"
-                       OnPrimaryAction="OnPrimaryActionAsync"
-                       SecondaryActions="@ShellSecondaryActions">
+                       ShowActionBar="false">
 
         @if (_loading)
         {
@@ -103,23 +103,31 @@
                 @if (ShowSummary && _item is not null)
                 {
                     <section id="authoring-summary" class="authoring-summary" aria-label="Assignment summary">
-                        <div class="authoring-summary__header">
+                        @* The first block's header row carries the page action (§4/§6). On the overview it
+                           is this card, so the status-matrix primary, the kebab and the Cancel live here
+                           — sticky, exactly as they are in the Details panel on the form view. *@
+                        <div class="authoring-summary__header authoring-summary__header--sticky">
                             <div class="authoring-title-group">
                                 <h3 class="authoring-summary__title">@_item.Title</h3>
                                 <FluentBadge Appearance="@StatusAppearance(_item.Status)">@_item.Status</FluentBadge>
                             </div>
-                            @if (EffectiveMode == AssignmentAuthoringMode.Edit)
-                            {
-                                @* D3: the pencil exists ONLY while the assignment still accepts
-                                   structural edits (Draft|Scheduled). Published/Closed/Archived get
-                                   the same summary without it. *@
-                                <FluentButton Id="authoring-summary-edit"
-                                              Appearance="ButtonAppearance.Primary"
-                                              IconStart="@FluentIcons.Edit"
-                                              Title="Edit assignment details"
-                                              AriaLabel="Edit assignment details"
-                                              OnClick="EnterEditFieldsView" />
-                            }
+                            <div class="authoring-summary__actions">
+                                @PageLeadingActions
+                                @PageMenu
+                                @PagePrimary
+                                @if (EffectiveMode == AssignmentAuthoringMode.Edit)
+                                {
+                                    @* D3: the pencil exists ONLY while the assignment still accepts
+                                       structural edits (Draft|Scheduled). Published/Closed/Archived get
+                                       the same summary without it. *@
+                                    <FluentButton Id="authoring-summary-edit"
+                                                  Appearance="ButtonAppearance.Outline"
+                                                  IconStart="@FluentIcons.Edit"
+                                                  Title="Edit assignment details"
+                                                  AriaLabel="Edit assignment details"
+                                                  OnClick="EnterEditFieldsView" />
+                                }
+                            </div>
                         </div>
                         <dl class="authoring-summary__facts">
                             @foreach (var fact in SummaryFacts)
@@ -155,11 +163,36 @@
                     </section>
                 }
 
-                @* ── 1 · Basics (the always-on spine, §3/UX-12) ───────────────── *@
+                @* ── 1 · Details (the always-on spine, §3/UX-12) ───────────────── *@
                 @if (!ShowSummary)
                 {
-                <div class="authoring-layout">
-                    <section id="authoring-basics" class="authoring-compartment" aria-label="Basics">
+                @* The ONE skeleton (documents/solution/panel-layout-pattern.md §2): a MAIN region of the
+                   entity's own fields and its own content, and a RAIL region of one panel per
+                   relationship. Regions draw NOTHING — the single frame per block is the PanelSection
+                   inside them (lesson L2: the rail's old `.authoring-compartment` drew a box inside a
+                   box, one border inside another and a second surface tone). DOM order is main then
+                   rail, which is also the collapsed order (§2: the rail goes LAST — the fields are what
+                   the author came for, the relationships are enrichment).
+
+                   The container query lives on `.region-grid-host`, the page wrapper: a grid cannot
+                   query its own width, so the ancestor carries `container-type: inline-size` and the
+                   grid queries it. Collapse is therefore driven by the width this surface really has,
+                   never by a viewport magic number. *@
+                <div class="region-grid-host">
+                <div class="region-grid">
+                <div class="region-grid__main">
+                    <PanelSection Id="authoring-basics" Title="Details" StickyHeader="true" ShowBorder="false">
+                        @* The page's primary action, its kebab and the leave-the-surface controls live in
+                           the FIRST block's STICKY header row (§4/§6) — that row never scrolls away,
+                           which is exactly what lets it replace a separate action bar. Order per §6:
+                           leading (Back to summary, Cancel) · kebab · page action. *@
+                        <HeaderActions>
+                            @PageLeadingActions
+                            @PageMenu
+                            @PagePrimary
+                        </HeaderActions>
+
+                        <ChildContent>
 
                         @* D6/§3 (assignment-create-edit-redesign): Status & available from LEAD the
                            form — the lifecycle readout an author checks first. Description and
@@ -373,125 +406,60 @@
                         }
 
                         @* D14/D6: Subject + its strands & lessons row LEAD the authoring decisions
-                           (right after Title, before type/grading — D14); Basics ends with the two notes
-                           above, and the materials live in the Content & Resources block that now tops the
-                           right pane (owner, 2026-10-10). *@
-                    </section>
+                           (right after Title, before type/grading — D14); the notes above close the
+                           panel, and the materials live in the rail's Content & Resources panel. *@
+                        </ChildContent>
+                    </PanelSection>
 
-                    <section id="authoring-targets" class="authoring-compartment authoring-compartment--right">
-                        @* Round drop-primary-grade: the assignment carries no primary grade. The
-                           grade half of the audience is authored as grade TARGET rows in the builder
-                           below; the policy-scope grade is derived from them (one distinct grade ⇒
-                           that grade, otherwise the tenant default). *@
-                        @if (_gradeLevels is { Length: 0 })
-                        {
-                            <FluentMessageBar Intent="MessageBarIntent.Warning">
-                                No grade levels available. Please create grade levels in the Students module first.
-                            </FluentMessageBar>
-                        }
+                    @* ── 6 · Questions & AI — the assignment's OWN content, so it stays in the MAIN
+                       column (§5: the ownership test, not "which column looks balanced"). No chevron:
+                       the main region is never collapsible.
+                       D10 (owner, 2026-10-08) still holds: question authoring starts when a draft
+                       exists, so Create renders this block nowhere. *@
+                    @if (Mode != AssignmentAuthoringMode.Create)
+                    {
+                        @QuestionsPanel
+                    }
+                </div>
 
-                        @* UX-21 load-half, fail-closed: when an editable Edit surface could not read the
-                           persisted targets, the builder renders DISABLED WITH REASON (never live-empty) —
-                           a first add over an unknown set is what the save path would write as a full
-                           replacement. *@
-                        @if (AudienceEditorDisabledReason is not null)
-                        {
-                            <p class="authoring-reason" id="authoring-targets-reason">@AudienceEditorDisabledReason</p>
-                        }
+                <div class="region-grid__rail" id="authoring-targets">
+                    @* ── 2 · Targets & Audience — a relationship panel, so it lives in the rail, but it is
+                       NOT collapsible: an explicit owner call (2026-10-23). The rail is where
+                       collapsibility is AVAILABLE, never where it is MANDATORY (§6). *@
+                    <PanelSection Title="Targets &amp; Audience" TitleId="authoring-targets-title">
+                        <HeaderActions>
+                            @* Q87: the count chip stays in the header slot — the target count carries
+                               information, unlike the Rules card's fixed five-row readout. *@
+                            <span class="authoring-targets-count">@_targetsAndAudience.Count</span>
+                            @* Q91: the kebab is ALWAYS rendered; a disabled builder disables every item
+                               and each carries the reason (RowActionsMenu's F7 treatment). *@
+                            <RowActionsMenu UseMenuService="false"
+                                            ForceKebab="true"
+                                            Actions="@TargetActions"
+                                            AriaLabel="Add a target" />
+                        </HeaderActions>
 
-                        @* Owner, 2026-10-10: Content & Resources TOPS this pane now, above Targets &
-                           audience — moved here complete, with every part of it (header + kebab, the
-                           instructions list, the dropzone, the refusal bar) and its ids intact.
-                           D8 (revised)/AC-9: the header carries the title TEXT on the left and the kebab
-                           MENU on the right — two distinct elements, the kebab being the dropdown control,
-                           never the title. D5 (revised)/AC-10: the dropzone routes by kind — media to an
-                           instruction row, a document to a resource — and refuses, by name, only what it
-                           cannot take at all. *@
-                        @if (!IsReadOnly)
-                        {
-                            <section class="authoring-materials-section" id="authoring-materials-section">
-                                @* The header treatment is the SHARED component (owner, 2026-10-10) — the same one
-                                   the Rules card is to wear — so the thin rule under the title and the
-                                   title/actions split cannot drift between the two. *@
-                                <PanelSection Title="Content &amp; Resources" TitleId="authoring-materials-title">
-                                    <HeaderActions>
-                                        @* D2/AC-1/D12: one kebab, straight to the action — and a lone available
-                                           action would render as a plain button, the shared component's own rule. *@
-                                        <RowActionsMenu UseMenuService="false"
-                                                        ForceKebab="true"
-                                                        Actions="@MaterialActions"
-                                                        AriaLabel="Add a material" />
-                                    </HeaderActions>
+                        <ChildContent>
+                            @* Round drop-primary-grade: the assignment carries no primary grade. The
+                               grade half of the audience is authored as grade TARGET rows in this
+                               builder; the policy-scope grade is derived from them (one distinct grade
+                               ⇒ that grade, otherwise the tenant default). *@
+                            @if (_gradeLevels is { Length: 0 })
+                            {
+                                <FluentMessageBar Intent="MessageBarIntent.Warning">
+                                    No grade levels available. Please create grade levels in the Students module first.
+                                </FluentMessageBar>
+                            }
 
-                                    @* RZ9996: with a named fragment supplied, the body must be wrapped
-                                       in an explicit ChildContent. *@
-                                    <ChildContent>
+                            @* UX-21 load-half, fail-closed: when an editable Edit surface could not read
+                               the persisted targets, the builder renders DISABLED WITH REASON (never
+                               live-empty) — a first add over an unknown set is what the save path would
+                               write as a full replacement. *@
+                            @if (AudienceEditorDisabledReason is not null)
+                            {
+                                <p class="authoring-reason" id="authoring-targets-reason">@AudienceEditorDisabledReason</p>
+                            }
 
-                                @* The instructions list lives INSIDE Content & Resources, just beneath its
-                                   header text — and above the dropzone (AC-11). The same shared editor the
-                                   question dialog uses, so the two owners cannot drift; this block supplies
-                                   the add affordance, so its own button is suppressed here (grill Q1). *@
-                                <InstructionEditorList @ref="_instructionList"
-                                                       Id="authoring-instruction-items"
-                                                       Rows="_model.InstructionItems"
-                                                       ShowAddButton="false"
-                                                       EditingMode="@RowEditingMode.Dialog"
-                                                       EditRowRequested="OnMaterialEditRequestedAsync"
-                                                       StageMediaAsync="StageInstructionMediaAsync"
-                                                       LoadInstructionMediaAsync="LoadInstructionMediaAsync"
-                                                       Changed="OnModelChanged"
-                                                       RecorderStateChanged="OnMaterialRecorderStateChangedAsync"
-                                                       ReadOnly="@IsReadOnly" />
-
-                                @* Owner rework (2026-10-12): the dropzone (and its refusal bar) hide while
-                                   the recorder takeover shows in the list above — a live capture surface
-                                   must not compete with a drop target (RecorderStateChanged signal). *@
-                                @if (!_materialRecorderOpen)
-                                {
-                                    <div class="authoring-materials-dropzone" id="authoring-materials-dropzone">
-                                        <FluentInputFile Mode="InputFileMode.Stream"
-                                                         MaximumFileCount="1"
-                                                         MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
-                                                         Accept="@AttachmentUploadPolicy.AcceptExtensions"
-                                                         OnCompleted="@OnMaterialDroppedAsync"
-                                                         DragDropZoneVisible="true">
-                                            Drop files here — images, audio or video become materials; PDFs and documents become references
-                                        </FluentInputFile>
-                                    </div>
-                                    @if (_materialRefusal is not null)
-                                    {
-                                        @* D5: the refusal is surfaced, named and actionable — a
-                                           FluentMessageBar, the shape every other error here takes. *@
-                                        <FluentMessageBar Id="authoring-materials-refusal"
-                                                          Intent="MessageBarIntent.Error">@_materialRefusal</FluentMessageBar>
-                                    }
-                                }
-                                    </ChildContent>
-                                </PanelSection>
-                            </section>
-                        }
-
-                        @* Owner, 2026-10-17 (grill Q86–Q93): the builder wears the SHARED PanelSection —
-                           the same header treatment Content & Resources and Rules wear — and it enters
-                           targets through its header KEBAB, one item per category (Q88: the category
-                           choice left the dialog for the menu item the author just clicked), with NO Add
-                           button. PanelSection is a dumb container, so the entry list renders INLINE
-                           inside an explicit ChildContent (RZ9996). The count chip stays in the header
-                           slot (Q87) — the target count carries information, unlike the Rules card's
-                           fixed five-row readout. Q91: the kebab is ALWAYS rendered; a disabled builder
-                           disables every item and each carries the reason (RowActionsMenu's F7
-                           treatment). P1-3/UX-21 is unchanged: the reason paragraph stays visible above
-                           (never a tooltip) and the save path still refuses to write. *@
-                        <PanelSection Title="Targets &amp; Audience" TitleId="authoring-targets-title">
-                            <HeaderActions>
-                                <span class="authoring-targets-count">@_targetsAndAudience.Count</span>
-                                <RowActionsMenu UseMenuService="false"
-                                                ForceKebab="true"
-                                                Actions="@TargetActions"
-                                                AriaLabel="Add a target" />
-                            </HeaderActions>
-
-                            <ChildContent>
                                 @if (_targetsAndAudience.Count == 0)
                                 {
                                     @* Q88: the empty-state copy must not point at a button that no
@@ -521,24 +489,121 @@
                                         </div>
                                     }
                                 }
-                            </ChildContent>
-                        </PanelSection>
+                            @* TGT-16 / D-4: live, server-resolved, advisory preview (debounced; never blocks
+                               save). F10: a degraded read answers all-zero counts, so only the unavailable
+                               reason renders then — counts that merely LOOK trustworthy are never shown beside
+                               it. F11: the preview resolves on an editable surface only, so a read-only View
+                               renders PreviewAuthorOnlyNote (via PreviewText) rather than a "Preview pending…"
+                               that can never settle. *@
+                            @if (!IsReadOnly && _previewDegraded)
+                            {
+                                <p class="authoring-reason" id="authoring-audience-preview-note">@PreviewUnavailableReason</p>
+                            }
+                            else
+                            {
+                                <p class="authoring-hint" id="authoring-audience-preview">@PreviewText</p>
+                            }
+                        </ChildContent>
+                    </PanelSection>
 
-                        @* TGT-16 / D-4: live, server-resolved, advisory preview (debounced; never blocks
-                           save). F10: a degraded read answers all-zero counts, so only the unavailable
-                           reason renders then — counts that merely LOOK trustworthy are never shown beside
-                           it. F11: the preview resolves on an editable surface only, so a read-only View
-                           renders PreviewAuthorOnlyNote (via PreviewText) rather than a "Preview pending…"
-                           that can never settle. *@
-                        @if (!IsReadOnly && _previewDegraded)
-                        {
-                            <p class="authoring-reason" id="authoring-audience-preview-note">@PreviewUnavailableReason</p>
-                        }
-                        else
-                        {
-                            <p class="authoring-hint" id="authoring-audience-preview">@PreviewText</p>
-                        }
+                    @* ── 4 · Content & Resources — the MERGED block (owner, 2026-10-23). One panel, one
+                       title, one box. The instruction materials (list + dropzone), the attachments and
+                       the reference links all present OTHER rows, so they are ONE relationship (§5).
+                       The read-only and disabled-with-reason branches are this panel's body STATES,
+                       never a second region — the deleted `#authoring-content` section was that
+                       second region. ResourcesSection renders its BODY only: its old
+                       `.cq-header`/`.cq-count` chrome would be a second heading inside this panel.
+                       Collapsible: YES per the consent table (§6) — a long rail is an accordion. *@
+                    <PanelSection Id="authoring-materials-section"
+                                  Title="Content &amp; Resources"
+                                  TitleId="authoring-materials-title"
+                                  Collapsible="true">
+                        <HeaderActions>
+                            <span class="authoring-materials-count" id="authoring-materials-count">@MaterialsCount</span>
+                            @if (!IsReadOnly && ChildrenEditorDisabledReason is null)
+                            {
+                                @* D2/AC-1/D12: one kebab, straight to the action — and a lone available
+                                   action would render as a plain button, the shared component's own rule.
+                                   D8 (revised)/AC-9: the panel supplies the title TEXT and this supplies
+                                   the MENU — two distinct elements, never the title itself. *@
+                                <RowActionsMenu UseMenuService="false"
+                                                ForceKebab="true"
+                                                Actions="@MaterialActions"
+                                                AriaLabel="Add a material" />
+                            }
+                        </HeaderActions>
 
+                        <ChildContent>
+                            @if (IsReadOnly)
+                            {
+                                <p class="authoring-hint" id="authoring-content-readonly">
+                                    Attachments and URL resources are managed on the assignment's edit surface.
+                                </p>
+                            }
+                            else if (ChildrenEditorDisabledReason is not null)
+                            {
+                                @* P1 fail-closed: no live-empty editor, so an add can never replace the
+                                   persisted set (the update handler full-replaces a non-null collection). *@
+                                <p class="authoring-reason" id="authoring-content-reason">@ChildrenEditorDisabledReason</p>
+                            }
+                            else
+                            {
+                                @* AC-11: the instructions list sits just beneath the panel's header text
+                                   and above the dropzone. The same shared editor the question dialog uses,
+                                   so the two owners cannot drift; this block supplies the add
+                                   affordance, so its own button is suppressed here (grill Q1).
+                                   D5 (revised)/AC-10: the dropzone routes by kind — media to an
+                                   instruction row, a document to a resource — and refuses, by name,
+                                   only what it cannot take at all. *@
+                                <InstructionEditorList @ref="_instructionList"
+                                                       Id="authoring-instruction-items"
+                                                       Rows="_model.InstructionItems"
+                                                       ShowAddButton="false"
+                                                       EditingMode="@RowEditingMode.Dialog"
+                                                       EditRowRequested="OnMaterialEditRequestedAsync"
+                                                       StageMediaAsync="StageInstructionMediaAsync"
+                                                       LoadInstructionMediaAsync="LoadInstructionMediaAsync"
+                                                       Changed="OnModelChanged"
+                                                       RecorderStateChanged="OnMaterialRecorderStateChangedAsync"
+                                                       ReadOnly="@IsReadOnly" />
+
+                                @* Owner rework (2026-10-12): the dropzone (and its refusal bar) hide
+                                   while the recorder takeover shows in the list above — a live
+                                   capture surface must not compete with a drop target. *@
+                                @if (!_materialRecorderOpen)
+                                {
+                                    <div class="authoring-materials-dropzone" id="authoring-materials-dropzone">
+                                        <FluentInputFile Mode="InputFileMode.Stream"
+                                                         MaximumFileCount="1"
+                                                         MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
+                                                         Accept="@AttachmentUploadPolicy.AcceptExtensions"
+                                                         OnCompleted="@OnMaterialDroppedAsync"
+                                                         DragDropZoneVisible="true">
+                                            Drop files here — images, audio or video become materials; PDFs and documents become references
+                                        </FluentInputFile>
+                                    </div>
+                                    @if (_materialRefusal is not null)
+                                    {
+                                        @* D5: the refusal is surfaced, named and actionable — the
+                                           shape every other error here takes. *@
+                                        <FluentMessageBar Id="authoring-materials-refusal"
+                                                          Intent="MessageBarIntent.Error">@_materialRefusal</FluentMessageBar>
+                                    }
+                                }
+
+                                @* CR-1/D3: the attachments and reference links ride the SAME panel —
+                                   the body-only ResourcesSection supplies their rows, its own error bars;
+                                   the panel above supplies the single title.
+                                   D10 is unchanged by the merge: the RESOURCES half still starts at
+                                   draft-edit time (a Create draft has nothing persisted to attach to),
+                                   while the instruction materials above it render on Create as before. *@
+                                @if (Mode != AssignmentAuthoringMode.Create)
+                                {
+                                    <ResourcesSection Model="_model" Changed="OnModelChanged" AssignmentId="_item?.Id" SuppressUploadTile="@_materialRecorderOpen" />
+                                }
+                            }
+                        </ChildContent>
+                    </PanelSection>
                         @* ── 3 · Rules (D1/D2: policy-derived readouts only) ────────────
                            Round authoring-compact-fields (OD1/OD2): the five policy readouts render as five
                            rows inside this panel, stacked directly beneath the Targets & Audience panel, inside this same
@@ -547,13 +612,16 @@
                            component, no truncation. #authoring-rules stays on the panel's container so the
                            readout rows keep their long-standing element ids (D12 removed the
                            jump-nav that used to link here). *@
-                        <div id="authoring-rules" class="authoring-rules-card">
-                            @* Owner, 2026-10-10: the Rules card wears the SHARED PanelSection — the same header
-                               treatment Content & Resources uses — so the two panels cannot drift. SectionCard's
-                               chrome retires with it: its title, its count chip (PanelSection has no count slot)
-                               and its Add (already off). The readout rows keep their long-standing ids. *@
-                            <PanelSection Title="Rules" TitleId="authoring-rules-title">
-                                <ChildContent>
+                    @* ── 5 · Rules (D1/D2: policy-derived readouts only) ────────────
+                       Round authoring-compact-fields (OD1/OD2): the five policy readouts render as five
+                       rows inside ONE panel in the rail, below Content & Resources.
+                       OD2: all five stay rows and each row's chrome wraps — no compact row component,
+                       no truncation. #authoring-rules rides the panel itself, so the readout rows keep
+                       their long-standing element ids (D12 removed the jump-nav that used to link here).
+                       Collapsible: YES per the consent table (§6). *@
+                    <PanelSection Id="authoring-rules" Title="Rules" TitleId="authoring-rules-title" Collapsible="true">
+                        <ChildContent>
+
                                     @foreach (var readout in PolicyReadouts)
                                     {
                                     @* UX-13 + D13: a policy-derived value is the resolved read-only text — plus,
@@ -581,132 +649,29 @@
                                         }
                                     </div>
                                     }
-                                </ChildContent>
-                            </PanelSection>
-
-                            @* D11 + D13: no explanatory hint paragraph — the info lives in the padlock
-                               tooltip on the header and on every subitem. *@
-                        </div>
-                    </section>
+                                    </ChildContent>
+                    </PanelSection>
+                </div>
+                </div>
                 </div>
                 }
 
-                @* ── Row 2 · Content & Resources / Questions & AI ────────────────
-                   Round content-questions-modern-ui (spec §4, decisions D1/D9): the two
-                   compartments are composed as ONE row mirroring the reference project page —
-                   Questions & AI in the main column, Content & Resources in the rail. Grid
-                   AREAS do the placing; DOM order stays content → questions so the compartment
-                   order assertion is untouched (D12 removed the jump-nav that once mirrored it).
-                   assignment-create-edit-redesign: on the SUMMARY view the same wrapper goes
-                   single-column (authoring-layout--summary) and drops Content & Resources (D2),
-                   then carries Questions & AI first and the Targets accordion directly below it —
-                   one Questions section in the DOM, rendered identically in both views.
-                   D10 (extended by the owner 2026-10-08): Create renders NEITHER section —
-                   Content & Resources and Questions & AI both live on the draft-edit surface —
-                   so the whole row-2 wrapper is skipped there; Create ends after the
-                   Instructions compartment. *@
-                @if (Mode != AssignmentAuthoringMode.Create)
-                {
-                <div class="authoring-layout authoring-layout--cq @(ShowSummary ? "authoring-layout--summary" : null)">
-                    @if (!ShowSummary)
-                    {
-                    @* ── 5 · Content & Resources (always active, UX-19) ───────────── *@
-                    <section id="authoring-content" class="authoring-compartment authoring-compartment--cq">
-                        @if (IsReadOnly)
-                        {
-                            <div class="cq-header">
-                                <h3 class="authoring-compartment-title">Content &amp; Resources</h3>
-                            </div>
-                            <p class="authoring-hint">
-                                Attachments and URL resources are managed on the assignment's edit surface.
-                            </p>
-                        }
-                        else if (ChildrenEditorDisabledReason is not null)
-                        {
-                            <div class="cq-header">
-                                <h3 class="authoring-compartment-title">Content &amp; Resources</h3>
-                            </div>
-                            @* P1 fail-closed: no live-empty editor, so an add can never replace the
-                               persisted set (the update handler full-replaces a non-null collection). *@
-                            <p class="authoring-reason" id="authoring-content-reason">@ChildrenEditorDisabledReason</p>
-                        }
-                        else
-                        {
-                            @* CR-1/D3: on the live surface the section owns its card header
-                               (title + count + the + that reveals the link input), so the page
-                               renders no duplicate heading here — X-1 still holds because the
-                               h3 is a descendant of #authoring-content. *@
-                            <ResourcesSection Model="_model" Changed="OnModelChanged" AssignmentId="_item?.Id" SuppressUploadTile="@_materialRecorderOpen" />
-                        }
-                    </section>
-                    }
 
-                    @* ── 6 · Questions & AI (UX-19: disabled-with-reason, never hidden) ─────
-                       D10 (assignment-create-edit-redesign, verification round 2026-10-08):
-                       Create renders NO Questions & AI — "move questions and AI to draft edit
-                       when assignment is created" means question authoring/generation starts
-                       only once a draft exists, so the section (and the kebab's
-                       #authoring-questions anchor) exist on Edit/summary surfaces only. *@
-                    @if (Mode != AssignmentAuthoringMode.Create)
-                    {
-                    <section id="authoring-questions" class="authoring-compartment authoring-compartment--cq">
-                        <div class="cq-header">
-                            <h3 class="authoring-compartment-title">Questions &amp; AI</h3>
-                        </div>
-                        @if (IsReadOnly)
-                        {
-                            <p class="authoring-hint">
-                                Questions are managed on the assignment's edit surface.
-                            </p>
-                        }
-                        else if (ChildrenEditorDisabledReason is not null)
-                        {
-                            <p class="authoring-reason" id="authoring-questions-reason">@ChildrenEditorDisabledReason</p>
-                        }
-                        else if (!GateEnabled)
-                        {
-                            <p class="authoring-reason" id="authoring-questions-reason">@QuestionGenerationGate.DisabledHint</p>
-                            <QuestionGenerationSection Model="_model"
-                                                       GateEnabled="false"
-                                                       TopicId="@TopicId"
-                                                       TopicName="@_selectedSubject?.Label"
-                                                       TargetGradeLevels="@TargetGradeLevels"
-                                                       ContextStrandNames="@ContextStrandNames"
-                                                       ContextLessonNames="@ContextLessonNames"
-                                                       PromptLocked="_aiPromptLocked"
-                                                       AssignmentId="_item?.Id"
-                                                       OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" LoadInstructionMediaAsync="LoadInstructionMediaAsync" />
-                        }
-                        else
-                        {
-                            <QuestionGenerationSection Model="_model"
-                                                       GateEnabled="true"
-                                                       TopicId="@TopicId"
-                                                       TopicName="@_selectedSubject?.Label"
-                                                       TargetGradeLevels="@TargetGradeLevels"
-                                                       ContextStrandNames="@ContextStrandNames"
-                                                       ContextLessonNames="@ContextLessonNames"
-                                                       PromptLocked="_aiPromptLocked"
-                                                       AssignmentId="_item?.Id"
-                                                       OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" LoadInstructionMediaAsync="LoadInstructionMediaAsync" />
-                            @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
-                            {
-                                <QuestionsDraftSection AssignmentId="_item.Id"
-                                                       Model="_model"
-                                                       GateEnabled="true"
-                                                       PromptLocked="_aiPromptLocked"
-                                                       TopicId="@TopicId"
-                                                       TopicName="@_selectedSubject?.Label"
-                                                       TargetGradeLevels="@TargetGradeLevels"
-                                                       ContextStrandNames="@ContextStrandNames"
-                                                       ContextLessonNames="@ContextLessonNames"
-                                                       OnConfirmed="ReloadAsync" />
-                            }
-                        }
-                    </section>
-                    }
+                @* ── The summary view's own row — one column ───────────────────────
+                   The form view no longer has a second row at all: it is ONE region grid — main
+                   column Details + Questions & AI, rail Targets & Audience / Content & Resources /
+                   Rules — because the two grids it used to stack duplicated one track definition
+                   and disagreed about when to collapse (lesson L5).
+                   The summary is not a create / edit FORM: it is the facts card plus the questions
+                   block and the Targets accordion, single-column, with Content & Resources dropped
+                   (D2). It therefore keeps no rail and no second column.
+                   D10 (owner, 2026-10-08): Create renders NEITHER block — both start at draft-edit
+                   time — so this whole region is skipped there. *@
+                @if (Mode != AssignmentAuthoringMode.Create && ShowSummary)
+                {
+                <div class="region-grid-host">
+                <div class="region-stack">
+                    @QuestionsPanel
 
                     @* ── Targets & audience accordion (D2/D3, summary only) ─────────
                        Collapsed by default under Questions & AI; the expanded body reuses the
@@ -716,7 +681,7 @@
                        it is the compartment's single title (X-1). *@
                     @if (ShowSummary && _item is not null)
                     {
-                        <section id="authoring-targets" class="authoring-compartment authoring-summary__targets">
+                        <section id="authoring-targets" class="authoring-summary__targets">
                             @if (AudienceEditorDisabledReason is not null)
                             {
                                 <p class="authoring-reason" id="authoring-targets-reason">@AudienceEditorDisabledReason</p>
@@ -778,6 +743,7 @@
                         </section>
                     }
                 </div>
+                </div>
                 }
 
                 @* ── Instructions compartment (D5/D6, assignment-create-edit-redesign) ───
@@ -800,6 +766,72 @@
 </ErrorBoundary>
 
 @code {
+    /// <summary>
+    /// Questions &amp; AI — the assignment's OWN content, so the ownership test (§5) puts it in the
+    /// MAIN region: the author writes the questions here, they are not a link to another aggregate.
+    /// One definition rendered in both views (the form's second main block, the summary's first
+    /// block) — the previous revision carried the same markup twice and the two copies were free to
+    /// drift. No chevron: the main region is never collapsible (§6).
+    /// </summary>
+    private RenderFragment QuestionsPanel => @<text>
+        <PanelSection Id="authoring-questions" Title="Questions &amp; AI" ShowBorder="false">
+            <ChildContent>
+                        @if (IsReadOnly)
+                        {
+                            <p class="authoring-hint">
+                                Questions are managed on the assignment's edit surface.
+                            </p>
+                        }
+                        else if (ChildrenEditorDisabledReason is not null)
+                        {
+                            <p class="authoring-reason" id="authoring-questions-reason">@ChildrenEditorDisabledReason</p>
+                        }
+                        else if (!GateEnabled)
+                        {
+                            <p class="authoring-reason" id="authoring-questions-reason">@QuestionGenerationGate.DisabledHint</p>
+                            <QuestionGenerationSection Model="_model"
+                                                       GateEnabled="false"
+                                                       TopicId="@TopicId"
+                                                       TopicName="@_selectedSubject?.Label"
+                                                       TargetGradeLevels="@TargetGradeLevels"
+                                                       ContextStrandNames="@ContextStrandNames"
+                                                       ContextLessonNames="@ContextLessonNames"
+                                                       PromptLocked="_aiPromptLocked"
+                                                       AssignmentId="_item?.Id"
+                                                       OnQuestionsChanged="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" LoadInstructionMediaAsync="LoadInstructionMediaAsync" />
+                        }
+                        else
+                        {
+                            <QuestionGenerationSection Model="_model"
+                                                       GateEnabled="true"
+                                                       TopicId="@TopicId"
+                                                       TopicName="@_selectedSubject?.Label"
+                                                       TargetGradeLevels="@TargetGradeLevels"
+                                                       ContextStrandNames="@ContextStrandNames"
+                                                       ContextLessonNames="@ContextLessonNames"
+                                                       PromptLocked="_aiPromptLocked"
+                                                       AssignmentId="_item?.Id"
+                                                       OnQuestionsChanged="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" LoadInstructionMediaAsync="LoadInstructionMediaAsync" />
+                            @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
+                            {
+                                <QuestionsDraftSection AssignmentId="_item.Id"
+                                                       Model="_model"
+                                                       GateEnabled="true"
+                                                       PromptLocked="_aiPromptLocked"
+                                                       TopicId="@TopicId"
+                                                       TopicName="@_selectedSubject?.Label"
+                                                       TargetGradeLevels="@TargetGradeLevels"
+                                                       ContextStrandNames="@ContextStrandNames"
+                                                       ContextLessonNames="@ContextLessonNames"
+                                                       OnConfirmed="ReloadAsync" />
+                            }
+                        }
+            </ChildContent>
+        </PanelSection>
+</text>;
+
     /// <summary>UX-13 + D13 (owner, 2026-10-08): the note that a policy-derived value is inherited
     /// and NOT overridable here — carried by the padlock tooltip on the Rules card's header and on
     /// each LOCKED readout (see <see cref="PolicyReadouts"/>). Declared once so the markup, the spec
@@ -1366,10 +1398,12 @@
     private string CurrentCrumb =>
         EffectiveMode == AssignmentAuthoringMode.Edit ? "Edit" : "Overview";
 
-    // ── Shell slots (ADR adr-authoring-surface-pattern, decision 1) ──────────────
-    // The chrome that used to be authored here now lives in the shared AuthoringShell; this page
-    // supplies only the trail, the status badge, the summary-back control, the primary label and the
-    // secondary kebab, so the ids the suite pins stay exactly where they were.
+    // ── Shell slots and the page's own header actions ──────────────────────────
+    // The shared AuthoringShell still supplies the trail and the page title. Its sticky ACTION BAR is
+    // off on this surface (docs/solution/panel-layout-pattern.md §4/§6): the page action belongs to
+    // the FIRST block's header row, which is sticky, so no second toolbar is needed. The controls are
+    // composed here and rendered into that row — the Details panel on the form view, the summary
+    // card's header on the overview — so the ids the suite pins stay exactly where they were.
 
     /// <summary>D8: `Assignments › … › current`, degrading to `Assignments › …` while loading.</summary>
     private IReadOnlyList<AuthoringCrumb> ShellCrumbs =>
@@ -1394,16 +1428,35 @@
             <FluentBadge Appearance="@StatusAppearance(_item.Status)">@_item.Status</FluentBadge>
         }</text>;
 
-    private RenderFragment ShellLeadingActions => @<text>@if (ShellShowsSummaryBack)
+    /// <summary>
+    /// The header row's LEADING cluster (§6 order: leading · kebab · page action): Back to summary
+    /// while the edit-fields view is showing, then <c>Cancel</c>.
+    /// <para>
+    /// <c>Cancel</c> is the surface's leave-the-draft control (owner, 2026-10-23). It does NOT replace
+    /// <c>Back to summary</c> — different verbs: one leaves the page, the other changes which view of
+    /// the SAME draft is showing — so both coexist. It navigates through the ordinary
+    /// <see cref="NavigationManager"/>, which is exactly what makes the existing UX-7 unsaved-changes
+    /// guard run (<see cref="OnLocationChangingAsync"/> is registered on that same navigator): a dirty
+    /// form asks "discard?" before it leaves, and a non-discard answer cancels the navigation. No second
+    /// guard is introduced.
+    /// </para>
+    /// </summary>
+    private RenderFragment PageLeadingActions => @<text>@if (ShellShowsSummaryBack)
         {
             <FluentButton Id="authoring-summary-back"
                           Appearance="ButtonAppearance.Outline"
                           IconStart="@FluentIcons.ArrowLeft"
                           Disabled="@_busy"
                           OnClick="ExitEditFieldsView">Back to summary</FluentButton>
-        }</text>;
+        }
+        <FluentButton Id="authoring-cancel"
+                      Appearance="ButtonAppearance.Outline"
+                      Disabled="@_busy"
+                      OnClick="BackToList">Cancel</FluentButton></text>;
 
-    private RenderFragment ShellSecondaryActions => @<text>@if (SecondaryActions.Count > 0)
+    /// <summary>The header row's kebab — this panel's own menu, right of the leading cluster and left of
+    /// the page action (§6).</summary>
+    private RenderFragment PageMenu => @<text>@if (SecondaryActions.Count > 0)
         {
             @* UseMenuService="false" keeps the kebab items in the rendered DOM (the
                Index.razor landing-grid precedent) — the module registers no FluentMenuProvider. *@
@@ -1412,6 +1465,21 @@
                             Actions="@SecondaryActions"
                             AriaLabel="More assignment actions" />
         }</text>;
+
+    /// <summary>The header row's page action, last on the row (§6). It keeps the id the shell used to
+    /// emit, so every existing id-based assertion still addresses the same button.</summary>
+    private RenderFragment PagePrimary => @<text>@if (ShellPrimaryLabel is { } label)
+        {
+            <FluentButton Id="authoring-primary-action"
+                          Appearance="ButtonAppearance.Primary"
+                          Disabled="@_busy"
+                          OnClick="OnPrimaryActionAsync">@label</FluentButton>
+        }</text>;
+
+    /// <summary>The Content &amp; Resources panel's header count: the attachments plus the reference links,
+    /// the number the old <c>.cq-count</c> chip carried inside the section's own header. The panel owns the
+    /// header now, so the count is supplied from here.</summary>
+    private int MaterialsCount => _model.Attachments.Count + _model.ResourceUrls.Count;
 
     /// <summary>D11: the feedback-mode narrative — now the GRADING FORMAT cell's (i) help icon
     /// (owner 2026-10-11, split from the row label).</summary>

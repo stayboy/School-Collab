@@ -9,6 +9,13 @@
 > precedence) and §5 (API surface). Data model, renderer, tag vocabulary, constraints semantics and
 > audit remain governed by `assignment-notification-templates.md` except where this file says
 > otherwise. Execution mode: **Full four-agent round (Tier 3, attended)**, three workstreams — §9.
+>
+> **Layout & chrome (superseded 2026-10-23 in part).** The editor surface's chrome — the panel box,
+> the header order, the page action's placement and the rail membership (Constraints · Preview) — now
+> follows **`documents/solution/panel-layout-pattern.md`**, the single source of truth for create /
+> edit surfaces. This spec keeps the landing grid, the ownership model, the constraints semantics and
+> the audit contract; the editor's box/border/padding, sticky header and collapsible rail panels are
+> the pattern doc's, not restated here.
 
 ## 1. Findings (substrate inventory, 2026-10-20)
 
@@ -41,7 +48,7 @@
 | Q7 | **Constraint add = the Constraints panel's header kebab**, one item per dimension ("Add grade levels", "Add streams", "Add activity groups", "Add subjects", "Add assignment types"). Each opens a dialog **preset to that dimension** where several values of that one dimension can be picked; each pick becomes its own constraint row, deduped by `(dimension, value)`, rendered as a chip. | as recommended |
 | Q8 | **Viewing constraints uses one shared read-only dialog** (not a chip click — `Chip` in badge mode has no click handler): `TemplateConstraintsDialog` opens from the panel kebab's "View all constraints" **and** the grid's "N constraints" link. Chips stay inline and dismissible. | as recommended |
 | Q9 | **Constraints are staged and saved once**: the dialog/chips mutate only the draft; Save persists subject + body + the whole set in one `PUT`, one optional reason, one `TemplateAuditEntry`. Reset stays a separate audited action. | as recommended |
-| Q10 | **Rail order**: inside the right rail, **Constraints above Preview**; the left column is a plain titled "Message" section (not a `PanelSection`) carrying the dropdowns, subject, body editor and tag chips. | as recommended |
+| Q10 | **Rail order**: inside the right rail, **Constraints above Preview**; the left column is a plain titled "Message" section ~~(not a `PanelSection`)~~ carrying the dropdowns, subject, body editor and tag chips. **Superseded 2026-10-23:** the left column is now a `PanelSection` too, because an unbounded form beside two bounded panels read as unfinished — see `notification-template-naming-and-editor-surface.md` D10. | as recommended, amended 2026-10-23 |
 | Q11 | **One shared `TemplateEditor`** hosts Create and Detail (`Mode` = Create \| Edit, `TemplateFormModel` draft); `Index`/`Create`/`Detail` are thin route hosts. | as recommended |
 | Q12 | The **grade-detail deep link survives**: `?grade=<id>` filters the landing rows and is forwarded to Create, which prefills a `GradeLevel` constraint (spec §3.11's one-click promise). | as recommended |
 | Q13 | **Add a by-id read**: `GET …/notification-templates/{id:guid}` → DTO \| 404, plus `NotificationTemplateApiClient.GetByIdAsync(Guid)`. | as recommended |
@@ -89,14 +96,15 @@ contract — no `OnCreate` dialog), `RowActions`, `RowActionsAriaLabel="Template
 | Type | `<NotificationTemplateKindBanner Kind="context.Kind" />` |
 | Owner | `context.TenantId is null` → `<FluentBadge Color="BadgeColor.Informational">System</FluentBadge>`; else `context.OwnerName` |
 | Contact mode | `Email` / `SMS` / `WhatsApp` (`Channel` label map; SMS keeps its existing casing) |
-| Template | `FluentLink` → `/notification-templates/{id}`; label = `Subject` when the mode is Email and it is non-empty, else the plain-text body excerpt (`RichInstructionSanitizer.ToPlainText`, 80 chars + ellipsis) |
+| Template | `FluentLink` → `/notification-templates/{id}`; label = the template's **`Title`** (2026-10-23 — the subject/body-excerpt derivation this row originally specified is retired by `notification-template-naming-and-editor-surface.md` D3; `Subject` is content, not identity), with the optional `Description` as a muted second line |
+| Code | narrow sortable column showing the generated `Code` (`TPL07`), or an em dash for a pre-upgrade row whose code was never minted (same spec, D6/D7) |
 | Constraints | `Constraints.Count == 0` → `<FluentBadge Color="BadgeColor.Success">Tenant default</FluentBadge>` (label `System default` on a system row); else a `FluentLink` labelled `N constraint`/`N constraints` (singular at 1) that opens `TemplateConstraintsDialog` for that row |
 | Updated | `UpdatedAt.ToLocalTime()` formatted `yyyy-MM-dd HH:mm` |
 
 **Toolbar filters** (`<ToolbarFilters>`, `DropdownComponent` wrappers, never raw selects):
 All types / Publish / Reminder / Completion / Overdue; All modes / Email / SMS / WhatsApp; All owners /
-System / This tenant. Search is client-side over subject + plain-text body (the `ConfigFlags/Index`
-posture). A `?grade=` arrival renders a context bar naming the filter and keeps every row reachable that
+System / This tenant. Search is client-side over **`Title` + `Description` + subject + plain-text body** (the title and description are the identity fields since 2026-10-23 — a search box that could not find a template by its own name was the gap `notification-template-naming-and-editor-surface.md` closed; `ConfigFlags/Index`
+posture otherwise unchanged). A `?grade=` arrival renders a context bar naming the filter and keeps every row reachable that
 `AppliesToGrade` allows (the existing rule, moved into `NotificationTemplateScopeRules`). The bar is a
 `LandingPage` `ContextBar` fragment rendered above the grid *inside* the wrapper — not page markup above
 it — so the wrapper keeps ownership of its chrome and the bar is assertable in bUnit
@@ -109,7 +117,7 @@ it — so the wrapper keeps ownership of its chrome and the bar is assertable in
 | Open | always | `RowAction.Navigate` → `/notification-templates/{id}` |
 | Adopt to this tenant | row is system **and** the session has a real tenant | confirm → `POST …/{id}/adopt` → navigate to the returned new row |
 | Publish portal-wide… | row is tenant-owned **and** the session is in system scope | confirm → `POST …/{id}/promote` → navigate to the returned system row |
-| Reset to built-in default… | row is writable in the current scope | **not** flagged `Destructive` (the kebab would then confirm twice) + the new audited `TemplateResetReasonDialog` — the reason is required and is the confirmation → `DELETE …/{id}?reason=` → reload |
+| Reset to built-in default… | row is writable in the current scope | **not** flagged `Destructive` (the kebab would then confirm twice) + the shared audited `ReasonDialog` (**amended 2026-10-23**: the single-purpose `TemplateResetReasonDialog` named here is retired; `notification-template-naming-and-editor-surface.md` D11 generalised it so reset and edit-save share one dialog) — the reason is required and is the confirmation → `DELETE …/{id}?reason=` → reload |
 
 ### 3.3 Template editor layout (Detail and Create share it)
 
@@ -136,9 +144,9 @@ that shell, the layout mirrors `.authoring-layout--cq` (`AssignmentAuthoring.raz
 
 | Region | Content |
 |---|---|
-| Left — `#template-editor-message` | A plain titled `<section>` ("Message") — **not** a `PanelSection`: Type dropdown + Preferred mode of contact dropdown (`FormRow` + `DropdownForEnum`/`DropdownComponent`, W9 width), subject (`FluentTextInput`, email only), body (`RichInstructionEditor` for Email; `FluentTextArea` + the existing 140/160-char guidance for SMS and WhatsApp), tag chips (click-to-insert, unchanged set) |
+| Left — `#template-editor-message` | ~~A plain titled `<section>` ("Message") — **not** a `PanelSection`~~ **A `PanelSection` titled "Message" since 2026-10-23** (`notification-template-naming-and-editor-surface.md` D10): Title + Description rows, then one **Template Type** `FormRow` holding the kind and preferred-mode-of-contact dropdowns inline, subject (`FluentTextInput`, fill width, email only), body (`RichInstructionEditor` for Email, sized to fill the panel; `FluentTextArea` + the existing 140/160-char guidance for SMS and WhatsApp), tag chips (click-to-insert, unchanged set) |
 | Right rail — `#template-editor-rail` | **`PanelSection` "Constraints"** (kebab + chips + conflict warning), then **`PanelSection` "Preview"** (exact render path, Refresh, degraded note) |
-| Below the grid (full width) | Audit trail section — a plain `<section>` with its own heading and `FluentDataGrid` (**not** a `PanelSection`: exactly two exist on this surface) |
+| Below the grid (full width) | Audit trail section — a plain `<section>` with its own heading and `FluentDataGrid` (**not** a `PanelSection`). The "exactly two exist on this surface" rule of the original design is **retired**: the surface carries three bounded panels since 2026-10-23 (Message, Constraints, Preview), and the audit trail stays the one plain section |
 
 Test seams: `template-editor-message`, `template-editor-rail`, `template-constraints-title` / `-actions`
 (kebab), `template-preview-title`, `template-preview-body`, `template-audit-grid`. `PanelSection`'s own
@@ -155,9 +163,12 @@ chip). A system-scope session creates a **system** row (the API infers scope —
 ### 3.5 Detail page
 
 `TemplateEditor Mode="Edit"`: the two dropdowns are **disabled** with the reason text; Owner chip in the
-shell's action bar (`System` / tenant name). The sticky action bar (§3.3) carries the `Reason` input
+shell's action bar (`System` / tenant name). ~~The sticky action bar (§3.3) carries the `Reason` input
 (recorded in the audit trail), `Save` (primary) and the secondary `Reset to built-in default…`
-(destructive → confirm + reason). A tenant session opening a **system** row renders the editor read-only
+(destructive → confirm + reason).~~ **Amended 2026-10-23** (`notification-template-naming-and-editor-surface.md`
+D9/D11): the action bar carries no kind banner and no "New template" caption, and **no reason input** —
+`Save` opens the shared `ReasonDialog` (required reason; dismissing it abandons the write) and
+`Reset to built-in default…` opens the same dialog, which remains its own destructive confirmation. A tenant session opening a **system** row renders the editor read-only
 (no Save/Reset) with `Adopt to this tenant` as the primary action; the whole state is explained by **one**
 info bar rather than a reason per control, because a single cause explains both locked dropdowns
 (`documents/solution/adr-authoring-surface-pattern.md`, decision 6). A missing/foreign id renders
@@ -175,11 +186,25 @@ assignment surface's UX-7 guard protects a forty-field form — decision 5 of th
 (grade levels / topics / activity groups) + `CodedValuesApiClient` (`Streams` children); a lookup failure
 disables **adding** constraints and shows the existing warning, never drops stored values.
 
+**Each dimension loads independently** (amended 2026-10-23, defect pass). The lookups span two hosts and
+three feature postures, so one absent route costs only its own dimension:
+
+- A dimension whose lookup **failed** (an outage) disables adding **for that dimension** and is named in
+  the warning; the other dimensions keep working.
+- A dimension the host **does not serve** — 404, the `FEATURE:EnableActivityGroups` posture, since
+  `StudentEndpoints` maps `/activity-groups` only when the flag is on — is **not offered** in the menu and
+  is **not** reported as a failure. That is a feature the school does not have, not a fault.
+- `AssignmentType` is a closed set with no lookup, so no failure can reach it.
+
+The wording this replaces ("a lookup failure disables adding constraints") described one try/catch around
+all four reads; it made an optional feature being off read as every constraint name having been lost.
+
 **Interactions.**
 
 1. The Constraints `PanelSection` header carries `RowActionsMenu ForceKebab UseMenuService="false"` with one
-   item per dimension, all carrying `FluentIcons.Add` (the Targets-&-Audience precedent: the glyph names the
-   action). A disabled editor disables every item with its reason.
+   item per dimension the host **offers**, all carrying `FluentIcons.Add` (the Targets-&-Audience precedent:
+   the glyph names the action). A dimension the host does not serve is absent rather than empty; one that
+   failed is present and disabled with its reason. A disabled editor disables every item with its reason.
 2. Each item opens `ConstraintEditDialog` (`DialogShellBase<ConstraintEditModel, ConstraintEditResult>`)
    preset to that dimension (`CategoryLocked` — the dimension selector is hidden, as `TargetsAndAudienceDialog`
    does). The operator appends values; each pick renders as a dismissible `Chip` inside the dialog; Submit
@@ -292,16 +317,19 @@ library — no literal hex in the css (the `PanelSection` surface lesson).
 | settings-db | `(TenantId, Kind, Channel)` filtered index unchanged (a NULL-able column is valid in a Postgres index); no new index | in the same migration's model snapshot |
 | settings-db | no column for owner: it is derived (`TenantId` + the `tenants` join) | — |
 | settings-db | `TemplateAuditEntry.TenantId` already nullable | — |
+| settings-db | **`tenant_notification_templates.title` (required, 120), `.description` (500), `.code` (16)**; `title` backfilled then `NOT NULL`; unique index `(tenant_id, code)` filtered `is_deleted = false AND code IS NOT NULL` (**added 2026-10-23** by `notification-template-naming-and-editor-surface.md` D1/D6/D8) | `AddTenantNotificationTemplateTitleDescriptionAndCode` |
 
 No backfill: every existing row already carries its real tenant id and keeps it; system rows only appear
 when a system-scope session creates one. A down-migration restores `NOT NULL` and fails loudly if any
 `NULL` row exists (the correct posture — silently deleting blueprints is not acceptable).
 
 **DTO / contract changes** (mirrored in `SchoolCollab.Settings.Core.DTOs` and the Admin.Shared client):
-`TenantNotificationTemplateDto` + `TenantId`, `OwnerName`; `TemplateAuditEntryDto` + `TemplateId`;
-`ApplicableTemplateDto` + `TenantId`, `OwnerName`; new `ConstraintEditRequest`-free surface (constraints keep
-riding `TemplateConstraintRequest`). Assignments side: `PublishTemplateCandidateDto` + `IsSystem`, `OwnerName`;
-the resolver's `TenantNotificationTemplatePayload` mirror + `tenantId`.
+`TenantNotificationTemplateDto` + `TenantId`, `OwnerName`, and (**2026-10-23**) `Title`, `Description`, `Code`;
+`Create`/`UpdateTenantNotificationTemplateRequest` + `Title`, `Description`; `TemplateAuditEntryDto` + `TemplateId`;
+`ApplicableTemplateDto` + `TenantId`, `OwnerName` (still no title — a known follow-up recorded in
+`documents/solution/notification-template-naming-and-codes.md`); new `ConstraintEditRequest`-free surface
+(constraints keep riding `TemplateConstraintRequest`). Assignments side: `PublishTemplateCandidateDto` +
+`IsSystem`, `OwnerName`; the resolver's `TenantNotificationTemplatePayload` mirror + `tenantId`.
 
 ## 5. API surface
 
@@ -424,8 +452,9 @@ implementation record.
   promotion scoped to the tied row's own scope. `PublishTemplateCandidateDto` gained
   `IsSystem`/`OwnerName`, and the publish picker marks a blueprint row with its owner.
 - **UI** — landing gained the Owner column + owner filter, the `System default` / `Tenant default` badge
-  split, and scope-gated row actions (Adopt, Publish portal-wide…, Reset… via the new audited
-  `TemplateResetReasonDialog`). The editor shows the owner chip, renders a row outside the session's
+  split, and scope-gated row actions (Adopt, Publish portal-wide…, Reset… via the audited reason dialog — the
+  `TemplateResetReasonDialog` named in the original text is retired, see `notification-template-naming-and-editor-surface.md`
+  D11). The editor shows the owner chip, renders a row outside **the session's**
   write scope **read-only** (no Save/Reset/reason, no constraint kebab or dismissible chips) and offers
   the copy action that makes it editable (Adopt for a tenant session, Publish portal-wide for system
   scope).

@@ -1,44 +1,29 @@
 /*
     Isolated styles for the shared assignment authoring surface
-    (documents/specs/assignment-authoring-compartments.md UX-4/UX-8): stacked panel-style
-    compartments. D12: the sticky compartment jump-nav was removed — the sections keep their ids
-    (and a reduced scroll-margin) as anchors. The breadcrumb and the sticky action bar moved to the
-    shared AuthoringShell (adr-authoring-surface-pattern, decision 1), which owns their rules; only
-    this page's summary title row still uses `.authoring-title-group`.
+    (documents/specs/assignment-authoring-compartments.md UX-4/UX-8; the layout contract itself is
+    documents/solution/panel-layout-pattern.md).
+
+    REGIONS DRAW NOTHING (§2). The region grid, the main column and the rail column are layout only —
+    no border, no surface, no padding, no radius. The single frame per block is the shared
+    PanelSection inside the region, which is why this file no longer carries
+    `.authoring-compartment` at all: it drew a border, a surface and a radius around blocks that draw
+    their own, one box inside another (lesson L2).
+
+    The grid and its container-query collapse live once, in
+    src/SchoolCollab.Admin.Shared/wwwroot/app.css (`.region-grid` / `.region-grid-host`), so this
+    surface and the notification-template editor cannot diverge and neither carries a viewport
+    breakpoint of its own.
+
+    D12: the sticky compartment jump-nav was removed — the blocks keep their ids (and a reduced
+    scroll-margin) as anchors. The breadcrumb and the page title belong to the shared AuthoringShell
+    (adr-authoring-surface-pattern, decision 1); only this page's summary title row still uses
+    `.authoring-title-group`.
 */
 
 .authoring-title-group {
     display: flex;
     align-items: center;
     gap: 12px;
-}
-
-/* ── Compartment cards (UX-1/UX-3/UX-8) ────────────────────────────── */
-
-.authoring-compartment {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 16px;
-    background-color: var(--neutral-layer-1);
-    border: 1px solid var(--neutral-stroke-divider-rest);
-    border-radius: 6px;
-    /* D12: the offset now clears only the sticky action bar (the jump-nav is gone). */
-    scroll-margin-top: 56px;
-}
-
-.authoring-compartment-title {
-    margin: 0 0 4px 0;
-}
-
-/* UX-1a (owner, 2026-10-21): compartment 1 is a HEADERLESS PANEL — no visible title, PanelSection's
-   box shape (radius 8, padding 12) drawn with the same divider token the compartment already uses.
-   PanelSection's literal #e1e1e1 is deliberately NOT copied here: a literal colour ignores the
-   light/dark tokens every other container resolves through (its own CSS comment records the lesson).
-   The accessible name is the section's aria-label. */
-#authoring-basics {
-    padding: 12px;
-    border-radius: 8px;
 }
 
 /* ── Field treatments ──────────────────────────────────────────────── */
@@ -100,127 +85,6 @@
     flex-direction: column;
 }
 
-/* ── Audience take-away: two-column top (Basics left, scoped audience cards right) ── */
-.authoring-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
-    gap: 16px;
-    align-items: start;
-}
-
-/* ── Row 2 composition (round content-questions-modern-ui, spec §4) ──────
-   The reference project page: Questions & AI in the main column, Content &
-   Resources in the rail. Grid AREAS do the placing while DOM order stays
-   content → questions, so the compartment order assertion and the jump-nav
-   order both survive unchanged. The rail track is deliberately IDENTICAL to
-   row 1's, so the two stacked rows share one column grid (no ragged edge).
-   The --cq-* custom properties live here once and cascade to every child
-   section (custom properties inherit across component boundaries, unlike
-   scoped class rules), so retuning the composition is a one-line edit. */
-.authoring-layout--cq {
-    --cq-radius-card: 14px;
-    --cq-radius-tile: 10px;
-    --cq-chip-radius: 999px;
-    --cq-gap: 12px;
-    --cq-row-pad: 14px 4px;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
-    grid-template-areas: "questions content";
-}
-
-.authoring-layout--cq > #authoring-content {
-    grid-area: content;
-}
-
-.authoring-layout--cq > #authoring-questions {
-    grid-area: questions;
-}
-
-@media (max-width: 1400px) {
-    /* Owner, 2026-10-11 (round wysiwyg-instruction-editor): raised from 1100px. Between 1100 and
-       ~1400 the two columns still held, leaving the left pane — and the rich editor inside it, behind a
-       fixed 180px label column — squeezed to ≈170–520px, which is a laptop's whole range. Stacking here
-       gives every authoring field the full width where it matters most. */
-    .authoring-layout--cq {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-areas: "questions" "content";
-    }
-}
-
-/* The modern card chrome for the two recomposed compartments: the legacy bubble
-   is reset and replaced by the reference's flat, hairline, large-radius card. */
-.authoring-compartment--cq {
-    gap: var(--cq-gap, 12px);
-    padding: 16px;
-    border-radius: var(--cq-radius-card, 14px);
-    border: 1px solid var(--neutral-stroke-divider-rest);
-    background-color: var(--neutral-layer-1);
-}
-
-/* Card header band: title left, count chip and trailing actions right.
-   Used by the page-rendered headers (Questions & AI always; Content & Resources
-   on its disabled / read-only branches); the live Content & Resources header is
-   rendered by ResourcesSection and carries its own scoped copy of this rule. */
-.authoring-compartment--cq .cq-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.authoring-compartment--cq .cq-header .authoring-compartment-title {
-    flex: 1;
-    min-width: 0;
-}
-
-.authoring-compartment--cq .cq-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 24px;
-    height: 24px;
-    padding: 0 8px;
-    border-radius: var(--cq-chip-radius, 999px);
-    background: var(--neutral-fill-rest);
-    color: var(--neutral-foreground-hint);
-    font-size: 0.78rem;
-    font-variant-numeric: tabular-nums;
-}
-
-/* Right-hand column: the compact card stack right of Basics — the audience builder card and, since
-   round authoring-compact-fields, the Rules readouts card beneath it. The column draws NO frame of
-   its own — the base .authoring-compartment chrome is reset here because the SectionCards it hosts
-   are FluentCards with their own border/background, so a second frame would double-frame them: each
-   card's own frame is the single visible border. */
-.authoring-compartment--right {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 0;
-    background-color: transparent;
-    border: none;
-    border-radius: 0;
-}
-
-/* OD2 (round authoring-compact-fields): the Rules readouts render as a card inside that column, so
-   #authoring-rules is the card's container and a column block: the card plus the hint explaining
-   the readouts. The readout rows themselves keep .authoring-policy-row's own wrapping chrome — the
-   column is narrow (320–460px) and the row wraps rather than truncating or shrinking. */
-.authoring-rules-card {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-/* D14 (owner follow-up 2026-10-09): the readout rows carry no horizontal padding, but the
-   shared card header's 1rem padding-indent made "Rules" sit 16px to the right of the rows
-   beneath it. The header becomes flush with the card's content box on both edges, so its
-   text shares ONE left edge with every subitem (the count badge ends level with the row
-   values' right edge). `:deep` because the header belongs to the SectionCard child
-   component, which CSS isolation's scope attribute does not reach. */
-.authoring-rules-card :deep(.section-card__header) {
-    padding-left: 0;
-    padding-right: 0;
-}
-
 /* Targets & audience builder: label on top, bold value underneath. */
 .targets-audience-item__label {
     font-size: var(--font-size-100, 0.75rem);
@@ -243,15 +107,36 @@
     padding: 16px;
     background-color: var(--neutral-layer-1);
     border: 1px solid var(--neutral-stroke-divider-rest);
-    border-radius: 6px;
-    scroll-margin-top: 56px;
+    border-radius: 8px;
+    /* D12: the offset now clears the pinned header row inside the page's own scroll port. */
+    scroll-margin-top: calc(var(--app-bar-height) + 6px);
 }
 
+/* §6: the FIRST block of the overview is this card, so its header row carries the page action and
+   pins to the same offset as every other sticky row on an authoring surface. It keeps the card's
+   surface token, so a pinned header reads as the card's header and not as a toolbar above it. */
 .authoring-summary__header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+}
+
+.authoring-summary__header--sticky {
+    position: sticky;
+    top: var(--app-bar-sticky-offset, 0px);
+    z-index: 5;
+    margin: -16px -16px 0;
+    padding: 16px 16px 0;
+    background-color: var(--neutral-layer-1);
+    border-radius: 8px 8px 0 0;
+}
+
+.authoring-summary__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
 }
 
 .authoring-summary__title {
@@ -294,22 +179,8 @@
     white-space: pre-wrap;
 }
 
-/* ── Summary row-2 layout: single column, Questions first, accordion below ─
-   Declared AFTER the --cq rules so it wins the cascade with equal specificity;
-   #authoring-questions keeps its grid-area, Content & Resources is simply not
-   rendered on the summary (D2). */
-.authoring-layout--summary {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "questions" "targets";
-}
-
-.authoring-layout--summary > #authoring-targets {
-    grid-area: targets;
-}
-
-/* The Targets accordion: heading carries the compartment title + count (X-1's single
-   title for the summary surface); the expanded body hosts the SectionCard with an
-   intentionally empty card title. */
+/* The Targets accordion (summary only): its heading carries the title + count, so the summary keeps
+   its single title per block (X-1); the card inside is deliberately title-less. */
 .authoring-summary__targets fluent-accordion {
     width: 100%;
 }
@@ -340,13 +211,20 @@
     padding-top: 8px;
 }
 
-/* The Content & Resources block: LAYOUT only — the card box (border, radius, surface, padding) comes
-   from the shared PanelSection inside it, so it cannot drift from the Rules panel (owner, 2026-10-10:
-   the duplicate box here is what made the two panels look different). */
-.authoring-materials-section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+/* Content & Resources' header count — the number the section's own `.cq-count` chip used to carry,
+   now supplied to the shared panel that owns the header. */
+.authoring-materials-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: var(--neutral-fill-rest);
+    color: var(--neutral-foreground-hint);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Rich text, BOTH notes (grill round, owner 2026-10-11): the tab CHROME lives in the shared
@@ -363,7 +241,7 @@
 .authoring-note-caption {
     display: block;
     font-size: 0.85rem;
-    color: #605e5c;
+    color: var(--neutral-foreground-hint);
     margin-bottom: 4px;
 }
 
@@ -379,11 +257,8 @@
 }
 
 /* (The card box and the header rules that used to live here are gone: the box and the title/header
-   treatment now come from the shared PanelSection inside this section — see PanelSection.razor.css.
-   Left as a marker so a reader does not re-add a second border.) */
-
-/* (The .authoring-materials-header and .authoring-materials-title rules that lived here are gone with
-   the header itself — the title, its actions slot and the thin rule come from PanelSection.) */
+   treatment come from the shared PanelSection — see PanelSection.razor.css. Left as a marker so a
+   reader does not re-add a second border.) */
 
 /* The drop target fills the section's width so a drop anywhere on the card lands. */
 .authoring-materials-dropzone ::deep fluent-input-file {

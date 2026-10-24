@@ -47,7 +47,7 @@ public class HttpNotificationTemplateResolverTests
         string? subject = "Subject",
         DateTimeOffset? createdAt = null,
         params TemplateConstraintDto[] constraints) =>
-        new(Guid.NewGuid(), kind, channel, subject, body, constraints,
+        new(Guid.NewGuid(), kind, channel, "Grade 8 Science reminder", null, "TPL01", subject, body, constraints,
             createdAt ?? new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2026, 10, 2, 0, 0, 0, TimeSpan.Zero),
             TenantId: null, OwnerName: "System");
@@ -141,6 +141,7 @@ public class HttpNotificationTemplateResolverTests
         settings.When(ListUrl).Respond("application/json", Serialize(
             new TenantNotificationTemplateDto(
                 id, NotificationTemplateKind.Publish, NotificationChannel.Email,
+                "Grade 8 Science reminder", null, "TPL01",
                 "New task: {{Title}}", "<p>{{Description}}</p>",
                 [new TemplateConstraintDto(Guid.NewGuid(), TemplateConstraintDimension.GradeLevel, "Grade 3")],
                 createdAt, createdAt.AddDays(1),

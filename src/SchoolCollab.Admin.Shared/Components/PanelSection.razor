@@ -1,5 +1,8 @@
-@* PanelSection (owner, 2026-10-10) — the shared titled-panel header treatment the **Content & Resources**
-   block and the **Rules** card both wear, so the two cannot drift apart.
+@using SchoolCollab.Admin.Shared.Constants
+@* PanelSection (owner, 2026-10-10) — the ONE box on a create / edit surface
+   (documents/solution/panel-layout-pattern.md §3). Every block on those surfaces wears it: the
+   assignment authoring surface's Details, Questions & AI, Targets & Audience, Content & Resources
+   and Rules, and the notification-template editor's Message, Constraints and Preview.
 
    NAME: deliberately `PanelSection`, not `Panel` — `Panel` is exactly the kind of name FluentUI is
    likely to introduce, and a bare `Panel` in this namespace would then collide or shadow. (The
@@ -7,42 +10,138 @@
 
    ITS RULE — kept here because it is the thing most easily lost in a refactor:
    **a THIN LINE runs underneath the header, spanning the FULL header row — the title AND the
-   `HeaderActions` slot (the kebab menu) — not just the width of the title text.** It is a sibling of
-   the header row (not a child of the title), full-width inside the panel's own box, with the margin
-   that separates the header from the content beneath. Owner-corrected 2026-10-10: the first pass drew
-   it as the title's own border, which stopped short of the kebab. *@
-<div class="panel-section" id="@Id">
-    <div class="panel-section__header">
-        <h4 class="panel-section__title" id="@TitleId">@Title</h4>
-        @if (HeaderActions is not null)
-        {
-            <div class="panel-section__actions">@HeaderActions</div>
-        }
+   `HeaderActions` slot (the kebab menu, the page action) — not just the width of the title text.**
+   It is a sibling of the header row (not a child of the title), full-width inside the panel's own
+   box, with the margin that separates the header from the content beneath. Owner-corrected
+   2026-10-10: the first pass drew it as the title's own border, which stopped short of the kebab.
+
+   THE HEAD GROUP (2026-10-23, §6 sticky behaviour): the header row and its rule are wrapped in ONE
+   element so `StickyHeader` can pin both together. Without the wrapper the rule would scroll away
+   from the title it belongs to and the pinned row would read as a second toolbar instead of as the
+   panel's own header.
+
+   COLLAPSIBILITY IS OPT-IN (owner, 2026-10-23; §6). `Collapsible` defaults to false and a false
+   panel renders **no chevron element at all** — not a disabled one, not a CSS-hidden one. Showing a
+   control that looks collapsible and is not is worse than showing nothing.
+
+   THE BORDER IS OPT-OUT (owner, 2026-10-24; §3). A panel is a box by default. The MAIN region's
+   blocks turn the box off (`ShowBorder="false"`) and are separated from their header by the header
+   rule alone; the rail's blocks keep the box, because a stack of unboxed panels in a narrow column
+   has no edge to read. The rule is `border-color: transparent` — never `border: none` — so the two
+   variants keep the same box model and switching one does not shift the layout by a pixel. *@
+<div class="panel-section @(StickyHeader ? "panel-section--sticky" : null) @(ShowBorder ? null : "panel-section--borderless")" id="@Id">
+    <div class="panel-section__head">
+        <div class="panel-section__header">
+            @* The chevron LEADS: it is part of the title's affordance, not a trailing control
+               (a trailing chevron was proposed and rejected by the owner, 2026-10-23). *@
+            @if (Collapsible)
+            {
+                <button type="button"
+                        class="panel-section__chevron"
+                        aria-expanded="@ExpandedAttribute"
+                        aria-controls="@_bodyId"
+                        aria-label="@ChevronLabel"
+                        @onclick="Toggle">
+                    <FluentIcon Value="@ChevronIcon" />
+                </button>
+            }
+            <h4 class="panel-section__title" id="@TitleId">@Title</h4>
+            @if (HeaderActions is not null)
+            {
+                <div class="panel-section__actions">@HeaderActions</div>
+            }
+        </div>
+
+        <span class="panel-section__rule" aria-hidden="true"></span>
     </div>
 
-    <span class="panel-section__rule" aria-hidden="true"></span>
-
-    @ChildContent
+    @* Collapsing hides the BODY, never the panel: title, count, chevron and kebab stay visible, so
+       a relationship's existence is never a click away. The body element is ALWAYS rendered and
+       merely marked `hidden` while collapsed — that keeps the chevron's `aria-controls` pointing at
+       an element that exists (a dangling reference announces nothing to a screen reader) and keeps
+       the children's state across a collapse. *@
+    <div class="panel-section__body" id="@_bodyId" hidden="@(!_expanded)">@ChildContent</div>
 </div>
 
 @code {
     /// <summary>The panel's own id (the bUnit seam) — optional, because a caller may already own one
-    /// (the Content & Resources block keeps `authoring-materials-section` on its own `<section>`).</summary>
+    /// (the Content &amp; Resources block keeps `authoring-materials-section`; the assignment
+    /// surface's first block keeps `authoring-basics`).</summary>
     [Parameter] public string? Id { get; set; }
 
-    /// <summary>The header text. Title Case, like every other header on the authoring surface.</summary>
-    [Parameter, EditorRequired] public string Title { get; set; } = default!;
+    /// <summary>
+    /// The header text. Title Case, like every other header on the authoring surface.
+    /// <para>
+    /// OPTIONAL (§4): the component can render an untitled box. In practice every block on the
+    /// create / edit surfaces is titled — an untitled box makes the reader infer the block's
+    /// subject — so the optionality is a capability, not an invitation.
+    /// </para>
+    /// </summary>
+    [Parameter] public string? Title { get; set; }
 
     /// <summary>The id for the title element itself, so an assertion can address the TEXT and the
     /// actions separately — they are distinct elements, the rule the owner asked to keep.</summary>
     [Parameter] public string? TitleId { get; set; }
 
-    /// <summary>Right-hand header slot: the kebab menu, a card's Add — anything on the header line that
-    /// is not the title. The rule beneath is drawn under THIS too.</summary>
+    /// <summary>Right-hand header slot: the kebab menu, the page action, a card's Add — anything on
+    /// the header line that is not the title. The rule beneath is drawn under THIS too.</summary>
     [Parameter] public RenderFragment? HeaderActions { get; set; }
+
+    /// <summary>
+    /// Opt-in collapse (§6): when true the header carries a chevron button immediately before the
+    /// title and the body collapses to the header row. Defaults to <b>false</b> — an opt-in default
+    /// means a caller has to ask for the affordance, and forgetting to ask can never silently add a
+    /// control the owner did not consent to. The main region is never collapsible.
+    /// </summary>
+    [Parameter] public bool Collapsible { get; set; }
+
+    /// <summary>
+    /// Pin the header row (title + actions + its rule) to the top of the page's scroll port, at the
+    /// shared app-bar offset (§6). This is what lets the FIRST block own the page's primary action:
+    /// the actions never scroll out of view, so no second toolbar is needed.
+    /// </summary>
+    [Parameter] public bool StickyHeader { get; set; }
+
+    /// <summary>
+    /// Whether the block draws its frame (§3). Defaults to <b>true</b> — a panel is a box unless the
+    /// caller says otherwise. The <b>main region's</b> blocks pass <c>false</c>: that region is the
+    /// page's own content, not a card, and its separation comes from the header rule
+    /// (<see cref="Title"/> sits above a full-width bottom border). The <b>rail's</b> blocks keep the
+    /// box — a narrow column of unboxed blocks reads as one undifferentiated list.
+    /// Hidden via <c>border-color: transparent</c>, so both variants occupy identical space.
+    /// </summary>
+    [Parameter] public bool ShowBorder { get; set; } = true;
 
     /// <summary>The panel body. Wrap it in `<ChildContent>` whenever <see cref="HeaderActions"/>
     /// is also supplied (RZ9996).</summary>
     [Parameter] public RenderFragment? ChildContent { get; set; }
-}
 
+    /// <summary>Collapse state is per panel and NOT persisted: a re-render keeps it, a remount
+    /// returns to expanded, so a user never has to remember what they hid. Collapsible panels start
+    /// expanded.</summary>
+    private bool _expanded = true;
+
+    /// <summary>The body's id, the target of the chevron's `aria-controls`. Derived from
+    /// <see cref="Id"/> when the caller owns one, so it is stable across renders of this instance
+    /// and readable in a test; a per-instance sequence number keeps untitled-Id panels unique.</summary>
+    private string _bodyId = default!;
+
+    private static int _sequence;
+
+    /// <summary>`aria-expanded` as the string the attribute carries.</summary>
+    private string ExpandedAttribute => _expanded ? "true" : "false";
+
+    /// <summary>The chevron's accessible name — the action it performs on the panel it names.</summary>
+    private string ChevronLabel => (_expanded ? "Collapse " : "Expand ") + (Title ?? "panel");
+
+    /// <summary>Leading chevron: pointing down while expanded (the body is open), right while
+    /// collapsed (the title it opens is to its right), the console mock's own reading.</summary>
+    private Icon ChevronIcon => _expanded
+        ? SchoolCollab.Admin.Shared.Constants.FluentIcons.ChevronDown
+        : SchoolCollab.Admin.Shared.Constants.FluentIcons.ChevronRight;
+
+    protected override void OnInitialized() =>
+        _bodyId = (Id is { Length: > 0 } id ? id : $"panel-section-{Interlocked.Increment(ref _sequence)}") + "-body";
+
+    private void Toggle() => _expanded = !_expanded;
+}

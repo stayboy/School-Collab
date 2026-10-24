@@ -17,33 +17,8 @@
     gap: var(--cq-gap, 12px);
 }
 
-/* ── Card header band (CR-1) ─────────────────────────────────────────── */
-
-.cq-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.cq-header .authoring-compartment-title {
-    flex: 1;
-    min-width: 0;
-    margin: 0;
-}
-
-.cq-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 24px;
-    height: 24px;
-    padding: 0 8px;
-    border-radius: var(--cq-chip-radius, 999px);
-    background: var(--neutral-fill-rest);
-    color: var(--neutral-foreground-hint);
-    font-size: 0.78rem;
-    font-variant-numeric: tabular-nums;
-}
+/* (No header band: the rail's Content & Resources PanelSection owns the title, the count and the
+   kebab — owner, 2026-10-23. A `.cq-header` here would be a second heading inside that panel.) */
 
 /* ── Drop tile (CR-2/CR-3/CR-4) ──────────────────────────────────────── */
 

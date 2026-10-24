@@ -38,6 +38,16 @@
 > **Skills:** `blazor-css-isolation`, `dialog-ui`, `fluentui-dialog-shell`, `input-width-scale`,
 > `flex-row-input-alignment`, `fluentui-icons-in-school-collab`, `test-dialog-opener-components`.
 > **No** API, contract, domain or schema change. No migration.
+>
+> **Layout & chrome (superseded 2026-10-23 in part).** The two-column *composition* and the card
+> *box* this spec describes are now owned by **`documents/solution/panel-layout-pattern.md`**: the
+> surface is a main/rail region grid of `PanelSection` blocks, so the `.authoring-compartment` /
+> `.authoring-layout--cq` grid and the `.cq-card` box chrome (§4) are retired — Content & Resources
+> is a rail `PanelSection` (its title, count and kebab supplied by the panel), Questions & AI a main
+> `PanelSection`. The feature-local presentation this spec owns — the drop tile, Files/Links rows,
+> the composer hero, the question row list, the chips, the dialogs and the strand/lesson picks (§3,
+> §5, §6, §6A) — is unchanged; its row/tile/chip tokens still come from §3 DL, while any outer box,
+> border, padding and header order come from the pattern doc.
 
 ---
 
@@ -146,6 +156,15 @@ isolated stylesheet — one place to retune the composition.
 
 ## 4. Layout (LA)
 
+> *(Superseded 2026-10-23 in part.)* The composition row and the card **box** below are replaced by
+> `documents/solution/panel-layout-pattern.md`: the surface is one main/rail region grid of
+> `PanelSection` blocks, so the `.authoring-layout--cq` grid, the `.authoring-compartment--flush`
+> frame reset and the `.cq-card` box/border/radius are retired. Content & Resources (rail) and
+> Questions & AI (main) are placed by the pattern doc's §5 ownership test, not by this section's
+> `grid-template-areas`. The feature-local composition this spec owns — Content & Resources as a
+> body-only rail panel, Questions & AI as a composer + row list — keeps its §3 tokens, §5 rows and
+> §6 composer/list; only the outer box and the two-column mechanism move to the pattern doc.
+
 ### 4.1 The composition row
 
 ```razor
@@ -156,8 +175,11 @@ isolated stylesheet — one place to retune the composition.
 ```
 
 **LA-1** — Grid areas place **Questions & AI left (main)** and **Content & Resources right
-(rail)**, while **DOM order stays `content` then `questions`**, so the existing
-`section.authoring-compartment`-order assertion and the jump-nav order both survive unchanged:
+(rail)**. *(Superseded 2026-10-23: the placement survives, but the mechanism and the claims below do
+not — `assignment-compartment`-order assertions, the jump-nav and `.authoring-layout--cq` are all
+retired. The surviving rule is pattern §5: rail membership is decided by **ownership**, own content in
+main and other aggregates in the rail. Current pinning tests: `PanelLayout_RailMatchesTheConsentTable_ChevronOnlyWhereTheOwnerConsented`.
+See `documents/solution/panel-layout-pattern.md`.)* Historical text follows:
 
 ```css
 .authoring-layout--cq {
@@ -168,17 +190,28 @@ isolated stylesheet — one place to retune the composition.
 .authoring-layout--cq > #authoring-questions { grid-area: questions; }
 ```
 
+> *(Superseded 2026-10-23 — the `grid-template-areas` row and the `.authoring-layout--cq` grid are
+> retired; main/rail placement is the pattern doc's §5 ownership test —
+> `documents/solution/panel-layout-pattern.md`.)*
+
 **LA-2** — `authoring-compartment--flush` resets the legacy frame (padding/background/border →
 none), exactly as the existing `--right` modifier does, because the new card chrome is the single
 visible frame.
 
-**LA-3** — Below `1100px` the row collapses to one column, stacked **Questions then Content**
-(`grid-template-areas: "questions" "content"`).
+**LA-3** — ~~Below `1100px` the row collapses to one column, stacked **Questions then Content**
+(`grid-template-areas: "questions" "content"`).~~
+> *(Superseded 2026-10-23 — the `1100px` viewport breakpoint is the retired form: collapse is driven
+> by available width, never a viewport magic number, and a page may not carry its own breakpoint. The
+> implementation uses `@container region-grid-host (max-width: 899px)` —
+> `documents/solution/panel-layout-pattern.md` §2.)*
 
 **LA-4** — The compartment `<h3 class="authoring-compartment-title">` renders in **every** branch.
 For Content & Resources the **live** header belongs to `ResourcesSection` (see CR-1); for the
 disabled / read-only / fail-closed branches the page renders its own header, so X-1 holds and no
 `@ref` delegation is needed.
+> *(Superseded 2026-10-23 — `.authoring-compartment` and `authoring-compartment-title` no longer
+> exist; each block's single title is `PanelSection`'s `panel-section__title` —
+> `documents/solution/panel-layout-pattern.md` §3/§4.)*
 
 ### 4.2 Card chrome
 
@@ -197,7 +230,7 @@ Header · drop tile · **Files** · **Links**.
 
 | # | Contract |
 |---|---|
-| **CR-1** | **Header (owned by `ResourcesSection`)** — `h3.authoring-compartment-title` "Content & Resources" + a muted item count + a trailing `FluentButton` (`Appearance.Stealth`, `Size.Small`, `IconStart="@FluentIcons.Add"`, `aria-label="Add resource"`) that **toggles the link-input row** (revealed + focused, hidden by default). The page renders an equivalent static header on the disabled / read-only / fail-closed branches. |
+| **CR-1** | **Header (owned by `ResourcesSection`)** — `h3.authoring-compartment-title` "Content & Resources" + a muted item count + a trailing `FluentButton` (`Appearance.Stealth`, `Size.Small`, `IconStart="@FluentIcons.Add"`, `aria-label="Add resource"`) that **toggles the link-input row** (revealed + focused, hidden by default). The page renders an equivalent static header on the disabled / read-only / fail-closed branches. *(Superseded 2026-10-23 in part — the `h3.authoring-compartment-title` header is retired: the rail `PanelSection` supplies title, count slot and kebab, so only the `+`-reveals-the-link-row behaviour survives — `documents/solution/panel-layout-pattern.md` §3/§4.)* |
 | **CR-2** | **Drop tile** (`#cq-context-tile`) — `--neutral-layer-2` fill, `--cq-radius-tile`, centred: an `aria-hidden` icon composition (two overlapping `Document` icons + a small `Add` badge); the muted helper line **"Add PDFs, documents, or other text to reference in this assignment."**; and a `FluentButton` labelled **"Upload files"**. |
 | **CR-3** | The tile **is** the drop zone: `FluentInputFile` keeps `DragDropZoneVisible="true"`, `Mode="InputFileMode.Stream"`, `Multiple="true"`, and the existing `MaximumFileCount` / `MaximumFileSize` / `Accept` / callbacks from `AttachmentUploadPolicy`. The tile's button is the input trigger via **`FluentInputFile.AnchorId`** (verified present in the pinned 4.14.2) — no JS, no hidden-element click. |
 | **CR-4** | The helper line **"No resources attached yet."** is retained as the tile's secondary muted line when both groups are empty (replacing the `FluentMessageBar Intent="Info"`), so the empty state reads as an invitation. |
@@ -345,10 +378,10 @@ The summary line (QA-3) and this narrative are **two renderings of the same part
 
 | # | Invariant — must survive the redesign |
 |---|---|
-| **X-1** | Exactly one `h3.authoring-compartment-title` per compartment in **every** mode/branch (Create, Edit, View, offline gate, fail-closed, read-only hints) — for Content & Resources that means the child renders it live and the page renders it in the non-live branches. |
+| **X-1** | Exactly one `h3.authoring-compartment-title` per compartment in **every** mode/branch (Create, Edit, View, offline gate, fail-closed, read-only hints) — for Content & Resources that means the child renders it live and the page renders it in the non-live branches. *(Superseded 2026-10-23 — `authoring-compartment-title` no longer exists; the invariant reads "exactly one `panel-section__title` per block", pinned by `PanelLayout_RailMatchesTheConsentTable_ChevronOnlyWhereTheOwnerConsented` and `TargetsCompartment_CardHeaderIsTheOnlyTitle_AndNoPrimaryGradeFieldRenders` — `documents/solution/panel-layout-pattern.md` §3/§4.)* |
 | **X-2** | `#authoring-content`, `#authoring-questions`, `#authoring-content-reason`, `#authoring-questions-reason` keep their ids and branches. |
 | **X-3** | `FindComponents<ResourcesSection>()`, `<QuestionEditorSection>()`, `<QuestionGenerationSection>()` still resolve; they render **nowhere** on the fail-closed children-read path, and `QuestionEditorSection` renders in Create. |
-| **X-4** | Jump-nav text and href order unchanged: `Basics · Targets & audience · Rules · Content & Resources · Questions & AI` → `#authoring-basics · #authoring-targets · #authoring-rules · #authoring-content · #authoring-questions`. |
+| **X-4** | Jump-nav text and href order unchanged: `Basics · Targets & audience · Rules · Content & Resources · Questions & AI` → `#authoring-basics · #authoring-targets · #authoring-rules · #authoring-content · #authoring-questions`. *(Superseded 2026-10-23 — the jump nav is retired, so there is no text or order to preserve; only the `#authoring-*` anchor set survives, pinned by `CompartmentAnchors_StillResolve_WithoutTheJumpNav` and `EverySurface_RendersNoJumpNav_AndTheFormKeepsItsSections` — `documents/solution/panel-layout-pattern.md`.)* |
 | **X-5** | Save semantics, `Changed` callbacks, the children full-replacement / fail-closed rule (UX-21), and every API call are untouched. *(Scoped to R1–R3: R4's §6A deliberately adds contract fields and a `CaptureSaveSnapshot` mix.)* |
 | **X-6** | Retained user-facing strings: "Upload files", "No resources attached yet.", "N file(s) attached", "N link(s)", "No questions yet. Add a question to get started.", "Add question", "N question(s)", the extraction-status labels, and `ChildrenUnavailableReason`. |
 | **X-7** | Accessibility: the drop tile and every icon-only button have an accessible name; chips are real toggle buttons with `aria-pressed`; the row kebab is reachable by keyboard (D13) and the row's open target is a real anchor; the draft disclosure exposes `aria-expanded`/`aria-controls`; the dialog traps focus and returns it; contrast meets WCAG 2.1 AA in both themes; nothing depends on hover alone. |
@@ -386,7 +419,7 @@ The summary line (QA-3) and this narrative are **two renderings of the same part
 | Contract cluster | Test |
 |---|---|
 | DL-1/DL-8 (tokens, motion, no literals) | Source check: changed `.razor.css` files contain no `#rrggbb` literal; no `<style>` in `.razor`. |
-| LA-1/LA-3 (composition) | `AssignmentAuthoringBunitTests`: the `.authoring-layout--cq` row exists, contains both anchors, DOM order is `content` then `questions`; existing compartment-order test **unchanged**. |
+| LA-1/LA-3 (composition) | *(Superseded 2026-10-23 — `.authoring-layout--cq` is retired and the compartment-order test was NOT unchanged: it reads `PanelSectionIds` now.)* Current coverage: `AssignmentAuthoringBunitTests.Create_RendersItsCompartmentSections_NoContentNoQuestions`, `Edit_Draft_RendersTheFormSections` and `EverySurface_RendersNoJumpNav_AndTheFormKeepsItsSections` (panel ids/order), plus `PanelLayout_FirstBlockOwnsThePageAction_AndTheShellRendersNoActionBar` and `PanelLayout_RailMatchesTheConsentTable_ChevronOnlyWhereTheOwnerConsented` (region membership). `documents/solution/panel-layout-pattern.md` §2/§5. |
 | CR-1…CR-8 | `ResourcesSectionBunitTests`: tile + `AnchorId` wiring; "Upload files" and "No resources attached yet." present; Files/Links counts; `+` reveals and focuses the link input; extraction badge only for non-`Succeeded`; two-line row renders size + badge. |
 | CR-9 | Existing `StageFileAsync` / `AddUrl` / `RemoveAt` / re-extract tests pass **unmodified**. |
 | CH-1…CH-3 | `ChipBunitTests` (**new**, Admin.Tests.Unit) — the attribute really is the literal `"true"`/`"false"` in both states (never bare, never absent), a click fires `OnToggle` with the requested state, the two-state class is applied, and the badge / dismissible modes are untouched. |
@@ -396,7 +429,7 @@ The summary line (QA-3) and this narrative are **two renderings of the same part
 | QA-14/QA-15 | Existing pagination and zero-state tests pass, with the zero-state string preserved. |
 | QA-18…QA-21 | `QuestionsDraftSectionBunitTests`: disclosure collapsed by default, auto-expanded when a draft exists; confirm/discard calls unchanged. |
 | VM-1/VM-2 | New: View mode renders read-only rows in both compartments; `QuestionReviewList` no longer exists (file + suite deleted). |
-| X-1…X-4 | Existing `AssignmentAuthoringBunitTests` invariants pass unmodified (`CompartmentTitles`, `JumpNav_StillResolvesAllFiveAnchors`, the fail-closed and Create children tests). |
+| X-1…X-4 | *(Superseded 2026-10-23 — `CompartmentTitles` and `JumpNav_StillResolvesAllFiveAnchors` no longer exist; the jump nav is retired and `CompartmentSectionIds` was renamed `PanelSectionIds`.)* Current coverage: `PanelLayout_RailMatchesTheConsentTable_ChevronOnlyWhereTheOwnerConsented` (one `panel-section__title` per block, X-1), `CompartmentAnchors_StillResolve_WithoutTheJumpNav` (the `#authoring-*` anchors, X-2/X-4) and the fail-closed / Create children tests. `documents/solution/panel-layout-pattern.md` §3/§4. |
 
 | PB-1…PB-11 (dialog) | `QuestionPromptDialogBunitTests` (new, dialog-shell harness): fields bound to the saved knobs; read-only subject/grade/grounding block; composition template; no subject → Configure disabled-with-reason; `PromptLocked` keeps the knobs live but disables composition. |
 | PB-5/PB-6/QA-23 (overwrite · re-hydration · timing) | Unit tests on the composer/parser helper: empty or template-matched → replace; hand-edited (non-template) → confirm path; a composed prompt re-hydrates **after a simulated reload** (no transient state) with difficulty from the persisted counts; a partially-matching text falls back to defaults; hand-written prose is never parsed. |
@@ -456,7 +489,7 @@ and is delivered as a stack layer on top of R1 if R1's PR is still open.
 | **S2** | Page size stays **5**. | `AssignmentFormModelMappingsTests.QuestionPageSize_DefaultIsFive` ("FR-240: page size is fixed at 5") |
 | **S3** | The four section components are used **only** by `AssignmentAuthoring.razor`; churn is contained. | repo-wide grep |
 | **S4** | View mode uses the **same** two-column row. | consistency; no variant layout |
-| **S5** | The rail is **not sticky** — the page already stacks two sticky layers (action bar, jump-nav). | `AssignmentAuthoring.razor.css` L16, L49 |
+| **S5** | *(Superseded 2026-10-23.)* The rail **is** sticky, together with the first block's header row (title + page action); the retired two-layer stack it reasoned about (action bar, jump-nav) no longer exists, so the objection is void. See `documents/solution/panel-layout-pattern.md` §6. Historical claim: the rail was **not** sticky because the page already stacked two sticky layers. | `AssignmentAuthoring.razor.css` L16, L49 |
 | **S6** | The AI host **already** composes the difficulty line and serializes the whole request as JSON, then sends `PromptOverride` as a separate third user message framed as *additional teacher guidance (does not change the output format)*. | `AssignmentQuestionGenerationSystemPromptProvider.cs` `BuildMessages` L124–154 |
 | **S7** | A tenant lock nulls **only** `PromptOverride`; `TopicId`/`TopicName`, `QuestionCount`, `Types`, the difficulty counts and `ResourceTexts` all survive. | `AssignmentQuestionGenerationService.cs:82` |
 | **S8** | `GradeLevelDto` carries `Level`, `Name` and `DisplayOrder` as three separate fields (fields at `:6-8`); `Level` **defaults** from the GRADE coded value's `DisplayOrder` when a grade is picked on the create page (a page default, not an automatic server-side seed) — the canonical community grade number. | `Students.Core/DTOs/GradeLevelDto.cs:4-17`, `GradeLevel.cs:23-25`, `Students.Application/Components/Pages/Students/GradeLevels/Create.razor` `OnGradePickedAsync` ~:131 |

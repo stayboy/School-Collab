@@ -10,14 +10,18 @@ using SchoolCollab.Settings.Core.Services;
 namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenantNotificationTemplate;
 
 /// <summary>
-/// Replaces one template's subject, body and constraint set, addressed by id, and writes a
-/// <see cref="TemplateAuditEntry"/> of kind <see cref="TemplateChangeKind.Updated"/> in the same
+/// Replaces one template's title, description, subject, body and constraint set, addressed by id, and
+/// writes a <see cref="TemplateAuditEntry"/> of kind <see cref="TemplateChangeKind.Updated"/> in the same
 /// transaction. A row that is absent - or owned by another tenant, which the query filter makes
 /// indistinguishable - is a <see cref="TenantNotificationTemplateNotFoundException"/>. A row the caller
 /// can see but must not write (a tenant session editing a system-blueprint row) is a
 /// <see cref="TenantNotificationTemplateScopeException"/> (403), never a silent stamp (spec section 6).
 /// Clearing the constraint set makes the row its scope's default, so an unconstrained update runs the
 /// per-scope default invariant check before the write.
+/// <para>
+/// The generated code is <b>not</b> part of this path (naming spec D6): a template's code identifies the
+/// row for its whole life, so a rename changes the title and leaves the code alone.
+/// </para>
 /// </summary>
 public sealed class UpdateTenantNotificationTemplateHandler(
     SettingsDbContext db,
@@ -56,10 +60,6 @@ public sealed class UpdateTenantNotificationTemplateHandler(
                 excludingTemplateId: template.Id, ct);
         }
 
-        var previousSubject = template.Subject;
-        var previousBody = template.Body;
-        var previousConstraints = TemplateConstraintSummary.Serialize(template.Constraints);
-
         // Capture the tracked rows before Update() swaps the in-memory collection, then make the
         // replace deterministic for EF: delete the old rows, insert the new ones (navigation-only
         // replacement would rely on severance semantics for a required FK).
@@ -68,25 +68,30 @@ public sealed class UpdateTenantNotificationTemplateHandler(
             .Select(c => TemplateConstraint.Create(template.TenantId, template.Id, c.Dimension, c.Value))
             .ToList();
 
-        template.Update(request.Subject, request.Body, newRows);
+        // Every argument is named because title, description and subject are all strings: a positional
+        // swap would compile.
+        var previous = template.Update(
+            title: request.Title,
+            description: request.Description,
+            subject: request.Subject,
+            body: request.Body,
+            constraints: newRows);
 
         db.TemplateConstraints.RemoveRange(oldRows);
         db.TemplateConstraints.AddRange(newRows);
 
         auditor.Record(
             db, template.TenantId, template.Id, template.TemplateKey, TemplateChangeKind.Updated,
-            previousSubject, template.Subject,
-            previousBody, template.Body,
-            previousConstraints, TemplateConstraintSummary.Serialize(template.Constraints),
+            previous.PreviousSubject, template.Subject,
+            previous.PreviousBody, template.Body,
+            TemplateConstraintSummary.Serialize(previous.PreviousConstraints),
+            TemplateConstraintSummary.Serialize(template.Constraints),
             reason: command.Reason);
 
         await db.SaveChangesAsync(ct);
 
         var ownerName = await NotificationTemplateOwnership.ResolveOwnerNameAsync(db, template.TenantId, ct);
 
-        return new TenantNotificationTemplateDto(
-            template.Id, template.Kind, template.Channel, template.Subject, template.Body,
-            template.Constraints.Select(c => new TemplateConstraintDto(c.Id, c.Dimension, c.Value)).ToList(),
-            template.CreatedAt, template.UpdatedAt, template.TenantId, ownerName);
+        return NotificationTemplateOwnership.ToDto(template, ownerName);
     }
 }

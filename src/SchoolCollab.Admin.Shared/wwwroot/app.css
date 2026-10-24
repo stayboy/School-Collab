@@ -15,6 +15,34 @@ body {
     color: var(--neutral-foreground-1, #ffffff);
 }
 
+/* Neutral design tokens — the app must supply the ones it consumes.
+   FluentUI 5.0.1 ships no token CSS and this app uses no design-system provider, so every
+   `var(--neutral-…)` in a component stylesheet resolves to NOTHING unless it is defined here
+   (2026-10-24: `PanelSection`'s border and surface were declared with bare tokens, which made the
+   whole declaration invalid at computed-value time — the box silently lost its border and painted
+   transparent, so panels matched the page). Values are the literals those tokens replaced, so this
+   migration is visually neutral; the dark overrides below keep the theme working. */
+:root {
+    --neutral-layer-1: #ffffff;
+    --neutral-layer-2: #faf9f8;
+    --neutral-stroke-rest: #d1d1d1;
+    --neutral-stroke-divider-rest: #e1e1e1;
+    --neutral-stroke-focus: #0f6cbd;
+    --neutral-foreground-1: #242424;
+    --neutral-fill-rest: #f5f5f5;
+}
+
+[data-theme="dark"],
+.dark {
+    --neutral-layer-1: #1f1f1f;
+    --neutral-layer-2: #292929;
+    --neutral-stroke-rest: #525252;
+    --neutral-stroke-divider-rest: #3d3d3d;
+    --neutral-stroke-focus: #479ef5;
+    --neutral-foreground-1: #ffffff;
+    --neutral-fill-rest: #333333;
+}
+
 h1, h2, h3, h4, h5, h6 {
     color: var(--neutral-foreground-1, inherit);
 }
@@ -41,13 +69,23 @@ fluent-data-grid {
    src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs and the `w-1`…`w-9` classes in
    src/SchoolCollab.Admin/wwwroot/css/app.css.
    Tag names are the v5 web-component names (v4's `fluent-select`/`fluent-text-field` are gone —
-   the Blazor wrappers render `fluent-dropdown` / `fluent-text-input`). */
+   the Blazor wrappers render `fluent-dropdown` / `fluent-text-input`).
+
+   `width: 100%`, NOT `inherit` (measured 2026-10-23 in the running admin app): on a flex/grid
+   slotted control `inherit` takes the parent's COMPUTED width, which for `w-9` is the percentage
+   itself — and the percentage then resolves against the slotted grid area, not the field host.
+   The result was a `fluent-text-input` stuck at its intrinsic 185px inside a 655px field, so a
+   `w-9` title and a `w-4` code field looked identical (185px each). `width: 100%` makes the
+   control fill the host: title 655px, code 200px, textarea unchanged. `fluent-text-area` never
+   showed the defect because it is block-level inside the field. */
 fluent-field > fluent-dropdown,
 fluent-field > fluent-text-input,
 fluent-field > fluent-text-area,
 fluent-field > fluent-number-field,
 fluent-field > fluent-date-picker {
-    width: inherit;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 /* v5 replaced the nav menu components (`FluentNavMenu`/`FluentNavLink`/`FluentNavGroup`) with
@@ -101,6 +139,78 @@ a:hover, fluent-link:hover {
 
 h1:focus {
     outline: none;
+}
+
+/* ── The create / edit skeleton (documents/solution/panel-layout-pattern.md §2, §6) ──────────────
+   ONE region grid for every authoring surface. Both columns are LAYOUT regions: no border, no
+   surface, no padding, no radius — they exist only to place blocks, so the single frame per block is
+   the PanelSection inside it (lesson L2: a region that draws a box double-framed every block in it).
+
+   COLLAPSE IS A CONTAINER QUERY, never a viewport magic number (owner, 2026-10-23; lesson L5: two
+   grids in the repo carried different viewport breakpoints — 1400px vs 1100px — for this same
+   decision). A viewport breakpoint lies the moment the surface renders inside a narrower host region
+   (a drawer, a dialog, a page with a wider nav), so the grid queries the width IT actually has. The
+   queried ancestor is `.region-grid-host` — a grid cannot query itself. Declare it on the page
+   wrapper, NOT on the grid. */
+.region-grid-host {
+    container-type: inline-size;
+    container-name: region-grid-host;
+}
+
+.region-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
+    gap: 16px;
+    align-items: start;
+}
+
+.region-grid__main {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+/* The summary view's single-column stack (panel-layout-pattern §2): one block after another with the
+   same 16px rhythm the two regions use. It draws nothing — it only stacks, so the only frame per
+   block stays the PanelSection inside it. */
+.region-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+/* The rail column sticks to the top of the page's scroll port (§6): relationships stay reachable
+   while the form scrolls. `align-self: start` is part of the rule, not a tidy-up — a stretched grid
+   item has the full column height as its containing block and can never stick. */
+.region-grid__rail {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+    position: sticky;
+    top: var(--app-bar-sticky-offset, 0px);
+    align-self: start;
+}
+
+/* Collapsed: one column, and the rail goes LAST — the fields are what the author came for and the
+   relationships are enrichment. */
+@container region-grid-host (max-width: 899px) {
+    .region-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ── One offset for every sticky thing on an authoring surface (§6) ─────────────────────────────
+   `--app-bar-height` is the app bar's own height (MainLayout pins its header region at 50px).
+   `--app-bar-sticky-offset` is the distance a sticky block keeps from the top of the scroll port.
+   The port — `.page-scroll` — begins at the app bar's LOWER edge, so that distance is 0 and a
+   nonzero value would float a pinned header 50px below where it belongs. Declared once here: the
+   rail column and the first block's header row both read it, and a page may not invent its own. */
+:root {
+    --app-bar-height: 50px;
+    --app-bar-sticky-offset: 0px;
 }
 
 #blazor-error-ui {

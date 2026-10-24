@@ -102,6 +102,33 @@ public static class DialogServiceExtensions
     }
 
     /// <summary>
+    /// Shows the shared audited-reason <see cref="ReasonDialog"/> and returns the operator's
+    /// <b>trimmed</b> reason, or <c>null</c> when the dialog was cancelled — in which case the caller
+    /// must abandon the act it was about to perform and leave its draft untouched. The dialog rejects
+    /// a blank reason itself, so a non-null result is never whitespace.
+    ///
+    /// <para>This is the single entry point for every audited act (naming spec D11): saving an edit and
+    /// resetting a template both come through here, so the two cannot drift into two different reason
+    /// experiences.</para>
+    /// </summary>
+    /// <param name="model">The dialog's copy — the prompt, the submit label and its in-flight label.
+    /// See <see cref="ReasonDialog.ReasonFormModel"/>.</param>
+    /// <param name="title">The dialog header title, e.g. <c>Reset 'Grade 8 reminder'</c>.</param>
+    /// <param name="size">One of the four fixed <see cref="DialogWidth"/> widths. Default
+    /// <see cref="DialogWidth.Small"/> (420px) — the footprint the reset prompt always had.</param>
+    public static async Task<string?> ShowReasonDialogAsync(
+        this IDialogService dialogService,
+        ReasonDialog.ReasonFormModel model,
+        string title,
+        DialogWidth size = DialogWidth.Small)
+    {
+        var result = await dialogService
+            .ShowShellDialogAsync<ReasonDialog, ReasonDialog.ReasonFormModel, ReasonDialog.ReasonResult>(
+                model, title, size);
+        return result?.Reason;
+    }
+
+    /// <summary>
     /// Shows a read-only dialog (a plain <see cref="ComponentBase"/> that is
     /// NOT a <see cref="DialogShellBase{TModel, TResult}"/>) with the same
     /// shell chrome every shell dialog uses (title + width + no

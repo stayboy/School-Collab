@@ -353,28 +353,33 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "the pencil flips the page into the edit-fields view"), TimeSpan.FromSeconds(5));
     }
 
-    /// <summary>D12 (owner, 2026-10-08): the compartment JUMP-NAV is removed, so the compartment
-    /// contract is now read straight off the DOM — the <c>section.authoring-compartment</c> order.
-    /// Rules is NOT a section (it is a SectionCard inside the Targets column), so the expected lists
-    /// below are the SECTION order; the Rules card's own anchor is pinned separately.</summary>
-    private static IReadOnlyList<string> CompartmentSectionIds(IRenderedComponent<Authoring> cut) =>
-        cut.FindAll("section.authoring-compartment").Select(section => section.Id).ToList();
+    /// <summary>Every block on the surface is a <c>PanelSection</c> (panel-layout-pattern §3: exactly
+    /// one box, and regions draw nothing), so the block contract is read straight off the DOM — the
+    /// <c>.panel-section[id]</c> order, main region first and then the rail. Blocks with no id of their
+    /// own (the rail's Targets &amp; Audience panel) are addressed by their pinned child ids instead.</summary>
+    private static IReadOnlyList<string> PanelSectionIds(IRenderedComponent<Authoring> cut) =>
+        cut.FindAll(".panel-section[id]").Select(section => section.Id).ToList();
 
+    /// <summary>The edit-fields view: main = Details + Questions &amp; AI, rail = Targets &amp; Audience
+    /// (no id of its own) + Content &amp; Resources + Rules. DOM order is main-then-rail, which is also
+    /// the collapsed order (§2: the rail goes LAST).</summary>
     private static readonly string[] ExpectedFormSections =
     [
         "authoring-basics",
-        "authoring-targets",
-        "authoring-content",
-        "authoring-questions"
+        "authoring-questions",
+        "authoring-materials-section",
+        "authoring-rules"
     ];
 
     /// <summary>D10 (verification round 2026-10-08, extended by the owner). Revised 2026-10-10: the
     /// Instructions compartment is COLLAPSED — its notes moved into Basics and its materials block moved
-    /// into the right pane — so neither surface lists it any more.</summary>
+    /// into the rail — so neither surface lists it any more. Revised 2026-10-23: Create still renders
+    /// no Questions &amp; AI, and the merged Content &amp; Resources panel lives in the rail.</summary>
     private static readonly string[] ExpectedCreateSections =
     [
         "authoring-basics",
-        "authoring-targets"
+        "authoring-materials-section",
+        "authoring-rules"
     ];
 
     private static bool ScoringFieldDisabled(IRenderedComponent<Authoring> cut, string id) =>
@@ -565,7 +570,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            CompartmentSectionIds(cut).Should().Equal(ExpectedCreateSections,
+            PanelSectionIds(cut).Should().Equal(ExpectedCreateSections,
                 "UX-1/UX-3 (D1) + D5 + D10: Create renders the three DETAILS sections — Content & Resources and Questions & AI live on the draft-edit surface only");
             cut.Find("#authoring-rules").Should().NotBeNull(
                 "the Rules card (not a section) still renders in the Targets column");
@@ -604,7 +609,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            CompartmentSectionIds(cut).Should().Equal(ExpectedFormSections,
+            PanelSectionIds(cut).Should().Equal(ExpectedFormSections,
                 "the pencil flipped the default summary into the edit-fields view, which carries the form sections in canonical order");
             cut.Find("#authoring-rules").Should().NotBeNull("the Rules card renders in the Targets column");
         });
@@ -653,7 +658,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
             {
                 cut.FindAll("nav.authoring-jumpnav").Should().BeEmpty(
                     "D12: the jump-nav — the submenu list that used to sit under the page title — is removed");
-                CompartmentSectionIds(cut).Should().Equal(expected,
+                PanelSectionIds(cut).Should().Equal(expected,
                     "D1/D5/D10: the section set per mode is unchanged by D12");
             });
         }
@@ -731,8 +736,9 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 // ORDER is what this asserts, top-to-bottom in the column.
                 cut.FindAll("#authoring-targets .panel-section__title")
                     .Select(title => title.TextContent.Trim())
-                    .Should().Equal(["Content & Resources", "Targets & Audience", "Rules"],
-                        "the pane's headers, top to bottom: Content & Resources, Targets & Audience, then Rules");
+                    .Should().Equal(["Targets & Audience", "Content & Resources", "Rules"],
+                        "the rail's headers, top to bottom — the approved consent table's order (the "
+                        + "relationship the surface opens on first, then its content, then the policy readouts)");
                 cut.FindAll("#authoring-basics-grade").Should().BeEmpty(
                     "round drop-primary-grade: the Primary grade control is gone from every mode (AC-9)");
                 cut.Markup.Should().NotContain("Primary grade",
@@ -1191,12 +1197,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
             var pane = cut.Find("#authoring-targets");
             pane.QuerySelector("#authoring-materials-section").Should().NotBeNull(
                 "Content & Resources moved into the right pane (owner, 2026-10-10)");
-            pane.InnerHtml.IndexOf("authoring-materials-section", StringComparison.Ordinal)
+            pane.InnerHtml.IndexOf("authoring-targets-title", StringComparison.Ordinal)
                 .Should().BeLessThan(
-                    pane.InnerHtml.IndexOf("authoring-targets-title", StringComparison.Ordinal),
-                    "…and it TOPS the pane, above the Targets & Audience panel (the needle is the panel "
-                    + "title's own id: the retired 'section-card' needle matches nothing now that the "
-                    + "block wears the shared PanelSection)");
+                    pane.InnerHtml.IndexOf("authoring-materials-section", StringComparison.Ordinal),
+                    "the rail's approved order puts Targets & Audience first and Content & Resources "
+                    + "beneath it (owner, 2026-10-23 — the consent table's order, not the earlier "
+                    + "materials-tops-the-pane arrangement)");
 
             // ── AC-9: the block's header carries a TITLE and the kebab MENU — two distinct elements.
             cut.Find("#authoring-materials-title").TextContent.Trim().Should().Be("Content & Resources",
@@ -1609,28 +1615,32 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
             cut.WaitForAssertion(() =>
             {
-                cut.Find("#authoring-targets").ClassList.Should().Contain("authoring-compartment--right",
-                    "the right-hand column is the element the Rules card stacks in");
+                cut.Find("#authoring-targets").ClassList.Should().Contain("region-grid__rail",
+                    "the rail region is the element the relationship panels stack in — and it draws "
+                    + "no box of its own (panel-layout-pattern §2)");
                 cut.Find("#authoring-targets > #authoring-rules").Should().NotBeNull(
-                    "the Rules container is a child of that column, so it stacks beneath the Targets card");
+                    "the Rules panel is a direct child of that region, so it stacks beneath the others");
 
                 var rules = cut.Find("#authoring-rules");
+                rules.ClassList.Should().Contain("panel-section",
+                    "Rules is the shared box now, not a card inside a container that drew its own");
                 rules.QuerySelectorAll("h3").Should().BeEmpty(
-                    "the card header IS the compartment's single title — no hand-rolled h3");
+                    "the panel header IS the block's single title — no hand-rolled h3");
                 rules.QuerySelector(".panel-section .authoring-policy-row").Should().NotBeNull(
                     "the readouts render inside the shared panel (owner, 2026-10-10: SectionCard's chrome retired)");
                 rules.NextElementSibling.Should().BeNull(
-                    "the Rules card closes the column: Targets card → its audience readouts → Rules card");
+                    "the Rules panel closes the rail: Targets & Audience → Content & Resources → Rules");
 
                 string[] expectedSections = mode == AssignmentAuthoringMode.Create
-                    // D10: Create renders neither Content nor Questions; the Instructions compartment is
-                    // collapsed (owner, 2026-10-10), so it is not a section any more on either surface.
-                    ? ["authoring-basics", "authoring-targets"]
-                    : ["authoring-basics", "authoring-targets", "authoring-content",
-                       "authoring-questions"];
-                cut.FindAll("section.authoring-compartment").Select(section => section.Id)
+                    // D10: Create renders neither Questions nor the resources half of the rail; the
+                    // Instructions compartment is collapsed (owner, 2026-10-10) on both surfaces.
+                    ? ["authoring-basics", "authoring-materials-section", "authoring-rules"]
+                    : ["authoring-basics", "authoring-questions", "authoring-materials-section",
+                       "authoring-rules"];
+                cut.FindAll(".panel-section[id]").Select(section => section.Id)
                     .Should().Equal(expectedSections,
-                        "only the spine compartments are sections any more — Rules is a card, D10 drops content+questions on Create, and the Instructions compartment is collapsed");
+                        "the surface's blocks are all PanelSections now — one box each, regions drawing "
+                        + "nothing, and the rail's panels after the main column");
             });
         }
     }
@@ -2330,6 +2340,154 @@ public class AssignmentAuthoringBunitTests : BunitContext
     /// <see cref="ConfirmDialogContent"/> is what <c>ShowConfirmDialogAsync</c> hands FluentUI, so
     /// recording it pins the wording and the button roles the author actually reads.
     /// </summary>
+    // ── Round panel-layout-pattern (owner, 2026-10-23): one skeleton, one box, opt-in collapse ──
+
+    /// <summary>§4/§6: the page action belongs to the FIRST block's sticky header row, so the shell
+    /// renders no separate action bar on this surface. The main region carries no collapse control, and
+    /// the compartment chrome that used to frame the blocks is gone (§2/§3).</summary>
+    [TestMethod]
+    public void PanelLayout_FirstBlockOwnsThePageAction_AndTheShellRendersNoActionBar()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll(".authoring-actionbar").Should().BeEmpty(
+                "§4/§6: the actions live in the first block's header row, not in a second toolbar");
+
+            var details = cut.Find("#authoring-basics");
+            details.ClassList.Should().Contain("panel-section", "the block is the shared box (§3)");
+            details.ClassList.Should().Contain("panel-section--sticky",
+                "§6: that first header row is sticky, which is what lets it own the page action");
+            details.QuerySelectorAll(".panel-section__actions #authoring-primary-action").Should().ContainSingle(
+                "the status-matrix primary action renders on the title's row");
+            details.QuerySelectorAll(".panel-section__actions #authoring-cancel").Should().ContainSingle(
+                "§16: Cancel renders beside it, left of the primary");
+            details.QuerySelectorAll(".panel-section__chevron").Should().BeEmpty(
+                "§6: the main region is never collapsible");
+
+            cut.Markup.Should().NotContain("authoring-compartment",
+                "§2/§3: the compartment chrome is deleted — one frame per block and no region draws one");
+        });
+    }
+
+    /// <summary>§5/§6 consent table: the rail holds Targets &amp; Audience, Content &amp; Resources and
+    /// Rules in that order; only the last two are collapsible, and the chevron LEADS the title on the
+    /// panels that have one.</summary>
+    [TestMethod]
+    public void PanelLayout_RailMatchesTheConsentTable_ChevronOnlyWhereTheOwnerConsented()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+
+        cut.WaitForAssertion(() =>
+        {
+            var rail = cut.Find("#authoring-targets");
+            rail.ClassList.Should().Contain("region-grid__rail",
+                "the rail is a layout region: it draws no border, surface or padding of its own (§2)");
+
+            var panels = rail.QuerySelectorAll(".panel-section").ToList();
+            panels.Select(p => p.QuerySelector(".panel-section__title")!.TextContent.Trim())
+                .Should().Equal(["Targets & Audience", "Content & Resources", "Rules"],
+                    "the approved rail, in reading order");
+
+            panels[0].QuerySelectorAll(".panel-section__chevron").Should().BeEmpty(
+                "§6: Targets & Audience is explicitly NOT collapsible");
+            panels[1].QuerySelector("button.panel-section__chevron").Should().NotBeNull(
+                "Content & Resources is collapsible per the consent table");
+            panels[2].QuerySelector("button.panel-section__chevron").Should().NotBeNull("Rules likewise");
+
+            panels[1].QuerySelector(".panel-section__header")!.FirstElementChild!.ClassList
+                .Should().Contain("panel-section__chevron",
+                    "§6: the chevron leads the title on a collapsible panel");
+
+            cut.FindAll(".region-grid__main .panel-section__chevron").Should().BeEmpty(
+                "§6: main-column panels carry no collapse control");
+        });
+    }
+
+    /// <summary>§12: the edit surface renders exactly ONE Content &amp; Resources block. The old
+    /// arrangement had two — the instruction-materials panel in the rail and a second
+    /// <c>#authoring-content</c> region carrying <c>ResourcesSection</c> below the fold — and the
+    /// second one is deleted, with <c>ResourcesSection</c> reduced to a body.</summary>
+    [TestMethod]
+    public void Edit_ExactlyOneContentAndResourcesBlock_Renders()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("#authoring-materials-title").Should().ContainSingle(
+                "one block, one title");
+            cut.FindAll("#authoring-materials-section .panel-section__title")
+                .Select(t => t.TextContent.Trim()).Should().Equal(["Content & Resources"]);
+            cut.FindAll("#authoring-content").Should().BeEmpty(
+                "the separate Content & Resources region is deleted — its branches are the one panel's body states");
+            cut.FindAll(".cq-header").Should().BeEmpty(
+                "ResourcesSection renders no heading chrome of its own now");
+            cut.FindComponents<ResourcesSection>().Should().ContainSingle(
+                "its rows render inside the one panel's body");
+        });
+    }
+
+    /// <summary>§16 (owner, 2026-10-23): <c>Cancel</c> renders on both assignment surfaces and leaves
+    /// through the EXISTING unsaved-changes guard — no second guard, no silent discard.</summary>
+    [TestMethod]
+    public async Task PanelLayout_Cancel_GoesThroughTheExistingUnsavedChangesGuard()
+    {
+        var captured = new List<ConfirmDialogContent>();
+        RegisterConfirmationDialog(confirm: false, captured);
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+
+        await SetTitleAsync(cut, "Edited title");
+
+        var before = Navigation.Uri;
+        cut.Find("#authoring-cancel").Click();
+
+        cut.WaitForAssertion(() => captured.Should().HaveCount(1,
+            "§16: Cancel reaches the ONE UX-7 guard rather than a second one"));
+        captured[0].Message.Should().Be(Authoring.UnsavedChangesMessage);
+        Navigation.Uri.Should().Be(before,
+            "a non-discard answer cancels the navigation, and the draft stays on screen");
+        cut.Markup.Should().Contain("Edited title");
+    }
+
+    /// <summary>§16: with nothing to protect, Cancel simply leaves for the assignment list.</summary>
+    [TestMethod]
+    public void PanelLayout_Cancel_OnACleanForm_LeavesForTheAssignmentList()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-cancel").Should().ContainSingle());
+
+        cut.Find("#authoring-cancel").Click();
+
+        cut.WaitForAssertion(() => Navigation.Uri.Should().EndWith("/assignments",
+            "Cancel navigates to the owning list page"));
+    }
+
+    /// <summary>§16: the assignment surface's <c>Cancel</c> is on the overview too — which is the
+    /// Edit route's default landing — so the control is never only one click away from where the
+    /// author actually arrives.</summary>
+    [TestMethod]
+    public void PanelLayout_Cancel_AlsoRendersOnTheEditOverview()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            enterEditFields: false);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("#authoring-summary").Should().ContainSingle();
+            cut.FindAll("#authoring-cancel").Should().ContainSingle(
+                "§16/the consent table: the overview's first header row carries the same controls");
+            cut.Find("#authoring-summary .authoring-summary__header #authoring-primary-action").Should().NotBeNull(
+                "§4: the page action is on the first block's header row in this view as well");
+            cut.FindAll(".authoring-actionbar").Should().BeEmpty(
+                "no separate action bar exists on this surface in any view");
+        });
+    }
+
     private void RegisterConfirmationDialog(bool confirm, List<ConfirmDialogContent> captured)
     {
         var dialogMock = this.RegisterDialogService();
@@ -3683,7 +3841,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.WaitForAssertion(() => updateBody.Should().NotBeNull(), TimeSpan.FromSeconds(5));
         updateBody.Should().Contain(GroupAId.ToString()).And.NotContain(GroupBId.ToString(),
             "the update carries exactly the reduced target set");
-        linkBody.Should().NotBeNull("the changed group set re-issues the replace-set link route");
+        cut.WaitForAssertion(() => linkBody.Should().NotBeNull(
+            "the changed group set re-issues the replace-set link route"), TimeSpan.FromSeconds(5));
         linkBody.Should().NotContain(GroupBId.ToString());
     }
 

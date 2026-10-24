@@ -25,6 +25,8 @@ public static class FluentIcons
     // Contact ordering (spec §4.9): move-up / move-down affordances.
     public static readonly Icon ChevronUp = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ChevronUp();
     public static readonly Icon ChevronDown = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ChevronDown();
+    // PanelSection's opt-in collapse chevron, collapsed state (panel-layout-pattern §6).
+    public static readonly Icon ChevronRight = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ChevronRight();
     public static readonly Icon Save = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Save();
     public static readonly Icon Settings = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Settings();
     public static readonly Icon Open = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Open();

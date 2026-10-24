@@ -1,7 +1,7 @@
 @page "/notification-templates"
 @using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Core.Notifications
-@using SchoolCollab.Core.RichText
 @inject NotificationTemplateApiClient Api
 @inject VisibleTenantService Tenants
 @inject IDialogService DialogService
@@ -14,8 +14,9 @@
    IS the entity grid), a create action in the standard place, and a row kebab for secondary actions.
 
    Columns: the kind banner, the OWNER (System badge or the tenant's name - spec 3.7), the preferred mode
-   of contact, the template itself (linked), the constraint count (a link opening the ONE read-only
-   constraints dialog; the scope's default badge at zero) and the last change.
+   of contact, the generated CODE (a dash when a pre-upgrade row has none, naming spec D7), the template
+   itself — the TITLE as the link, the description as a muted second line (D3/D4) — the constraint count (a
+   link opening the ONE read-only constraints dialog; the scope's default badge at zero) and the last change.
 
    Scope: a tenant session sees its own rows plus the system blueprint, and may adopt a system row. A
    system-scope session sees the blueprint plus - through includeTenantOwned - every tenant's rows, and
@@ -101,12 +102,24 @@
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Contact mode" SortBy="@_sortByChannel" Sortable="true">
-            @ModeLabel(context.Channel)
+            @EnumLabels.For(context.Channel)
         </TemplateColumn>
+        @* Naming spec D7: the generated reference, shown read-only — a dash where a pre-upgrade row has none. *@
+        <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Code" SortBy="@_sortByCode" Sortable="true">
+            <span class="template-code">@CodeOf(context)</span>
+        </TemplateColumn>
+        @* D3/D4: the template cell is the TITLE (the row's identity), with the description as a muted
+           second line so the grid can be scanned for meaning rather than guessed at. *@
         <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Template" SortBy="@_sortByTitle" Sortable="true">
-            <FluentLink Appearance="LinkAppearance.Default" Href="@($"/notification-templates/{context.Id:D}")">
-                @TitleOf(context)
-            </FluentLink>
+            <div class="template-cell">
+                <FluentLink Appearance="LinkAppearance.Default" Href="@($"/notification-templates/{context.Id:D}")">
+                    @TitleOf(context)
+                </FluentLink>
+                @if (!string.IsNullOrWhiteSpace(context.Description))
+                {
+                    <span class="template-cell__description">@context.Description</span>
+                }
+            </div>
         </TemplateColumn>
         <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Constraints" SortBy="@_sortByConstraintCount" Sortable="true">
             @if (context.Constraints.Count == 0)
@@ -133,7 +146,8 @@
     {
         // One track per rendered column, INCLUDING the Actions column LandingPage appends
         // (blazor-components.md rule 7 / adr-authoring-surface-pattern decision 2).
-        GridTemplateColumns = "minmax(110px,1fr) minmax(110px,1fr) 110px minmax(200px,2fr) minmax(120px,1fr) 150px auto",
+        GridTemplateColumns =
+            "minmax(110px,1fr) minmax(110px,1fr) 110px 90px minmax(200px,2fr) minmax(120px,1fr) 150px auto",
     };
 
     private readonly GridSort<TenantNotificationTemplateDto> _sortByKind =
@@ -142,8 +156,10 @@
         GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.OwnerName);
     private readonly GridSort<TenantNotificationTemplateDto> _sortByChannel =
         GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Channel);
+    private readonly GridSort<TenantNotificationTemplateDto> _sortByCode =
+        GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Code);
     private readonly GridSort<TenantNotificationTemplateDto> _sortByTitle =
-        GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Subject);
+        GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Title);
     private readonly GridSort<TenantNotificationTemplateDto> _sortByConstraintCount =
         GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Constraints.Count);
     private readonly GridSort<TenantNotificationTemplateDto> _sortByUpdatedAt =
@@ -362,29 +378,21 @@
         return actions;
     }
 
-    private static string ModeLabel(NotificationChannel channel) => channel switch
-    {
-        NotificationChannel.Email => "Email",
-        NotificationChannel.SMS => "SMS",
-        NotificationChannel.WhatsApp => "WhatsApp",
-        _ => channel.ToString(),
-    };
-
     /// <summary>The zero-constraint badge names the SCOPE, not just "tenant" (spec 3.2).</summary>
     private static string DefaultBadgeLabel(TenantNotificationTemplateDto row) =>
         row.IsSystem ? "System default" : "Tenant default";
 
-    private static string TitleOf(TenantNotificationTemplateDto row)
-    {
-        if (!string.IsNullOrWhiteSpace(row.Subject))
-            return row.Subject!;
+    /// <summary>
+    /// The row's identity label (naming spec D3): its title, with the pre-naming chain kept only as a last
+    /// resort so a payload that omits the field never renders an empty cell.
+    /// </summary>
+    private static string TitleOf(TenantNotificationTemplateDto row) => TemplateTitles.For(
+        row.Title, row.Subject, row.Body, $"{row.Kind} · {EnumLabels.For(row.Channel)}");
 
-        var plain = RichInstructionSanitizer.ToPlainText(row.Body);
-        if (string.IsNullOrWhiteSpace(plain))
-            return "(empty body)";
+    /// <summary>The generated reference (D7), or the dash that marks a row which predates the code column.</summary>
+    private static string CodeOf(TenantNotificationTemplateDto row) =>
+        string.IsNullOrWhiteSpace(row.Code) ? "—" : row.Code!;
 
-        return plain.Length <= 80 ? plain : plain[..80] + "...";
-    }
     private static string ConstraintCountLabel(TenantNotificationTemplateDto row) =>
         row.Constraints.Count == 1 ? "1 constraint" : $"{row.Constraints.Count} constraints";
 
@@ -392,7 +400,7 @@
     private async Task OpenConstraintsAsync(TenantNotificationTemplateDto row)
     {
         await DialogService.ShowReadonlyDialogAsync<TemplateConstraintsDialog>(
-            $"{row.Kind} - {ModeLabel(row.Channel)}",
+            $"{row.Kind} - {EnumLabels.For(row.Channel)}",
             new Dictionary<string, object?>
             {
                 [TemplateConstraintsDialog.ConstraintsKey] = row.Constraints,
@@ -450,17 +458,17 @@
     /// </summary>
     private async Task ResetAsync(TenantNotificationTemplateDto row)
     {
-        var result = await DialogService.ShowShellDialogAsync<TemplateResetReasonDialog,
-            TemplateResetReasonDialog.ReasonFormModel,
-            TemplateResetReasonDialog.ReasonResult>(
-            new TemplateResetReasonDialog.ReasonFormModel(
-                $"Reset '{TitleOf(row)}'",
+        // D11: the shared reason dialog replaces the retired single-purpose reset prompt — the same dialog
+        // the editor opens on save, and the reset's only confirmation.
+        var reason = await DialogService.ShowReasonDialogAsync(
+            new ReasonDialog.ReasonFormModel(
                 "Resetting removes this template: the built-in default applies again. The reason is "
-                + "recorded in the audit trail."),
-            $"Reset '{TitleOf(row)}'",
-            DialogWidth.Small);
+                + "recorded in the audit trail.",
+                "Reset",
+                "Resetting..."),
+            $"Reset '{TitleOf(row)}'");
 
-        if (result is null)
+        if (reason is null)
             return;
 
         var previous = _items;
@@ -472,7 +480,7 @@
 
         try
         {
-            await Api.DeleteAsync(row.Id, result.Reason, MutationToken);
+            await Api.DeleteAsync(row.Id, reason, MutationToken);
         }
         catch (OperationCanceledException)
         {

@@ -4,8 +4,11 @@
 - **Date:** 2026-10-21
 - **Supersedes:** none — **extends** `assignment-authoring-compartments.md` UX-4/D6 (sticky action bar)
   and D8 (breadcrumb) from "the assignment surface" to "every authoring surface"
+- **Superseded in part (2026-10-23):** decision 1's sticky-action-bar half is superseded by
+  `documents/solution/panel-layout-pattern.md` §4 — see the note on decision 1.
 - **Related:** `.github/copilot/rules/blazor-components.md` § "Landing-page performance pattern";
   `documents/specs/notification-template-authoring-redesign.md` §3.2–§3.5, §7;
+  `documents/solution/panel-layout-pattern.md` §4 (owns the page action's placement);
   `documents/rounds/round-notification-template-authoring-redesign.md`;
   `documents/rounds/round-authoring-pattern-conformance.md`
 
@@ -40,6 +43,14 @@ of the two it finds first.
    action bar (title · status/owner · primary action · secondary kebab). `AssignmentAuthoring` and
    `TemplateEditor` both consume it. `Admin.Shared` is the only legal home: Settings may not reference
    `Assignments.Application`, and a second copy is the drift this ADR exists to prevent.
+
+   > **Superseded 2026-10-23 (the sticky-action-bar half).**
+   > `documents/solution/panel-layout-pattern.md` §4 now owns the page action's placement: the
+   > primary/secondary controls live in the **first block's sticky header row**, not in a separate
+   > action bar, so the shell keeps the breadcrumb and page title (and its ownership of *which* actions
+   > exist) but no longer renders a sticky action bar on the create / edit surfaces. The
+   > shell-owns-the-bar half of this decision is retained here as history; the breadcrumb half, the
+   > `Admin.Shared`-only home and the drift rationale are unchanged.
 2. **`LandingPage` owns its bars; the page owns its grid tracks.** A page's `GridTemplateColumns`
    budgets one track per rendered column, **including** the Actions column the wrapper appends.
    `LandingGridSettings` states the contract; the template landing appends `auto`.

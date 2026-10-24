@@ -97,4 +97,21 @@ public class StudentsLookupClientTests
         await FluentActions.Awaiting(() => client.ListTopicsAsync()).Should().ThrowAsync<HttpRequestException>();
         await FluentActions.Awaiting(() => client.ListActivityGroupsAsync()).Should().ThrowAsync<HttpRequestException>();
     }
+
+    /// <summary>
+    /// A route this host does not map answers 404, and that is reported as null — not thrown. It is
+    /// the live case for activity groups while <c>FEATURE:EnableActivityGroups</c> is off, and it is
+    /// a feature posture rather than a fault, so the caller must be able to tell it from an outage.
+    /// </summary>
+    [TestMethod]
+    public async Task EveryLookup_ReturnsNullWhenTheRouteIsNotMapped()
+    {
+        var (client, _) = Build(HttpStatusCode.NotFound, "no endpoint matched");
+
+        (await client.ListGradeLevelsAsync()).Should().BeNull();
+        (await client.ListTopicsAsync()).Should().BeNull();
+        (await client.ListActivityGroupsAsync()).Should().BeNull(
+            "an unmapped /activity-groups is the flag-off posture, and null is how the caller tells "
+            + "it apart from a 500");
+    }
 }

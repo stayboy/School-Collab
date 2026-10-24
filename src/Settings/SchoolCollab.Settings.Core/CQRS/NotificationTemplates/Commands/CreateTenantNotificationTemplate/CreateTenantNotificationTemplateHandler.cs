@@ -1,4 +1,5 @@
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
@@ -15,10 +16,17 @@ namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.CreateT
 /// request is checked against the per-scope default invariant first
 /// (<see cref="Services.TenantNotificationTemplateDefaults"/>) - a second default for the same
 /// (kind, channel) in the same scope is a typed conflict, never a silent duplicate.
+/// <para>
+/// The row's generated code is minted here, once, from the in-context
+/// <see cref="TenantNotificationTemplate.CodeRule"/> rule (naming spec D5/D6): Settings owns both the
+/// rule and the row, so this is a generator call, not a cross-context hop. Nothing on the update path
+/// can rewrite it.
+/// </para>
 /// </summary>
 public sealed class CreateTenantNotificationTemplateHandler(
     SettingsDbContext db,
     ITenantProvider tenantProvider,
+    IEntityCodeGenerator entityCodeGenerator,
     TemplateAuditRecorder auditor) : ICommandHandler<CreateTenantNotificationTemplate, TenantNotificationTemplateDto>
 {
     public async Task<TenantNotificationTemplateDto> HandleAsync(
@@ -37,12 +45,22 @@ public sealed class CreateTenantNotificationTemplateHandler(
                 db, request.Kind, request.Channel, ownerId, excludingTemplateId: null, ct);
         }
 
+        // A blank title is rejected by the domain, so the 400 arm of the route covers it.
+        var code = await entityCodeGenerator.GenerateAsync(TenantNotificationTemplate.CodeRule, ct);
+
         // Create builds the constraint rows itself so each carries the template's generated id and
-        // scope (callers cannot know it before the row exists).
+        // scope (callers cannot know it before the row exists). Every argument is named because `code`
+        // and `subject` are both strings: a positional swap would compile.
         var template = TenantNotificationTemplate.Create(
-            ownerId, request.Kind, request.Channel,
-            request.Subject, request.Body,
-            requestedConstraints.Select(c => (c.Dimension, c.Value)).ToList());
+            tenantId: ownerId,
+            kind: request.Kind,
+            channel: request.Channel,
+            title: request.Title,
+            description: request.Description,
+            code: code,
+            subject: request.Subject,
+            body: request.Body,
+            constraints: requestedConstraints.Select(c => (c.Dimension, c.Value)).ToList());
 
         db.TenantNotificationTemplates.Add(template);
 
@@ -58,9 +76,6 @@ public sealed class CreateTenantNotificationTemplateHandler(
 
         var ownerName = await NotificationTemplateOwnership.ResolveOwnerNameAsync(db, ownerId, ct);
 
-        return new TenantNotificationTemplateDto(
-            template.Id, template.Kind, template.Channel, template.Subject, template.Body,
-            template.Constraints.Select(c => new TemplateConstraintDto(c.Id, c.Dimension, c.Value)).ToList(),
-            template.CreatedAt, template.UpdatedAt, ownerId, ownerName);
+        return NotificationTemplateOwnership.ToDto(template, ownerName);
     }
 }

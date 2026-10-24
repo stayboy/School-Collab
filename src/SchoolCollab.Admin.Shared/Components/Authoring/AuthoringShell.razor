@@ -36,34 +36,33 @@
         }
     </nav>
 
-    <header class="authoring-actionbar">
-        <div class="authoring-title-group">
-            <h2 class="authoring-heading">
-                @if (TitleContent is not null)
+    @if (ShowActionBar)
+    {
+        <header class="authoring-actionbar">
+            @TitleGroup
+            <div class="authoring-actionbar-controls">
+                @LeadingActions
+                @if (PrimaryLabel is not null)
                 {
-                    @TitleContent
+                    <FluentButton Id="@PrimaryId"
+                                  Appearance="ButtonAppearance.Primary"
+                                  Disabled="@PrimaryDisabled"
+                                  OnClick="OnPrimaryAction">
+                        @PrimaryLabel
+                    </FluentButton>
                 }
-                else
-                {
-                    @Title
-                }
-            </h2>
-            @Badge
-        </div>
-        <div class="authoring-actionbar-controls">
-            @LeadingActions
-            @if (PrimaryLabel is not null)
-            {
-                <FluentButton Id="@PrimaryId"
-                              Appearance="ButtonAppearance.Primary"
-                              Disabled="@PrimaryDisabled"
-                              OnClick="OnPrimaryAction">
-                    @PrimaryLabel
-                </FluentButton>
-            }
-            @SecondaryActions
-        </div>
-    </header>
+                @SecondaryActions
+            </div>
+        </header>
+    }
+    else
+    {
+        @* The page owns its actions and renders them into its FIRST block's sticky header row
+           (documents/solution/panel-layout-pattern.md §4/§6), so this shell renders NO action bar —
+           not an empty one. The title group stays: the page title and its badge slot are the shell's
+           identity, and the bar is the only part whose PLACEMENT moved. *@
+        <div class="authoring-page-title">@TitleGroup</div>
+    }
 
     @ChildContent
 </div>
@@ -99,6 +98,37 @@
     /// <summary>The secondary actions — usually a kebab.</summary>
     [Parameter] public RenderFragment? SecondaryActions { get; set; }
 
-    /// <summary>The page body, rendered below the action bar.</summary>
+    /// <summary>
+    /// Whether the shell renders its own sticky action bar. <b>True by default</b> — the bar is this
+    /// shell's original contract (ADR <c>adr-authoring-surface-pattern.md</c>, decision 1, amended
+    /// 2026-10-23).
+    /// <para>
+    /// A surface on the panel layout pattern sets it to <b>false</b> and renders the SAME controls —
+    /// it already supplies them through the parameters above — into the FIRST block's header row,
+    /// which is sticky for exactly this reason (§4/§6). That row never scrolls away, so nothing is
+    /// lost by dropping the separate bar; what changes is only WHERE the controls render. The shell
+    /// keeps ownership of the crumb trail and the page title either way.
+    /// </para>
+    /// </summary>
+    [Parameter] public bool ShowActionBar { get; set; } = true;
+
+    /// <summary>The page body, rendered below the action bar (or below the title block).</summary>
     [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>The title + badge cluster, shared by both placements so the two cannot drift.</summary>
+    private RenderFragment TitleGroup => @<text>
+        <div class="authoring-title-group">
+            <h2 class="authoring-heading">
+                @if (TitleContent is not null)
+                {
+                    @TitleContent
+                }
+                else
+                {
+                    @Title
+                }
+            </h2>
+            @Badge
+        </div>
+    </text>;
 }

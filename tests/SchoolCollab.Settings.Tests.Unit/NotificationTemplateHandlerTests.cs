@@ -7,6 +7,7 @@ using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.DeleteTenan
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTemplateAuditEntries;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplate;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplateById;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplates;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
@@ -33,13 +34,14 @@ public class NotificationTemplateHandlerTests
     private TenantProvider _tenants = default!;
     private GetTenantNotificationTemplatesHandler _getAll = default!;
     private GetTenantNotificationTemplateHandler _getOne = default!;
+    private GetTenantNotificationTemplateByIdHandler _getById = default!;
     private CreateTenantNotificationTemplateHandler _create = default!;
     private UpdateTenantNotificationTemplateHandler _update = default!;
     private DeleteTenantNotificationTemplateHandler _delete = default!;
     private GetTemplateAuditEntriesHandler _audit = default!;
 
     [TestInitialize]
-    public void Setup()
+    public async Task Setup()
     {
         _tenants = new TenantProvider();
         var options = new DbContextOptionsBuilder<SettingsDbContext>()
@@ -48,10 +50,12 @@ public class NotificationTemplateHandlerTests
 
         _db = new SettingsDbContext(options, _tenants);
         var auditor = new TemplateAuditRecorder(new SystemActorAccessor("test:actor", "Test Actor"));
+        var generator = await TestEntityCodeSetup.SeedAndCreateGeneratorAsync(options, _tenants);
 
         _getAll = new GetTenantNotificationTemplatesHandler(_db, _tenants);
         _getOne = new GetTenantNotificationTemplateHandler(_db);
-        _create = new CreateTenantNotificationTemplateHandler(_db, _tenants, auditor);
+        _getById = new GetTenantNotificationTemplateByIdHandler(_db);
+        _create = new CreateTenantNotificationTemplateHandler(_db, _tenants, generator, auditor);
         _update = new UpdateTenantNotificationTemplateHandler(_db, _tenants, auditor);
         _delete = new DeleteTenantNotificationTemplateHandler(_db, _tenants, auditor);
         _audit = new GetTemplateAuditEntriesHandler(_db, _tenants);
@@ -68,10 +72,12 @@ public class NotificationTemplateHandlerTests
         NotificationChannel channel,
         string body = "Body for {{Title}}",
         string? subject = "Subject for {{Title}}",
+        string title = "Grade 8 Science reminder",
+        string? description = null,
         params (TemplateConstraintDimension Dimension, string Value)[] constraints) =>
         _create.HandleAsync(new CreateTenantNotificationTemplate(
             new CreateTenantNotificationTemplateRequest(
-                kind, channel, subject, body,
+                kind, channel, title, description, subject, body,
                 constraints.Select(c => new TemplateConstraintRequest(c.Dimension, c.Value)).ToList(),
                 "test"),
             "test"));
@@ -80,11 +86,13 @@ public class NotificationTemplateHandlerTests
         Guid templateId,
         string body = "Body for {{Title}}",
         string? subject = "Subject for {{Title}}",
+        string title = "Grade 8 Science reminder",
+        string? description = null,
         params (TemplateConstraintDimension Dimension, string Value)[] constraints) =>
         _update.HandleAsync(new UpdateTenantNotificationTemplate(
             templateId,
             new UpdateTenantNotificationTemplateRequest(
-                subject, body,
+                title, description, subject, body,
                 constraints.Select(c => new TemplateConstraintRequest(c.Dimension, c.Value)).ToList(),
                 "test"),
             "test"));
@@ -224,6 +232,121 @@ public class NotificationTemplateHandlerTests
         audit[0].NewBody.Should().Be("Body for {{Title}}");
         audit[0].PreviousBody.Should().BeNull();
         audit[0].ActorId.Should().Be("test:actor");
+        audit[0].Reason.Should().Be("test", "the audit trail keeps the operator's own words");
+    }
+
+    [TestMethod]
+    public async Task Create_RejectsBlankTitle()
+    {
+        // Naming spec D1: a template can never be created nameless, and the rule lives in the domain —
+        // the route's ArgumentException arm turns this into the 400.
+        AsTenant(TenantA);
+
+        var act = () => CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.Email, title: "   ");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        (await _db.TenantNotificationTemplates.AsNoTracking().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task Create_RejectsATitleLongerThanTheColumnAllows()
+    {
+        // Naming spec D1: the cap is the database column's (120), and the domain enforces it so an
+        // oversized title is the route's 400 rather than a 500 out of Postgres.
+        AsTenant(TenantA);
+
+        var act = () => CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.Email,
+            title: new string('t', TenantNotificationTemplate.TitleMaxLength + 1));
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        (await _db.TenantNotificationTemplates.AsNoTracking().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task Create_RejectsADescriptionLongerThanTheColumnAllows()
+    {
+        AsTenant(TenantA);
+
+        var act = () => CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.Email,
+            description: new string('d', TenantNotificationTemplate.DescriptionMaxLength + 1));
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [TestMethod]
+    public async Task Create_MintsTheTemplateCodeFromTheShippedRule()
+    {
+        // Naming spec D5: the code comes from the NOTIFICATION_TEMPLATE_CODE rule (stamp TPL + a
+        // two-digit numeric sequence), minted once on create and never typed by the caller.
+        AsTenant(TenantA);
+
+        var first = await CreateAsync(NotificationTemplateKind.Publish, NotificationChannel.Email);
+        var second = await CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.Email,
+            constraints: [(TemplateConstraintDimension.GradeLevel, "Grade 3")]);
+
+        first.Code.Should().Be("TPL01");
+        second.Code.Should().Be("TPL02");
+    }
+
+    [TestMethod]
+    public async Task CreateAndReads_ProjectTitleDescriptionAndCode()
+    {
+        // The three new members are read wherever a row is read (naming spec D3/D6): the landing grid's
+        // list, the slot default, and the detail-by-kind/channel read.
+        AsTenant(TenantA);
+
+        var created = await CreateAsync(
+            NotificationTemplateKind.Reminder, NotificationChannel.SMS,
+            title: "Grade 8 Science reminder", description: "Sent the day before the lab.",
+            subject: null, body: "Lab tomorrow: {{Title}}");
+
+        created.Title.Should().Be("Grade 8 Science reminder");
+        created.Description.Should().Be("Sent the day before the lab.");
+        created.Code.Should().NotBeNullOrWhiteSpace();
+
+        var row = (await _getAll.HandleAsync(new GetTenantNotificationTemplates()))
+            .Single(r => r.Id == created.Id);
+        row.Title.Should().Be(created.Title);
+        row.Description.Should().Be(created.Description);
+        row.Code.Should().Be(created.Code);
+
+        var slotDefault = await GetDefaultAsync(
+            NotificationTemplateKind.Reminder, NotificationChannel.SMS);
+        slotDefault!.Title.Should().Be(created.Title);
+        slotDefault.Description.Should().Be(created.Description);
+        slotDefault.Code.Should().Be(created.Code);
+
+        // The detail route's read is the editor's source: it must carry all three, or the naming rows
+        // open blank on a row that has them.
+        var byId = await _getById.HandleAsync(new GetTenantNotificationTemplateById(created.Id));
+        byId!.Title.Should().Be(created.Title);
+        byId.Description.Should().Be(created.Description);
+        byId.Code.Should().Be(created.Code);
+    }
+
+    [TestMethod]
+    public async Task Create_WithoutAReason_RecordsNoReasonOnTheAuditEntry()
+    {
+        // Naming spec D11: the editor sends no reason on create — a first write has no "why" — so the
+        // trail records the actor, the time and the created values, and invents nothing for the reason.
+        AsTenant(TenantA);
+
+        await _create.HandleAsync(new CreateTenantNotificationTemplate(
+            new CreateTenantNotificationTemplateRequest(
+                NotificationTemplateKind.Publish, NotificationChannel.Email,
+                "Grade 8 Science reminder", null, "Subject", "Body", []),
+            Reason: null));
+
+        var audit = await _audit.HandleAsync(
+            new GetTemplateAuditEntries(NotificationTemplateKind.Publish, NotificationChannel.Email));
+
+        audit.Should().ContainSingle();
+        audit[0].Reason.Should().BeNullOrWhiteSpace();
+        audit[0].ActorId.Should().Be("test:actor");
     }
 
     [TestMethod]
@@ -281,6 +404,7 @@ public class NotificationTemplateHandlerTests
         var result = await _create.HandleAsync(new CreateTenantNotificationTemplate(
             new CreateTenantNotificationTemplateRequest(
                 NotificationTemplateKind.Overdue, NotificationChannel.SMS,
+                Title: "Overdue chase", Description: null,
                 Subject: null, Body: "Overdue: {{Title}}", Constraints: null!),
             "test"));
 
@@ -390,11 +514,79 @@ public class NotificationTemplateHandlerTests
         // Select by change kind rather than by index: two mutations in the same
         // DateTimeOffset tick share OccurredAt, so "most recent first" is not
         // positional-deterministic for the test fixture.
-        var updated = audit.Single(a => a.ChangeKind == TemplateChangeKind.Updated);
+        var updated = (audit.Single(a => a.ChangeKind == TemplateChangeKind.Updated));
         updated.PreviousBody.Should().Be("First body");
         updated.NewBody.Should().Be("Second body");
         updated.PreviousConstraints.Should().NotBeNull().And.Contain("Grade 3");
         updated.NewConstraints.Should().NotBeNull().And.Contain("Mathematics");
+        updated.Reason.Should().Be("test", "a rename stays attributable to the operator's words");
+    }
+
+    [TestMethod]
+    public async Task Update_ReplacesTitleAndDescription_AndLeavesTheCodeAlone()
+    {
+        // Naming spec D6: title and description are editable, the generated code is not — it identifies
+        // the row for its whole life, which is what makes it usable as a reference.
+        AsTenant(TenantA);
+        var created = await CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.Email,
+            title: "Named on create", description: "First description");
+
+        var updated = await UpdateAsync(
+            created.Id, title: "Renamed", description: "Second description",
+            body: "Body v2", constraints: []);
+
+        updated.Title.Should().Be("Renamed");
+        updated.Description.Should().Be("Second description");
+        updated.Code.Should().Be(created.Code);
+
+        var reread = (await _getAll.HandleAsync(new GetTenantNotificationTemplates()))
+            .Single(r => r.Id == created.Id);
+        reread.Code.Should().Be(created.Code);
+    }
+
+    [TestMethod]
+    public async Task Update_RejectsBlankTitle()
+    {
+        AsTenant(TenantA);
+        var created = await CreateAsync(NotificationTemplateKind.Publish, NotificationChannel.Email);
+
+        var act = () => UpdateAsync(created.Id, title: " ", body: "Body v2");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        (await _getAll.HandleAsync(new GetTenantNotificationTemplates()))
+            .Single(r => r.Id == created.Id).Title.Should().Be(created.Title,
+                "a rejected rename leaves the stored title untouched");
+    }
+
+    [TestMethod]
+    public async Task Update_RejectsATitleLongerThanTheColumnAllows()
+    {
+        AsTenant(TenantA);
+        var created = await CreateAsync(NotificationTemplateKind.Publish, NotificationChannel.Email);
+
+        var act = () => UpdateAsync(
+            created.Id, title: new string('t', TenantNotificationTemplate.TitleMaxLength + 1),
+            body: "Body v2");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [TestMethod]
+    public async Task Update_RejectsADescriptionLongerThanTheColumnAllows()
+    {
+        AsTenant(TenantA);
+        var created = await CreateAsync(NotificationTemplateKind.Publish, NotificationChannel.Email);
+
+        var act = () => UpdateAsync(
+            created.Id,
+            description: new string('d', TenantNotificationTemplate.DescriptionMaxLength + 1),
+            body: "Body v2");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        (await _getAll.HandleAsync(new GetTenantNotificationTemplates()))
+            .Single(r => r.Id == created.Id).Description.Should().BeNull(
+                "a rejected description leaves the stored row untouched");
     }
 
     [TestMethod]

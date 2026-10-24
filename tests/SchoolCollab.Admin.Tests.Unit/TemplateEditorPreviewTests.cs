@@ -24,6 +24,8 @@ public class TemplateEditorPreviewTests : BunitContext
 
     private TemplateApiHandler Register() => TemplateTestServices.Register<TemplateEditor>(this);
 
+    private TemplateDialogs RegisterDialogs() => TemplateDialogs.Register(this);
+
     private IRenderedComponent<TemplateEditor> RenderEditor(Guid id) =>
         Render<TemplateEditor>(p => p
             .Add(x => x.Mode, TemplateEditorMode.Edit)
@@ -33,7 +35,11 @@ public class TemplateEditorPreviewTests : BunitContext
     public void Preview_ShowsTheRenderedPair_IncludingAnUnknownTagLiteral()
     {
         var handler = Register();
-        var row = new TemplateRow { Kind = 0, Channel = 0, Subject = "AUTHORED", Body = "<p>{{Title}}</p>" };
+        RegisterDialogs();
+        var row = new TemplateRow
+        {
+            Kind = 0, Channel = 0, Title = "AUTHORED", Body = "<p>{{Title}}</p>",
+        };
         handler.Rows.Add(row);
         handler.PreviewJson = """{ "subject": "Rendered subject", "body": "<p>Hello {{NoSuchTag}}</p>" }""";
 
@@ -55,7 +61,8 @@ public class TemplateEditorPreviewTests : BunitContext
     public async Task PreviewFailure_ShowsTheNote_AndSaveStillWorks()
     {
         var handler = Register();
-        var row = new TemplateRow { Kind = 0, Channel = 1, Body = "OLD" };
+        var dialogs = RegisterDialogs();
+        var row = new TemplateRow { Kind = 0, Channel = 1, Title = "Grade 8 reminder", Body = "OLD" };
         handler.Rows.Add(row);
         handler.PreviewFails = true;
 
@@ -68,6 +75,9 @@ public class TemplateEditorPreviewTests : BunitContext
         var body = cut.FindComponents<FluentTextArea>().Single(a => a.Instance.Id == "template-body-text");
         await cut.InvokeAsync(() => body.Instance.ValueChanged.InvokeAsync("STILL SAVES"));
 
+        // The edit's audit reason is the shared dialog (naming spec D11); the preview's degradation
+        // changes nothing about it.
+        dialogs.ReasonAnswer = "Preview is down; the wording is right though";
         cut.Find("#template-save").Click();
 
         cut.WaitForAssertion(() =>
