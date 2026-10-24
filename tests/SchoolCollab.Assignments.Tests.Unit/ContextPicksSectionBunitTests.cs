@@ -520,15 +520,16 @@ public class ContextPicksSectionBunitTests : BunitContext
             .Should().Be(ContextPicksSection.NoSubjectReason, "CP-3: no subject yet, so both buttons say why");
         cut.Find("#authoring-add-strand").HasAttribute("disabled").Should().BeTrue();
         cut.Find("#authoring-add-lesson").HasAttribute("disabled").Should().BeTrue();
-        // panel-layout-pattern §3/§4 (owner, 2026-10-23): the first block is a TITLED PanelSection
-        // ("Details"), so its accessible name is the visible title and no separate aria-label is
-        // needed. The retired UX-1a headerless-panel arrangement is gone with the compartment chrome.
+        // panel-layout-pattern §3/§4 (owner, 2026-10-24): the first block is still the shared
+        // PanelSection box, but on CREATE it renders HEADERLESS — the page action header says
+        // "New Assignment" and the form has one visible block, so a "Details" caption above it
+        // would name the same thing twice. The retired UX-1a compartment chrome stays gone.
         cut.FindAll("#authoring-basics h3.authoring-compartment-title").Should().BeEmpty(
             "the compartment chrome is retired — there is no hand-rolled h3 to find");
         cut.Find("#authoring-basics").ClassList.Should().Contain("panel-section",
             "the block is the shared box");
-        cut.Find("#authoring-basics .panel-section__title").TextContent.Trim().Should().Be("Details",
-            "and it names itself, so the reader never has to infer the block's subject");
+        cut.FindAll("#authoring-basics .panel-section__title").Should().BeEmpty(
+            "ShowHeader=false renders no header DOM at all — no caption, no empty row, no orphan rule");
     }
 
     [TestMethod]
@@ -547,6 +548,11 @@ public class ContextPicksSectionBunitTests : BunitContext
             rows.IndexOf(strandRow).Should().BeGreaterThan(
                 rows.IndexOf(OwningFormRow(cut, "authoring-basics-subject")));
         });
+
+        // …and EDIT keeps the caption: the page now holds a record, so the block's title is what
+        // names it (the create form's headerless form would leave it unnamed here).
+        cut.Find("#authoring-basics .panel-section__title").TextContent.Trim().Should().Be("Details",
+            "on the edit surface the reader must not have to infer the block's subject");
     }
 
     [TestMethod]
