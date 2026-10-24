@@ -1,8 +1,6 @@
 @inherits LayoutComponentBase
 @using Microsoft.FluentUI.AspNetCore.Components
-@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using Microsoft.AspNetCore.Components.Sections
-@using SchoolCollab.Admin.Shared.Components.Theme
 @using SchoolCollab.Admin.Components.Layout
 @using SchoolCollab.Students.Application.Components.Toolbar
 @implements IDisposable
@@ -18,24 +16,27 @@
                          VerticalAlignment="VerticalAlignment.Center"
                          HorizontalGap="12">
 
-                <span class="brand">School Collab</span>
-                <span class="brand-sep" aria-hidden="true">&#183;</span>
-                <span class="brand-page">@(_pageTitle ?? DefaultTitle)</span>
-
-                <ThemeSwitcher />
+                @* One flex child, so the bar has an explicit priority order: the brand and its
+                   separator never yield, the page title yields before anything on the right does.
+                   An unmapped route renders neither the separator nor a title, instead of the
+                   brand a second time. *@
+                <div class="app-bar-title-cluster">
+                    <span class="brand">School Collab</span>
+                    @if (_pageTitle is not null)
+                    {
+                        <span class="brand-sep" aria-hidden="true">&#183;</span>
+                        <span class="brand-page">@_pageTitle</span>
+                    }
+                </div>
 
                 <FluentSpacer />
 
+                @* Context only: the active term and the dev tenant switcher. The theme menu and
+                   the settings shortcut moved to the sidebar's utility row (owner, 2026-10-24) —
+                   their fixed width (120px accent select + two 96px buttons) is what used to
+                   squeeze the page title into an ellipsis (#402). *@
                 <div class="header-actions-trailing">
                     @HeaderActionsLeading
-
-                    <FluentButton Appearance="ButtonAppearance.Subtle"
-                                  OnClick="@(() => Nav.NavigateTo("/settings"))"
-                                  Title="Settings"
-                                  aria-label="Settings"
-                                  class="toolbar-icon-button">
-                        <FluentIcon Value="@(new Icons.Regular.Size20.Settings())" />
-                    </FluentButton>
                 </div>
             </FluentStack>
         </div>
@@ -70,8 +71,6 @@
 </div>
 
 @code {
-    [Parameter] public string DefaultTitle { get; set; } = "School Collab";
-
     private RenderFragment? HeaderActionsLeading => __builder => {
         <ActiveTermToolbar />
         <DevTenantSwitcher />
@@ -79,23 +78,88 @@
 
     private bool _showSidebar = true;
 
-    private static string? ResolveTitle(string path) => path switch
+    /// <summary>
+    /// The static route title shown after the brand, or <see langword="null"/> when the route has no
+    /// entry — an unmapped route renders no title and no separator, never the brand a second time.
+    /// </summary>
+    /// <remarks>
+    /// One arm per route shape the Admin <c>Router</c> serves: the host assembly plus the
+    /// Settings / Assignments / Students <c>Application</c> assemblies it adds in
+    /// <c>Components/Routes.razor</c>. <c>MainLayoutAppBarTests</c> scans those four assemblies'
+    /// <c>@page</c> templates and fails when a shape resolves to nothing, so a new page cannot
+    /// silently fall back to a blank bar. The literal routes come first: the prefix/suffix arms
+    /// under them are the parameterised shapes (<c>{id}</c>, <c>{Id:guid}</c>, …), whose segment
+    /// shapes are what matter — parameter name and case vary between pages.
+    /// </remarks>
+    public static string? ResolveTitle(string path) => path switch
     {
-        "/"                                                                                    => "Home",
-        "/settings"                                                                            => "Settings",
-        "/coded-values"                                                                         => "Coded Values",
-        "/assignments"                                                                          => "Assignments",
-        "/students"                                                                             => "Students",
-        "/students/create"                                                                      => "New Student",
-        var p when p.StartsWith("/students/", StringComparison.OrdinalIgnoreCase)              => "Students",
-        var p when p.StartsWith("/coded-values/new", StringComparison.OrdinalIgnoreCase)     => "New Category",
-        var p when p.StartsWith("/assignments/create", StringComparison.OrdinalIgnoreCase)  => "New Assignment",
-        var p when p.EndsWith("/children/new", StringComparison.OrdinalIgnoreCase)          => "New Child",
-        var p when p.EndsWith("/children", StringComparison.OrdinalIgnoreCase)              => "Children",
-        var p when p.Contains("/edit", StringComparison.OrdinalIgnoreCase)                   => "Edit",
-        var p when p.EndsWith("/review", StringComparison.OrdinalIgnoreCase)              => "Review",
-        "/Error"                                                                            => "Error",
-        _                                                                                   => null
+        "/"                                                    => "Home",
+        "/settings"                                           => "Settings",
+        "/assignment-ai-prompt"                               => "Assignment AI Prompt",
+        "/signature-consent-text"                             => "Sign-off Consent Text",
+
+        "/coded-values"                                       => "Coded Values",
+        "/coded-values/new"                                   => "New Category",
+        "/coded-values/approvals"                             => "Pending Approvals",
+
+        "/config-flags"                                       => "Feature Flags",
+        "/config-flags/new"                                   => "New Flag",
+
+        "/entity-code-rules"                                  => "Code Generation Rules",
+        "/entity-code-rules/new"                              => "New Generation Rule",
+
+        "/notification-templates"                             => "Notification Templates",
+        "/notification-templates/create"                      => "New Notification Template",
+
+        "/tenants"                                            => "Tenants",
+
+        "/assignments"                                        => "Assignments",
+        "/assignments/create"                                 => "New Assignment",
+
+        "/activity-groups"                                    => "Activity Groups",
+
+        "/students"                                           => "Students",
+        "/students/create"                                    => "New Student",
+        "/students/grade-levels"                              => "Grade Levels",
+        "/students/grade-levels/create"                       => "New Grade Level",
+        "/students/guardians"                                 => "Guardians",
+        "/students/guardians/create"                          => "New Guardian",
+        "/students/periods"                                   => "Periods",
+        "/students/periods/create"                            => "New Period",
+        "/students/subjects"                                  => "Topics",
+        "/students/teachers"                                  => "Teachers",
+
+        "/Error"                                              => "Error",
+
+        // Parameterised shapes — most specific suffix first, then each module's own prefix.
+        var p when p.StartsWith("/coded-values/", StringComparison.OrdinalIgnoreCase)
+                && p.EndsWith("/children/new", StringComparison.OrdinalIgnoreCase)  => "New Child",
+        var p when p.StartsWith("/coded-values/", StringComparison.OrdinalIgnoreCase)
+                && p.EndsWith("/children", StringComparison.OrdinalIgnoreCase)      => "Children",
+        var p when p.StartsWith("/coded-values/", StringComparison.OrdinalIgnoreCase) => "Edit Coded Value",
+        var p when p.StartsWith("/config-flags/", StringComparison.OrdinalIgnoreCase) => "Feature Flag",
+        var p when p.StartsWith("/entity-code-rules/", StringComparison.OrdinalIgnoreCase) => "Edit Generation Rule",
+        var p when p.StartsWith("/notification-templates/", StringComparison.OrdinalIgnoreCase) => "Notification Template",
+        var p when p.StartsWith("/activity-groups/", StringComparison.OrdinalIgnoreCase) => "Activity Group",
+        var p when p.StartsWith("/assignments/", StringComparison.OrdinalIgnoreCase)
+                && p.EndsWith("/sign-off", StringComparison.OrdinalIgnoreCase)      => "Sign Off",
+        var p when p.StartsWith("/assignments/", StringComparison.OrdinalIgnoreCase)
+                && p.EndsWith("/edit", StringComparison.OrdinalIgnoreCase)          => "Edit Assignment",
+        var p when p.StartsWith("/assignments/", StringComparison.OrdinalIgnoreCase) => "Assignment",
+        var p when p.StartsWith("/students/guardians/", StringComparison.OrdinalIgnoreCase)
+                && p.EndsWith("/edit", StringComparison.OrdinalIgnoreCase)          => "Edit Guardian",
+        var p when p.StartsWith("/students/guardians/", StringComparison.OrdinalIgnoreCase) => "Guardian",
+        var p when p.StartsWith("/students/grade-levels/", StringComparison.OrdinalIgnoreCase)
+                && p.EndsWith("/edit", StringComparison.OrdinalIgnoreCase)          => "Edit Grade Level",
+        var p when p.StartsWith("/students/grade-levels/", StringComparison.OrdinalIgnoreCase) => "Grade Level",
+        var p when p.StartsWith("/students/periods/", StringComparison.OrdinalIgnoreCase)
+                && p.EndsWith("/sub-periods", StringComparison.OrdinalIgnoreCase)    => "Sub-periods",
+        var p when p.StartsWith("/students/periods/", StringComparison.OrdinalIgnoreCase) => "Edit Period",
+        var p when p.StartsWith("/students/teachers/", StringComparison.OrdinalIgnoreCase) => "Teacher",
+        var p when p.StartsWith("/students/", StringComparison.OrdinalIgnoreCase)
+                && p.EndsWith("/edit", StringComparison.OrdinalIgnoreCase)          => "Edit Student",
+        var p when p.StartsWith("/students/", StringComparison.OrdinalIgnoreCase)  => "Student",
+        _                                                                       => null
     };
 
     private string? _pageTitle;

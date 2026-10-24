@@ -244,15 +244,31 @@ h1:focus {
     white-space: nowrap;
 }
 
+/* The app bar paints a BRAND surface (FluentUI's header region: #0f6cbd light, #115ea3 dark,
+   following the accent), so its text must take the on-brand foreground, not the page's
+   inherited --colorNeutralForeground1. Until 2026-10-24 these three rules declared no colour
+   at all: in light mode the brand and page title therefore rendered #242424 on #0f6cbd —
+   measured 2.88:1 and 2.55:1, both under WCAG AA's 4.5:1 for text this size. Dark mode passed
+   by luck only, because there --colorNeutralForeground1 happens to be white. */
+.brand,
+.brand-sep,
+.brand-page {
+    color: var(--colorNeutralForegroundOnBrand, #ffffff);
+}
+
+/* Decorative rendering only: aria-hidden, and it stopped carrying meaning once the title
+   stopped being a second copy of the brand. */
 .brand-sep {
     opacity: 0.5;
     padding: 0 0.25rem;
 }
 
+/* No opacity here, deliberately. 0.85 alpha white on #0f6cbd composites to 4.32:1 — under
+   AA — so the title borrows its hierarchy from weight (400 vs the brand's 600) and size
+   (0.9 vs 0.95rem) instead of transparency. */
 .brand-page {
     font-weight: 400;
     font-size: 0.9rem;
-    opacity: 0.85;
     white-space: nowrap;
 }
 

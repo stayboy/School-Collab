@@ -1,3 +1,17 @@
-::deep .theme-switcher-stack {
-    padding-right: 0.25rem;
+/* Theme menu (sidebar footer). The trigger sits in the sidebar's utility row, so it sizes
+   to the row rather than to its own content.
+
+   The trigger is a FluentButton: its rendered root carries FluentUI's own scope attribute,
+   not this file's, so the rule needs ::deep — exactly the isolation trap documented in
+   MainLayout.razor.css. A plain .theme-menu__trigger selector would silently match nothing. */
+.theme-menu {
+    display: inline-flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.theme-menu ::deep .theme-menu__trigger {
+    width: 100%;
+    justify-content: flex-start;
 }
