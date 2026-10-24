@@ -17,11 +17,17 @@ guidance into these files.
 | Configuration documentation | `configuration-documentation.md` |
 | Shared constants and enums | `shared-constants.md` |
 | .NET/C# best practices | `dotnet-best-practices.md` |
+| **Durable lessons from past sessions** (read before your first full build) | `agent-lessons.md` |
 
 ## How to use
 
 Before working in a topic area, read the matching rule file. Do not duplicate large
 topic-specific sections in `AGENTS.md`; link to them instead.
+
+`agent-lessons.md` is the single home for lessons accepted after a build or defect pass —
+newest first, each with its date, rule, evidence and trigger. `AGENTS.md` and the specialty
+rules point at it and never restate a lesson inline; a lesson that fires twice should be
+promoted into a deterministic check instead of being re-worded.
 
 ## Related skills
 
