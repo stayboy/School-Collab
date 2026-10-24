@@ -303,7 +303,7 @@ a looser or missing suffix as a dispatch error to fix, exactly like an omitted
 | Orchestrator | `ollama-cloud/glm-5.3-flash` | `cline-pass/glm-5.3` | 3 only |
 | Worker | `ollama-cloud/deepseek-v4.1-flash:1017` | `cline-pass/deepseek-v4.1-flash` (lean, owner 2026-10-05 **latest** — supersedes the same day's `glm-5.3-flash` interim; full: `cline-pass/deepseek-v4-flash`) | 1–3 |
 | Reviewer (diff review) | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — the seat for every tier with a reviewer gate) | no dispatchable id — `cline-pass/mimo-v2.6-flash` is absent from the provider registry (verified 2026-10-18); the seat runs on the pi profile only | 2–3 |
-| **Plan reviewer** (every tier with a plan gate) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | 1–3 — **lean no longer self-gates on the reviewer seat** (owner 2026-10-18) |
+| **Plan reviewer** (every tier with a plan gate) | **Tier 2: `ollama-cloud/deepseek-v4-pro:0813` · Tier 3: `ollama/glm-5.3:cloud`** — a light round runs exactly TWO models (owner 2026-10-23), so its gate sits on the verifier seat; ids and the full ruling: `references/models.md` | `cline-pass/deepseek-v4-pro` · `cline-pass/glm-5.3` | 1–3 |
 | **Acceptance** (Tiers 1–3) | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — a dispatched pass on its own seat, model-independent from worker and reviewer) | unchanged (see the acceptance section): `cline-pass/glm-5.3` full rounds · parent-transcribed on lean | 1–3 |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 3 + UI |
 | Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (pinned; distinct from the diff-review seat `deepseek-v4-pro:0813`, so an escalated rework and its verifier never share a model); otherwise the round's reviewer model | the round's reviewer model | on block |
@@ -319,7 +319,7 @@ every role's `runs.run` — and record that choice in the round doc header.
 |---|---|---|---|---|
 | **Tier 0 (Solo)** | plan + implement + self-review + self-acceptance (this table's tier 0) — default `ollama-cloud/deepseek-v4.1-flash:1017` | — | — | ask the user first: session model only on their yes (see the procedure below) |
 | **Light (Tiers 1–2)** | `ollama-cloud/deepseek-v4.1-flash:1017` | `glm-5.3-flash` (if dispatched) | **`deepseek-v4-pro:0813`** | **the reviewer/orchestrator must NOT share the worker's model** — the verifier must not be the implementer's own model (owner 2026-10-18: the diff-review seat is `deepseek-v4-pro:0813`). Acceptance seat: `deepseek-v4-pro:0813` |
-| **Tier 3** | `ollama-cloud/deepseek-v4.1-flash:1017` | `glm-5.3-flash` | **`deepseek-v4-pro:0813`** | Tier 3 adds the UI tester `minimax-m3` and the plan-review on `glm-5.3:cloud` on **every** tier, lean and full alike (owner 2026-10-18 — lean no longer runs the plan gate on the reviewer seat). **escalator = `kimi-k2.7-code`** (pinned, distinct from the diff-review seat). Acceptance seat: `deepseek-v4-pro:0813` |
+| **Tier 3** | `ollama-cloud/deepseek-v4.1-flash:1017` | `glm-5.3-flash` | **`deepseek-v4-pro:0813`** | Tier 3 adds the UI tester `minimax-m3` and keeps the plan-review on `glm-5.3:cloud` (owner 2026-10-18 — the 2026-10-23 two-model ruling applies to light rounds only). **escalator = `kimi-k2.7-code`** (pinned, distinct from the diff-review seat). Acceptance seat: `deepseek-v4-pro:0813` |
 
 **Tier 0 — procedure.** The definition is the ladder's row 0 above; what belongs here is the
 mechanical detail. Before running a Tier 0 round, **always ask the user whether to use the current
@@ -350,7 +350,8 @@ shipped with no review because the mode's wording said "no reviewer".
    `glm-5.3-flash`, diff reviewer `deepseek-v4-pro:0813` (owner 2026-10-18), acceptance
    `deepseek-v4-pro:0813` — the verifier never shares the implementer's model, and
    acceptance is independent of both. Tier 3 differs only by
-   adding the UI tester and the `glm-5.3:cloud` plan-review, which runs on every tier.
+   adding the UI tester; the plan-gate seat differs per tier (Tier 2 = the verifier
+   seat, Tier 3 = `glm-5.3:cloud`) — see `references/models.md`.
 5. **Cline is the exception, not an override** — Cline cannot resolve `ollama`
    ids, so it always uses the `clinepass` profile.
 
@@ -409,7 +410,9 @@ file:line), **REVIEW** (P1/P2 with file:line evidence + best-practices check),
 After the worker run, the parent derives the UI verdict from
 `git diff --name-only`: the round is a **UI round** iff the changed-file list
 contains any `.razor`, `.razor.css`, `.css`, or `.js` file, anything under
-`wwwroot/`, or a file in the ApiClient / Blazor client projects. Only UI
+`wwwroot/`, or a file in the ApiClient / Blazor client projects. The **same file set,
+read off the plan's expected files**, decides the **step-2c UI mock gate** before the
+worker runs — one definition, two moments. Only UI
 rounds get a tester pass; the tester-scope handover enumerates exactly these
 surfaces — the changed files, the pages/dialogs/landing pages that render
 them, the ApiClient methods they call, and the navigation entry points — and
@@ -463,6 +466,14 @@ the tester never derives or expands its own scope.
    the plan-review iteration); only if the revised plan still exceeds it does
    the round **park** recommending the owner run `/to-tickets` — the orchestrator
    never invokes that skill (`disable-model-invocation: true`).
+   **Dispatch declaration (>3 workstreams).** A plan with more than three
+   workstreams must state, in its sizing block, `Dispatch: single pass` or
+   `Dispatch: one worker per workstream` — the decision goes on the record before
+   any worker runs. Three or fewer needs no declaration. A plan with more than four
+   workstreams **and** no published tickets must also carry a one-line **offer** of
+   `/to-tickets` to the owner in the plan; the offer is the parent's, the invocation
+   stays the owner's (owner, 2026-10-24 — a 5-workstream single pass timed out with
+   three landed; nobody had asked the question).
    **Open decisions (author side).** A plan that leaves a decision fork the specs
    do not determine must DECLARE it in `## Plan` as an `Open decisions:` list in
    grill format — numbered, each with a recommended answer — rather than silently
@@ -493,9 +504,67 @@ the tester never derives or expands its own scope.
    maximum, counted as the plan-review iteration. Fold the answers into `## Plan` as
    pinned decisions before the reviewer re-reads the revised sections; the worker is
    still never dispatched on a plan with an open P1.
-   **Model:** `ollama/glm-5.3:cloud` on **every tier**, lean and full alike (`cline-pass/glm-5.3`) —
-   owner 2026-10-18; lean no longer runs the plan gate on the reviewer seat. Read-only `reviewer` shell;
-   a user-named model wins.
+   **Model:** **Tier 2 → `ollama-cloud/deepseek-v4-pro:0813`**, **Tier 3 → `ollama/glm-5.3:cloud`**
+   (owner 2026-10-23: a light round runs exactly TWO models — worker + verifier — so the gate shares
+   the verifier seat; the 2026-10-18 every-tier `glm-5.3:cloud` ruling survives for Tier 3). The gate
+   must never be the plan author, so **record the parent's model on round-doc line 1**; if the parent
+   already sits on the verifier seat, escalate the gate one step. Read-only `reviewer` shell;
+   a user-named model wins. Ids: `references/models.md`.
+2c. **UI mock (owner gate — before the worker runs; owner, 2026-10-23).** When the
+   plan touches a **user-visible surface** — the same file set the *Deterministic
+   UI-round trigger* names, evaluated against the plan's expected files instead of a
+   post-hoc diff — the parent renders a **console mock of the final look** and posts it
+   for the owner's approval **before** dispatching the worker. This is a **gate, not a
+   courtesy**: the worker is never dispatched on an unapproved mock, and an approved
+   mock is what the diff-reviewer and the acceptance seat check the delivered UI
+   against.
+   - **Format (fixed):** a fenced `text` block, **dotted** box-drawing borders —
+     `┄` horizontal, `┆` vertical, `╭ ╮ ╰ ╯` corners — with one labelled section per
+     affected surface. Dotted = a **boxed block**; drawing **nothing** = a **layout
+     region**. Annotate with the pinned decision ids (`Q5`, `Q6`, …) so the reader can
+     trace a row to the rule that produced it. Keep each panel's inner width exact — a
+     mock whose columns misalign is unreadable and gets re-worked, not approved.
+   - **One round.** Post the whole mock once, covering every affected surface, then
+     wait. Owner edits come back as plain notes and are re-rendered in one revised
+     mock; a mock is approved when the owner says the look is right.
+   - **What a mock IS and IS NOT.** It is a **design artifact**: it settles layout,
+     grouping, chrome and where actions sit. It is **never evidence** — it proves no
+     behaviour, renders no real CSS, and must never be cited as verification in the
+     round doc, the reviewer task or the acceptance. Real-UI verification stays the
+     UI tester's (Tier 3) or a live browser pass; a mock is not a substitute for either.
+   - **The mock RENDERS the pinned pattern; it never invents one.** Every box, region,
+     header row, width and rail entry in a mock traces to the pattern doc named by the
+     `AGENTS.md` specialty table (`documents/solution/panel-layout-pattern.md`) — cite the
+     decision ids it carries (`Q5`, `Q6`, …) next to the rows they produced. If a mock
+     cannot be drawn without contradicting that doc, the round **parks**: the doc is the
+     contract and is amended first, never overridden by a prettier mock.
+   - **The mock step is where durable lessons surface (owner, 2026-10-23).** A mock
+     review is the cheapest place a design lesson ever appears: the owner sees the look,
+     not a diff, so a correction here is a general rule rather than a line change. When
+     the owner corrects the mock, treat the correction as a **candidate lesson** — record
+     it with its evidence (the mock row, the incident date, one clause), and **propose**
+     it in the reply for the pattern doc or the repo-owned rule file. **Never pre-write
+     it**: an unaccepted lesson riding this round's commit is a rule the next reader
+     assumes was ratified. Accepted lessons land in the **one** pattern doc — never
+     restated across specs, rule files and `AGENTS.md`, which only ever carry a pointer.
+     This is also the step that stops a round re-learning the session's own findings
+     (two box languages double-framing a rail; `width: inherit` failing to size a slotted
+     Fluent control; a literal colour fighting the theme).
+   - **Every mock carries a CONSENT CHECKLIST** (owner, 2026-10-23): a short table naming,
+     panel by panel, (a) which region it sits in, (b) **whether it is collapsible**, and
+     (c) where its action button lives. These are per-instance decisions the specs cannot
+     derive — whether an affordance exists is exactly the kind of thing the owner must
+     consent to before it is built, and a collapsible panel that should have been static
+     (or the reverse) is invisible in a diff. The owner approves the table together with
+     the layout; the approved table is the acceptance criterion for that part of the diff.
+     The pattern doc's own checklist is the starting point, not the answer — a new surface
+     gets its own rows.
+   - **Record it.** The approved mock (or its path), the owner's verdict and any
+     candidate lessons it produced go into the round doc, so a later reader can tell an
+     approved look from an assumed one, and an accepted lesson from an unratified one.
+   - **All tiers, including Tier 0.** The point is owner engagement with the look, so
+     the gate does not depend on a dispatched orchestrator: a solo round that changes a
+     visible surface shows its mock and waits too. No UI trigger fires ⇒ no mock step.
 3. **Worker run.** Task = worker contract + the plan inline + expected files +
    round-doc path (the worker does not edit it). The worker implements, runs
    build + affected tests, returns WORKER REPORT. The parent persists the
@@ -520,7 +589,11 @@ the tester never derives or expands its own scope.
    build failures it cannot recover from), the parent interrupts it and
    re-dispatches the SAME pass scope as an ESCALATION PASS on
    the ESCALATOR model (Tier 3: `kimi-k2.7-code`, pinned; since 2026-10-18 distinct
-   from the diff-review seat `deepseek-v4-pro:0813`) — via a WRITE-CAPABLE agent shell (the `worker` or `delegate`
+   from the diff-review seat `deepseek-v4-pro:0813`) — **unless the scope-split
+   rung below fires first: a pass that carried more than three workstreams is
+   SPLIT, not escalated** (owner, 2026-10-24; see that rung, which also covers the
+   judgement branch below the size test). Everything else here applies to the
+   escalation route — via a WRITE-CAPABLE agent shell (the `worker` or `delegate`
    agent; the `reviewer` agent shell is read-only by design and cannot
    execute passes) — which reconciles the on-disk state first, then
    completes the blocked pass. Subsequent worker passes revert to the worker
@@ -532,6 +605,45 @@ the tester never derives or expands its own scope.
    the provenance in the round doc (e.g. "pass 3 completed via escalation").
    Do not steer or revive a run whose bash has been open past a plausible
    build/test window — interrupt it; a hung process never settles.
+
+   **Scope-split rung — check it before escalating.** Escalation is the rung for a
+   *capability*-shaped block; a block that is *scope*-shaped is split instead. Two
+   branches, and only the first is mechanical:
+
+   1. **Size branch (mechanical, applies first).** If the timed-out pass carried
+      **more than three workstreams** — read off the plan's own dispatch
+      declaration, not off an impression of the worker — the pass is **split, not
+      escalated**. No judgement is involved and none may be substituted. The owner
+      asked for exactly this on 2026-10-24: a large blob is the remedy-shaped
+      failure, so it is split *before* another model is paid to do the same
+      quantity faster.
+   2. **Judgement branch (≤3 workstreams).** Classify by what the round doc
+      records, and **write the reason down**: no workstream landed, repeated build
+      failures it could not recover from, wrong approach being pursued ⇒
+      capability-shaped ⇒ escalate. Otherwise ⇒ split. Do **not** treat "the build
+      was green" as proof of health — build ≠ tests, and the 2026-10-23 round that
+      produced this rule timed out with a green build **and one failing test**. The
+      real protection is branch 1 plus the residual rule below, not a health signal.
+
+   A split means: freeze the landed state (frozen patch + one written line per
+   completed workstream), then dispatch **only** the named residual — and the
+   residual must be a plan **slice with its own acceptance criteria**, never a
+   restatement of the timed-out workstream. The split unit is **state-first**
+   ("landed vs residual"), never a re-dispatch of the original W-list: a second
+   worker redoing applied edits is worse than the timeout. Run the slices
+   **sequentially in one working tree**; worktrees are for genuinely independent
+   slices, and a residual is dependent by construction.
+   Accounting: a split is a re-dispatch of reduced scope, not an escalation, so it
+   leaves the one-escalation-per-blocked-pass allowance untouched and does **not**
+   consume the tier's rework bound (≤1 on Tier 2, ≤2 on Tier 3). Caps, so the rung
+   cannot become a chain: **one split per blocked pass and one per workstream**; a
+   split whose residual *also* times out is **escalated** (or, if the escalation is
+   already spent, **parked** to the owner) — never split again, and never a second
+   split of the same workstream. Once the residual lands, the tier's normal bound
+   resumes: "does not consume an iteration" must never read as "unbounded extra
+   passes". Evidence: the 2026-10-23 panel-layout round put 5 workstreams in one
+   30-minute pass, timed out with three landed and a named residual, and escalated
+   only because no rule authorised the split (round doc holds the story).
    **Time-box rule — probe with the `grill-me` skill, then park.** The escalation pattern
    above assumes the block has a known cause and a short path. When a pass (or the
    parent's own verification) is over its time box, **measurably** — there is no

@@ -188,6 +188,24 @@ restated in a repo-owned file carrying the same trigger. Cite the incident
 date in one clause (evidence, not a changelog); the round doc holds the full
 story.
 
+**Propose, never pre-write (owner, 2026-10-23).** A durable lesson is **proposed in the reply** as a
+candidate — what to write, where it goes, and the evidence — and reaches a repo-owned file **only
+when the owner explicitly accepts it**. Writing the file first is a rule violation even when the
+content is right: an unaccepted lesson riding a code commit makes the diff unreviewable, and the
+next agent reads an unratified rule as ratified. Acceptance is explicit ("write it", "accepted", or
+an answered lessons round); silence, a passing "all as recommended" on *other* questions, and the
+agent's own judgment are not acceptance. If a lesson is proposed and not answered, it stays prose in
+the reply and dies with the session — that is the correct outcome, not a loss.
+
+**`/retro` is the capture step (owner, 2026-10-23).** Run the installed `/retro` skill (it lives in
+`~/.agents/skills/retro` — installer-managed, never edit it) at the end of a build or a defect pass.
+It reviews the session for environment-level improvements (navigation pointers, automated checks,
+coding standards, AGENTS.md bloat, tool economy, no-ops, information access) and **presents
+candidates to the owner**; the owner accepts, and only then are those candidates written into the
+repo-owned files named above. A mechanical mistake becomes a deterministic check; a judgement call
+becomes a coding standard. This paragraph is the pointer, not a copy of retro's categories — the
+skill owns those and refreshes from upstream.
+
 ---
 
 ## Agent skills
@@ -220,6 +238,7 @@ instead of duplicating it.
 | Area | File |
 |---|---|
 | Blazor components, Fluent UI, and styling | `.github/copilot/rules/blazor-components.md` |
+| **Create / edit page layout** (main + rail skeleton, the single panel box, header/actions row, rail-membership test, control widths) | `documents/solution/panel-layout-pattern.md` — the **only** place these rules live; every other file points here |
 | CSS isolation and styling | `.github/copilot/rules/blazor-components.md#blazor-css-isolation-and-styling` |
 | Entity Framework Core migrations | `.github/copilot/rules/ef-migrations.md` |
 | Logging and Aspire observability | `.github/copilot/rules/logging-aspire.md` |
@@ -594,10 +613,18 @@ commit (and the related PR/stack steps per this policy), the mechanical
 git/gh execution — staging the named change set, the commit, `gh stack`
 unstack/init/submit, and `gh pr` operations — is delegated to a lightweight
 subagent running `ollama-cloud/deepseek-v4.1-flash:1017` (pi provider; Cline
-equivalent: `cline-pass/deepseek-v4.1-flash`; owner 2026-10-18 — the worker id is
-pinned **with its build suffix** because the registry carries several
+Pass equivalent, provider-qualified so it resolves as written:
+`clinepass/cline-pass/deepseek-v4.1-flash-1017`; owner 2026-10-18 — the worker id
+is pinned **with its build suffix** because the registry carries several
 v4.1-flash builds and a bare id is ambiguous; supersedes the 2026-09-25
-suffix-less spelling). The parent agent shows and
+suffix-less spelling). **Suffix spelling is per provider** (corrected
+2026-10-23): ollama-cloud writes the build as a COLON (`:1017`), ClinePass as a
+HYPHEN (`-1017`) — and ClinePass publishes **both** the suffixed and the bare
+`cline-pass/deepseek-v4.1-flash`, plus the free-tier `cline-free/deepseek-v4.1-flash`.
+An earlier note here claimed ClinePass carried no suffixed id; that was wrong,
+produced by grepping the extension's static catalog, which never lists a
+dynamically discovered id. Resolve against the live registry
+(`pi --list-models flash-1017`) before pinning, never against a source grep. The parent agent shows and
 confirms the change set, then hands the execution to that agent. Every gate
 in this policy (explicit authorization for each action, the change-set
 review, `SCHOOLCOLLAB_ALLOW_PUSH=1` for pushes, no merge without
