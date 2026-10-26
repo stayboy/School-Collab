@@ -71,7 +71,21 @@ public class NotificationTemplateCreateTests : BunitContext
         // beside the landing/dialog suites (the icons-skill note on load-sensitive bUnit timeouts).
         cut.WaitForAssertion(() =>
         {
-            var post = handler.Calls.Single(c => c.Method == "POST");
+            // Filter to THIS endpoint, and report what else was posted if the expectation ever breaks.
+            // `Single(c => c.Method == "POST")` over every call was the shape that reddened two of three
+            // full-suite runs (issue #418): it couples this assertion — "the create posts the whole draft" —
+            // to the absence of any other POST in the whole session, so an unrelated write turns a correct
+            // page into a failure with the misleading message "more than one matching element".
+            var posts = handler.Calls.Where(c => c.Method == "POST").ToArray();
+            var createPosts = posts
+                .Where(p => p.Url.StartsWith(TemplateApiHandler.BasePath, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            createPosts.Should().ContainSingle(
+                $"the create must post the draft exactly once. All POSTs this run: "
+                + string.Join(" | ", posts.Select(p => p.Url)));
+
+            var post = createPosts[0];
             post.Body.Should().Contain("\"channel\":1");
             post.Body.Should().Contain("Hello {{Title}}");
             post.Body.Should().Contain(TemplateApiHandler.GradeA);
