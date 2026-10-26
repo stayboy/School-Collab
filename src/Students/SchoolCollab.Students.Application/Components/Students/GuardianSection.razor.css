@@ -188,9 +188,9 @@
 /* ── Local relationship dropdown ──
    The local FluentSelect wrapper that renders the "Add Existing Guardian"
    sentinel + the RELATSHIPS coded values. Width is driven by the
-   component's inline Style="width: 150px" (scoped CSS would lose to the
-   web component's host width). The class is the hook for any future
-   per-instance overrides. */
+   component's inline ladder style — `Style="@FieldWidth.W3.ToCssStyle()"`
+   (scoped CSS would lose to the web component's host width). The class is
+   the hook for any future per-instance overrides. */
 .guardian-rel-select {
     /* Width: inline style (see FluentSelect Style parameter). */
 }
