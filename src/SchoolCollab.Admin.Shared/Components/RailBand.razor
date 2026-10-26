@@ -1,0 +1,60 @@
+@namespace SchoolCollab.Admin.Shared.Components
+
+@*
+    A labelled slice of a panel body: one kind of fact, tinted, with a text label that is never optional.
+
+    WHY THIS COMPONENT EXISTS (documents/solution/component-first-policy.md, Q22a):
+    the student edit rail renders a "Placement" band and an "Activity groups" band; round B adds
+    "Needs explicit enrolment" and "Assumed enrolled"; the Enrol dialog's placement banner repeats the
+    same shape. That is four call sites of one shape, so it is a component rather than four copies.
+
+    A band is panel CONTENT, never a box (panel-layout-pattern.md §3): it has no shadow and never nests
+    another PanelSection. It fills its container and wraps — no fixed width, so no parent needs a
+    `::deep` rule to size it (the contacts add-row defect, 2026-10-25, is why that is written down).
+*@
+
+<div class="rail-band @VariantClass" id="@Id" role="group" aria-label="@Label">
+    <div class="rail-band__label">
+        @Label
+        @if (!string.IsNullOrWhiteSpace(Hint))
+        {
+            <span class="rail-band__hint">@Hint</span>
+        }
+    </div>
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>The band's text label (e.g. <em>Placement</em>). Required: a band with no label is rejected
+    /// at review, because colour alone may never carry the meaning.</summary>
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>Right-aligned secondary text on the label row — per-band counts ("0 joined", "2 of 2 valid")
+    /// and markers such as "read-only". Bands never carry a count CHIP: two count treatments in one panel is
+    /// the "three chip shapes" problem (component-first-policy.md §6, Q28a).</summary>
+    [Parameter]
+    public string? Hint { get; set; }
+
+    /// <summary>Colour tint. Defaults to <see cref="RailBandVariant.Neutral"/>.</summary>
+    [Parameter]
+    public RailBandVariant Variant { get; set; } = RailBandVariant.Neutral;
+
+    /// <summary>Test/probe seam (e.g. <c>student-edit-activity-groups</c>). Optional, but every call site in
+    /// the repo passes one — the band's structure is otherwise unaddressable from a probe.</summary>
+    [Parameter]
+    public string? Id { get; set; }
+
+    /// <summary>The band's content — normally a <see cref="RailChips"/> set, but any fragment. The band owns
+    /// layout and tinting, never the meaning of what it holds.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private string VariantClass => Variant switch
+    {
+        RailBandVariant.Groups => "rail-band--groups",
+        RailBandVariant.Required => "rail-band--required",
+        RailBandVariant.Assumed => "rail-band--assumed",
+        _ => string.Empty,
+    };
+}
