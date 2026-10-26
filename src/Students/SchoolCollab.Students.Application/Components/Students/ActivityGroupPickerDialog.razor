@@ -1,0 +1,117 @@
+@* Activity-group picker for the student edit rail (owner, 2026-10-25 — mock v4/v5: the rail's
+   "＋ Add group" opens this). Lists every group, marks the ones the student already holds, and strikes
+   through the ones they may not join WITH THE REASON, because a hidden group reads as a bug to an admin
+   who knows it exists while a struck-through one reads as a rule (owner Q18).
+
+   The reasons come from <see cref="ActivityGroupEligibility"/>, the display mirror of
+   AddMembershipHandler's rules. The server stays the authority: this dialog only offers what the mirror
+   considers addable, and a rejection it did not predict surfaces in the footer's error line.
+
+   It returns the chosen group ids; the PAGE writes the memberships, so a partial failure cannot leave a
+   closed dialog claiming success — the page owns retry and the error surface. *@
+@inherits DialogShellBase<ActivityGroupPickerModel, Guid[]>
+@using SchoolCollab.Students.Application.Services
+@inject StudentsApiClient Api
+@inject ILogger<ActivityGroupPickerDialog> Logger
+
+<DialogShellBody>
+<div class="activity-group-picker">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        @if (_loading)
+        {
+            <div class="picker-loading"><FluentSpinner /></div>
+        }
+        else if (_options.Count == 0)
+        {
+            <FluentMessageBar Intent="MessageBarIntent.Info">
+                No activity groups exist yet. Create one under Students › Activity Groups, then come back.
+            </FluentMessageBar>
+        }
+        else
+        {
+            <p class="picker-hint">
+                Only groups this student is valid for can be picked. A struck-through group cannot be
+                joined, and the reason is shown beside it.
+            </p>
+
+            <ul class="picker-list">
+                @foreach (var option in _options.OrderBy(o => o.IsMember ? 1 : 0).ThenBy(o => o.Group.Name))
+                {
+                    <li class="picker-row @(option.CanAdd || option.IsMember ? null : "picker-row--blocked")"
+                        id="@($"group-option-{option.Group.Id}")" @key="option.Group.Id">
+                        @if (option.IsMember)
+                        {
+                            <span class="picker-name">@option.Group.Name</span>
+                            <span class="picker-badge">Joined</span>
+                        }
+                        else if (option.CanAdd)
+                        {
+                            <FluentCheckbox Value="@_selected.Contains(option.Group.Id)"
+                                            ValueChanged="@((bool on) => Toggle(option.Group.Id, on))"
+                                            Label="@option.Group.Name" />
+                            @if (!string.IsNullOrWhiteSpace(option.Group.Category))
+                            {
+                                <span class="picker-meta">@option.Group.Category</span>
+                            }
+                            @if (option.Group.Capacity is { } capacity)
+                            {
+                                <span class="picker-meta">@option.Group.ActiveMemberCount/@capacity</span>
+                            }
+                        }
+                        else
+                        {
+                            <span class="picker-name picker-name--blocked">@option.Group.Name</span>
+                            <span class="picker-reason">@option.InvalidReason</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        <DialogShellFooter SubmitText="Add"
+                           Saving="@Saving"
+                           Error="@Error"
+                           SubmitDisabled="@(_loading || _selected.Count == 0)"
+                           OnCancel="@HandleCancelAsync" />
+    </EditForm>
+</div>
+</DialogShellBody>
+
+@code {
+    private List<ActivityGroupOption> _options = [];
+    private readonly HashSet<Guid> _selected = [];
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var groups = await Api.ListActivityGroupsAsync() ?? [];
+            var held = await Api.ListStudentGroupsAsync(Model.StudentId) ?? [];
+            _options = ActivityGroupEligibility
+                .Evaluate(groups, Model.GradeLevelId,
+                    held.Select(g => g.Id).ToArray(), DateOnly.FromDateTime(DateTime.UtcNow))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading activity groups for student {StudentId} failed", Model.StudentId);
+            Error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Toggle(Guid groupId, bool selected)
+    {
+        if (selected) _selected.Add(groupId);
+        else _selected.Remove(groupId);
+    }
+
+    /// <summary>The pick itself. An empty pick is impossible — the footer is disabled — so this simply
+    /// hands the ids back; the page performs one <c>AddGroupMemberAsync</c> per id and reports failures.</summary>
+    protected override Task<Guid[]?> SubmitAsync(ActivityGroupPickerModel model) =>
+        Task.FromResult<Guid[]?>(_selected.Count == 0 ? null : _selected.ToArray());
+}

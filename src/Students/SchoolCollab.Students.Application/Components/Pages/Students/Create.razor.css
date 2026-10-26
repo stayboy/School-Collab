@@ -1,6 +1,8 @@
-/* Page layout. The form fields come from the shared <StudentFormFields>
-   component (Components/Students/), so this stylesheet only carries the
-   page chrome rules. */
-.page-container { height: 100%; gap: 0; }
-.title-row { flex-shrink: 0; display: flex; align-items: center; gap: 0.75rem; padding-top: 0.25rem; }
-.page-title { margin: 0; }
+/* Page chrome only — the fields come from the shared <StudentFormFields>, and the layout
+   (region stack, block box, page action header) from the shared pattern:
+   .region-stack and .authoring-actionbar live in SchoolCollab.Admin.Shared/wwwroot/app.css
+   and AuthoringShell.razor.css.
+
+   The old `.page-container` / `.title-row` / `.page-title` rules are gone: the title moved into
+   the page action header (panel-layout-pattern §4, owner 2026-10-24) and the stack is the shared
+   `.region-stack`, so this page has no bespoke layout left. */

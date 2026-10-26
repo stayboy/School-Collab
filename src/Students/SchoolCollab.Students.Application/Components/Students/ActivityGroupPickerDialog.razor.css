@@ -1,0 +1,76 @@
+/* Activity-group picker dialog (Student edit rail → "＋ Add group").
+   A plain list: pickable groups carry a checkbox, joined ones a badge, blocked ones a struck-through name
+   plus the reason the membership would be rejected. Kept deliberately flat — the dialog's job is one
+   decision, and a card per row would re-introduce the box-in-a-box the panel pattern forbids. */
+
+.activity-group-picker {
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+}
+
+.picker-loading {
+    display: flex;
+    justify-content: center;
+    padding: 32px;
+}
+
+.picker-hint {
+    margin: 0 0 10px;
+    font-size: 0.8125rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.picker-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.picker-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+}
+
+.picker-row:last-child {
+    border-bottom: 0;
+}
+
+.picker-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.picker-name--blocked {
+    font-weight: 500;
+    color: var(--neutral-foreground-hint, #616161);
+    text-decoration: line-through;
+}
+
+.picker-reason {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.picker-meta {
+    font-size: 0.75rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.picker-badge {
+    margin-left: auto;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--neutral-stroke-2, #d1d1d1);
+    background: var(--neutral-layer-2, #fafafa);
+    color: var(--neutral-foreground-hint, #616161);
+}
