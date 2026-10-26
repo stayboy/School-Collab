@@ -10,7 +10,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SchoolCollab.Admin.Shared.Components;
 using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.Students.Application.Components.Contacts;
+using SchoolCollab.Students.Application.Components.Students;
+using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Application.Components.Pages.Students;
 using SchoolCollab.Students.Application.Services;
 using SchoolCollab.Students.Core.Contracts;
@@ -94,7 +98,7 @@ public class StudentsPanelLayoutTests : BunitContext
     /// <summary>The page's backend, scripted for an EMPTY student surface (no enrollments, no
     /// guardians, no coded values). Registered in this order: the page's own reads first, then
     /// the catch-all that answers the blocks' lookup reads with an empty list.</summary>
-    private ScriptedHandler RegisterBackend(bool withActiveEnrollment = false)
+    private ScriptedHandler RegisterBackend(bool withActiveEnrollment = false, bool contactWriteFails = false)
     {
         var auth = new MutableAuth();
         var handler = new ScriptedHandler();
@@ -119,9 +123,20 @@ public class StudentsPanelLayoutTests : BunitContext
         handler.Map("GET", $"/students/{StudentId}/guardians", HttpStatusCode.OK, "[]");
         // Every lookup the blocks make on mount (coded values, contacts) reads an empty list.
         handler.Map("GET", "/", HttpStatusCode.OK, "[]");
+
+        // ── the create page's writes ────────────────────────────────────────────────────────────────
+        // POST /students returns the new id; the page then flushes each drafted contact against it.
+        // NOTE the prefix is "/students" WITHOUT a trailing slash — `PostAsJsonAsync("/students", …)` is what
+        // the client sends, and a "/students/" prefix never matches, which silently turned the create into a
+        // 404 and made the flush unreachable.
+        handler.Map("POST", "/students", HttpStatusCode.OK, $"{{\"id\":\"{NewStudentId}\"}}");
+        handler.Map("POST", "/contacts", contactWriteFails ? HttpStatusCode.InternalServerError : HttpStatusCode.OK,
+            contactWriteFails ? """{"message":"boom"}""" : $"{{\"id\":\"{Guid.NewGuid()}\"}}");
         return handler;
     }
 
+    private static readonly Guid GenderId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+    private static readonly Guid NewStudentId = Guid.Parse("77777777-7777-7777-7777-777777777777");
     private static readonly Guid GradeLevelId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid PeriodId = Guid.Parse("55555555-5555-5555-5555-555555555555");
 
@@ -163,6 +178,107 @@ public class StudentsPanelLayoutTests : BunitContext
     }
 
     /// <summary>Renders /students/create — the same scripted backend, no student id needed.</summary>
+    /// <summary>
+    /// The create page drafts contacts in a BUFFERED editor — there is no owner id to write them against until
+    /// the student exists — so it flushes them AFTER the create, one POST per contact. That flush is behavioural
+    /// code, so it is pinned here: the pre-flight review (2026-10-26) caught it shipping with no test at all.
+    /// </summary>
+    [TestMethod]
+    public async Task Create_FlushesTheDraftedContacts_AgainstTheNewStudentId()
+    {
+        var handler = RegisterBackend();
+        var cut = Render<Create>();
+
+        cut.WaitForAssertion(() => cut.Find("#student-create-contacts").Should().NotBeNull());
+
+        // Draft two contacts in the buffered editor, then save the student.
+        await DraftContactAsync(cut, ContactChannel.Email, "a@example.com", "Mum");
+        await DraftContactAsync(cut, ContactChannel.SMS, "+27 82 000 0000", null);
+        await SubmitTheCreateFormAsync(cut);
+
+        cut.WaitForAssertion(() =>
+        {
+            var posts = handler.Calls.Where(c => c.Method == "POST" && c.Url.StartsWith("/contacts", StringComparison.OrdinalIgnoreCase)).ToArray();
+            posts.Should().HaveCount(2,
+                $"one POST per drafted contact — the buffered editor cannot write them earlier. Calls seen: {string.Join(" | ", handler.Calls.Select(c => $"{c.Method} {c.Url}"))}");
+
+            // Ordering is the observable guarantee: the owner id only exists after the create, so every
+            // contact write must come AFTER it. (The id itself travels in the request body; asserting on the
+            // URL would be asserting on something the client never puts there.)
+            var createIndex = handler.Calls.FindIndex(c => c.Method == "POST" && c.Url == "/students");
+            var firstContactIndex = handler.Calls.FindIndex(c => c.Method == "POST" && c.Url.StartsWith("/contacts", StringComparison.OrdinalIgnoreCase));
+            createIndex.Should().BeGreaterThanOrEqualTo(0, "the create must fire");
+            firstContactIndex.Should().BeGreaterThan(createIndex,
+                "a contact can only be flushed once the student has an id");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>
+    /// A failed contact flush must say so in a sentence the user can act on, and must NOT re-create the student:
+    /// the student already exists at that point, so retrying the whole form would duplicate them. The detail
+    /// belongs in the log, never in the message.
+    /// </summary>
+    [TestMethod]
+    public async Task Create_WhenTheContactFlushFails_ReportsItAndDoesNotCreateASecondStudent()
+    {
+        var handler = RegisterBackend(contactWriteFails: true);
+        var cut = Render<Create>();
+
+        cut.WaitForAssertion(() => cut.Find("#student-create-contacts").Should().NotBeNull());
+
+        await DraftContactAsync(cut, ContactChannel.Email, "a@example.com", null);
+        await SubmitTheCreateFormAsync(cut);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("some contacts could not be saved",
+                $"the user needs a sentence, not a stack trace. Calls: {string.Join(" | ", handler.Calls.Select(c => $"{c.Method} {c.Url}"))}");
+
+            handler.Calls.Count(c => c.Method == "POST"
+                && c.Url == "/students").Should().Be(1,
+                "a contact failure must not trigger a second create — the student already exists");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>
+    /// Runs the create page's save path.
+    /// <para>
+    /// It invokes the <see cref="StudentFormFields"/> <c>OnValidSubmit</c> seam directly rather than replaying
+    /// five FluentUI controls (shadow-DOM event chains) plus <c>EditForm</c> validation: validation is the form
+    /// component's own covered ground, and what is being pinned here is the PAGE's new behaviour — create the
+    /// student, then flush the buffered contacts against the id it returns.
+    /// </para>
+    /// </summary>
+    private static async Task SubmitTheCreateFormAsync(IRenderedComponent<Create> cut)
+    {
+        var form = cut.FindComponent<StudentFormFields>();
+
+        // The buffered contacts are flushed only after a real owner id exists, so the precondition is part of
+        // the contract: the list the page owns is the list the editor mutates.
+        form.Instance.Model.Contacts.Should().NotBeEmpty(
+            "a flush with nothing drafted would prove nothing — the drafts must reach the page's model");
+
+        await cut.InvokeAsync(() => form.Instance.OnValidSubmit.InvokeAsync());
+    }
+
+    /// <summary>
+    /// Drafts one contact onto the list the PAGE owns (<see cref="StudentFormModel.Contacts"/>) — the list the
+    /// buffered <see cref="ContactsEditor"/> mutates and the page flushes after the create. Appending to the
+    /// editor's own <c>Contacts</c> parameter would be the wrong target: it is the editor's working copy, and
+    /// without the editor's <c>ContactsChanged</c> event the page's model would never see it.
+    /// </summary>
+    private static async Task DraftContactAsync(IRenderedComponent<Create> cut, ContactChannel channel, string value, string? label)
+    {
+        var contacts = cut.FindComponent<StudentFormFields>().Instance.Model.Contacts;
+        await cut.InvokeAsync(() => contacts.Add(new ContactModel
+        {
+            Channel = channel,
+            Value = value,
+            Label = label,
+            Order = contacts.Count,
+        }));
+    }
+
     private IRenderedComponent<Create> RenderCreate()
     {
         RegisterBackend();

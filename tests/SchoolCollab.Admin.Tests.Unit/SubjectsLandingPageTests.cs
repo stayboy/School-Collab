@@ -240,9 +240,9 @@ public class SubjectsLandingPageTests : BunitContext
     /// Registers the page's dependency graph and renders <c>Subjects</c>.
     /// <paramref name="activityGroupsStatus"/> controls the <c>/activity-groups</c> response so a test can
     /// reproduce a failed (404) and a healthy (200) group load; pass <c>null</c> to leave the route
-    /// unmapped entirely. <c>activityGroupsAvailable</c> is what the old <c>FEATURE:EnableActivityGroups</c>
-    /// flag stood in for — the flag was retired on 2026-10-26, the DEFENSIVE behaviour it was used to test
-    /// was not.
+    /// unmapped entirely. <c>activityGroupsAvailable</c> is what the retired
+    /// <c>FEATURE:EnableActivityGroups</c> flag used to stand in for when asserting the happy path; the page
+    /// itself no longer reads any flag, so the flag mock is registered but never consulted.
     /// </summary>
     private Harness RenderSubjects(
         bool activityGroupsAvailable,

@@ -284,12 +284,27 @@ host-independent call sites; `Class="w-N"` only resolves inside the Admin host).
 
 | Step | Width | Typical use |
 |---|---|---|
-| W1–W3 | 80 / 120 / 160px | pickers, small enums |
+| W1–W2 | 80 / 120px | **single-line text fields only — never a dropdown** |
+| W3 | 160px | **the narrowest a dropdown may be**, small enums |
 | W4 | 200px | code / reference fields |
 | W5–W6 | 240 / 280px | medium single-line |
 | W7 | 320px | identity fields (template title, subject) |
 | W8 | 400px | deliberate bounded field |
 | W9 | fill | the row's widest input, textareas |
+
+**A dropdown is never sized below W3 — 160px is a floor, not a preference
+(measured 2026-10-25).** Fluent UI v5 hard-codes `min-width: 160px` on the shadow
+`.control` of `fluent-dropdown` / `fluent-select`, and the host keeps `overflow: visible`,
+so a host narrower than 160px does not clip the control — the control paints **over** its
+next sibling. At W2 (120px) a `ContactChannel` dropdown's field measured 120px while its
+control measured 160px, leaving a **2px** overlap with the label; at W3 the field and the
+control both measure 160px and the label clears by **8px**. CSS cannot enforce this (the
+minimum lives inside the shadow root), so it is enforced three ways: this rule, the
+`FieldWidth` doc comment, and `SchoolCollab.ArchitectureTests.Unit.DropdownWidthFloorArchitectureTests`,
+which fails on a `DropdownForEnum` / `CodedValueDropdown` / `DropdownComponent` sized W1/W2
+or a raw `FluentSelect`/`FluentDropdown`/`FluentAutocomplete` declared under 160px.
+Do **not** "fix" it with `overflow: hidden` on the host: that hides the next defect instead
+of failing loudly, and risks clipping the focus ring.
 
 **Slotted Fluent controls must be sized with `width: 100%`, never `width: inherit`
 (lesson L3, measured 2026-10-23).** `FluentTextInput` and friends are slotted into their

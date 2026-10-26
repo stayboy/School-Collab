@@ -370,9 +370,12 @@ overrides work; or both) — an owner decision, not taken here. The populated-pa
 
 ---
 
-## Open decisions — unratified (2026-10-25)
+## Decisions settled after round A (2026-10-25 → 26)
 
-Numbered continuously across rounds. None of these were acted on; round A was built from Q16–Q19 only.
+**RATIFIED.** Q21–Q25 were settled by the owner as a set ("all as recommended") and **were acted on**: the policy
+doc flipped from `PROPOSED` to `ADOPTED`, and `RailBand` was built from them. Q20 was settled the same way
+(label above the control) and stays with the Enrol-dialog banner, which is round B work. The table below is kept as
+the decision record — read the *Recommended* column as *what was decided*, not as an open question.
 
 | # | Decision | Recommended |
 |---|---|---|
@@ -382,6 +385,45 @@ Numbered continuously across rounds. None of these were acted on; round A was bu
 | Q23 | Cost guardrail | **(a)** presentational-only rule + "advise against with a measurement" |
 | Q24 | Approval gate for design/spec-derived components | **(a)** grill round + rendered states mock + recorded contract, before building |
 | Q25 | Where the policy lives | **(a)** `documents/solution/component-first-policy.md` + one `AGENTS.md` row; CI checks deferred until it fires twice |
+
+---
+
+## `RailBand` / `RailChip` / `RailChips` — the contract (Q22a, Q24a)
+
+Design-derived, so the policy's approval gate applied: settled in the Q22/Q24 round, approved from the rendered
+states mock `.pi/mock/rail-band-states.png` (rest · empty · dense · blocked · round-B variants), and recorded here.
+
+| Parameter | Type | Contract |
+|---|---|---|
+| `RailBand.Label` | `string` (`EditorRequired`) | Always rendered as visible text + `aria-label`. A band with no label is a review rejection: colour never carries the meaning alone. |
+| `RailBand.Hint` | `string?` | Right-aligned secondary text — per-band counts ("0 joined") and markers ("read-only"). Bands never carry a count CHIP (Q28a). |
+| `RailBand.Variant` | `RailBandVariant` | `Neutral` (default, emits no class) · `Groups` · `Required` · `Assumed`. The last two exist for round B so it adds call sites, not CSS. |
+| `RailBand.Id` | `string?` | Probe/test seam. Every production call site passes one. |
+| `RailBand.ChildContent` | `RenderFragment` | Normally a `RailChips` set. The band owns layout and tint, never the meaning of its content. |
+| `RailChip.Text` | `string` (`EditorRequired`) | Also the accessible name of its remove button (`Remove {Text}`). |
+| `RailChip.Blocked` | `bool` | Struck through + `aria-disabled`. |
+| `RailChip.Reason` | `string?` | **Required by convention when `Blocked`** — enforced by review and by a test that pins the gap, not by the compiler. Rendered in **three** channels: visible `· reason`, `title`, `aria-description`. |
+| `RailChip.OnRemove` | `EventCallback` | Supplying it renders the ✕; absent ⇒ no affordance (facts are not removable). |
+| `RailChip.Disabled` | `bool` | Disables the ✕ during a write, never the chip's text. |
+| Accessibility | — | `role="group"` + `aria-label` (band); `role="list"` (chips set) / `role="listitem"` (chip); blocked ⇒ `aria-disabled="true"`. |
+| Sizing | — | No fixed width; fills and wraps. **No parent needs `::deep` to size it** — the contacts add-row defect (2026-10-25) is why this is written down. |
+
+**Call sites today:** `Students/Edit.razor` ×2 (`student-edit-enrollment-facts`, `student-edit-activity-groups`).
+**Committed next:** the Enrol dialog's placement banner, and round B's required/assumed bands.
+
+### Where the review's findings landed (2026-10-26)
+
+The pre-flight code review found one blocking defect **introduced by the flag retirement** and three test gaps;
+all were fixed before the PR:
+
+| Finding | Fix |
+|---|---|
+| `Subjects.razor` kept `if (false)` and never set `_activityGroupsEnabled = true`, so the *Activity Group* owner filter was permanently gone — a **lost capability**, exactly what the owner forbade | Flag probe deleted; the filter is offered when the group load **succeeds**. The happy-path test now asserts the rendered option, not just the HTTP call |
+| `ActivityGroupEligibility` was **stricter than the server**: it window-checked every span and refused a future start date, while `AddMembershipHandler` checks only `DateRange`'s end date | Mirror matches the server exactly; two new tests pin both asymmetries; the two remaining permissive divergences (grade source, span resolvability) are documented on the type |
+| `JoinGroupsDialog` put `ex.Message` in a message bar — the rule the deleted flag-off test also guarded | Logs the exception, shows a plain sentence; the isolation doc's rule survives the flag |
+| `AssignmentAuthoring` left the *SelectedGroups* category offered with an empty picker after a failed load | Fail-closed: enabled only after a successful load |
+| `Create.razor`'s contact flush (`AddContactAsync` per contact) had **no test** | Added (create → one POST per contact; a failure surfaces a sentence and leaves the student created) |
+| The picker dialog had no bUnit test | **Not fixed — filed (#419).** Its behaviour *is* verified end-to-end on a live AppHost (5 rows, Choir + Switched off struck through with their reasons, add/remove round-trip), but no unit test pins it. Recorded honestly rather than claimed. |
 
 ---
 

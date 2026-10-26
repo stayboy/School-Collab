@@ -110,12 +110,6 @@
     [Parameter] public string? CountId { get; set; }
 
     /// <summary>
-    /// Opt-in collapse (§6): when true the header carries a chevron button immediately before the
-    /// title and the body collapses to the header row. Defaults to <b>false</b> — an opt-in default
-    /// means a caller has to ask for the affordance, and forgetting to ask can never silently add a
-    /// control the owner did not consent to. The main region is never collapsible.
-    /// </summary>
-    /// <summary>
     /// Whether the panel renders its header row (title, count, actions and the rule) at all.
     /// <b>True by default.</b>
     /// <para>
@@ -128,6 +122,12 @@
     /// </summary>
     [Parameter] public bool ShowHeader { get; set; } = true;
 
+    /// <summary>
+    /// Opt-in collapse (§6): when true the header carries a chevron button immediately before the
+    /// title and the body collapses to the header row. Defaults to <b>false</b> — an opt-in default
+    /// means a caller has to ask for the affordance, and forgetting to ask can never silently add a
+    /// control the owner did not consent to. The main region is never collapsible.
+    /// </summary>
     [Parameter] public bool Collapsible { get; set; }
 
 

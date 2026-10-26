@@ -129,7 +129,7 @@
 
                                                     <RailBand Id="student-edit-activity-groups"
                                                               Label="Activity groups"
-                                                              Hint="@_groupCountHint"
+                                                              Hint="@GroupCountHint"
                                                               Variant="RailBandVariant.Groups">
                                                         <RailChips>
                                                             @if (_activityGroups is null)
@@ -369,9 +369,9 @@
     private bool _savingGroup;
     private string? _groupError;
 
-    /// <summary>"2 of 6 valid" — the band's own total, which is what a count means here (owner Q19:
-    /// the panel itself carries no count chip).</summary>
-    private string _groupCountHint => _activityGroups is null ? string.Empty : $"{_activityGroups.Count} joined";
+    /// <summary>How many groups the student is in — the band's own total, which is what a count means here
+    /// (owner Q19: the panel itself carries no count chip). Renders as e.g. "3 joined".</summary>
+    private string GroupCountHint => _activityGroups is null ? string.Empty : $"{_activityGroups.Count} joined";
 
     /// <summary>Loads the student's memberships. Called after the page's own loads and again after any
     /// add/remove, because the band is a projection of the server's state, never a local guess.</summary>

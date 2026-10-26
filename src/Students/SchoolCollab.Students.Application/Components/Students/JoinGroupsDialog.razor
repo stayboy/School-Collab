@@ -12,7 +12,7 @@
 @using SchoolCollab.Core.Features
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
-@inject IFeatureFlagService FeatureFlags
+@inject ILogger<JoinGroupsDialog> Logger
 
 <DialogShellBody>
 <div class="dialog-container">
@@ -152,7 +152,11 @@
         }
         catch (Exception ex)
         {
-            Error = ex.Message;
+            // A raw exception string in a message bar is a defect, not a message
+            // (documents/solution/activity-groups-flag-client-isolation.md still binds after the flag's
+            // retirement: the isolation contract never depended on the flag). The detail belongs in the log.
+            Logger.LogWarning(ex, "Could not load activity groups for student {StudentId}; the picker stays empty", Model.StudentId);
+            Error = "Activity groups could not be loaded. Close this dialog and try again.";
         }
         finally
         {

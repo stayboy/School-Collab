@@ -14,12 +14,9 @@
 
 /* ── Enrollment panel: one read-only fact set ─────────────────────────────────────────
    The primary active enrollment is display-only; Transfer / Withdraw write a new record.
-   The facts wrap as a single line on a wide rail and as a stack on a narrow one. */
-.enrollment-display {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    align-items: center;
+   NOTE (2026-10-26): the `.enrollment-display*` rules that used to sit here are DELETED along with the
+   markup — the facts are <RailChip>s inside a <RailBand> now, so their layout lives in the shared band
+   vocabulary (app.css) and a page-local copy would be dead CSS that a future reader mistakes for live. */
     font-size: 0.8125rem;
 }
 

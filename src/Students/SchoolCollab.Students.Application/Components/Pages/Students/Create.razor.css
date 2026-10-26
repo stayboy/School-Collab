@@ -1,8 +1,0 @@
-/* Page chrome only — the fields come from the shared <StudentFormFields>, and the layout
-   (region stack, block box, page action header) from the shared pattern:
-   .region-stack and .authoring-actionbar live in SchoolCollab.Admin.Shared/wwwroot/app.css
-   and AuthoringShell.razor.css.
-
-   The old `.page-container` / `.title-row` / `.page-title` rules are gone: the title moved into
-   the page action header (panel-layout-pattern §4, owner 2026-10-24) and the stack is the shared
-   `.region-stack`, so this page has no bespoke layout left. */

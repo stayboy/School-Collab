@@ -1,4 +1,3 @@
-using SchoolCollab.Students.Application.Services;
 
 namespace SchoolCollab.Students.Application.Services;
 
@@ -69,6 +68,24 @@ public static class ActivityGroupEligibility
     }
 
     /// <summary>The reason a student may not join <paramref name="group"/>, or null when they may.</summary>
+    /// <remarks>
+    /// <para><b>Advisory, not authoritative.</b> The server re-checks every rule in
+    /// <c>AddMembershipHandler</c>; this mirror exists so the picker can strike a row through with the same
+    /// reason the write would fail with, instead of letting the user discover it on submit.</para>
+    /// <para><b>Two known divergences, both permissive (the server may still refuse a row we call addable);
+    /// neither ever refuses something the server would accept:</b></para>
+    /// <list type="number">
+    /// <item><description><b>Grade source.</b> The server resolves the student's grade for the ACTIVE
+    /// academic-year period; this mirror is handed the grade on the page's primary enrollment, which may be a
+    /// different period. Passing the active-period enrollment would close it — the page does not load one.</description></item>
+    /// <item><description><b>Span resolvability.</b> The server throws <c>EnrollmentSpanMismatchException</c>
+    /// when the span cannot be resolved (no active academic year, no active sub-period). This mirror has no
+    /// equivalent because it would need two more HTTP calls per render.</description></item>
+    /// </list>
+    /// <para><b>Capacity</b> is a documented approximation: <c>ActivityGroupDto</c> carries only
+    /// <c>ActiveMemberCount</c> (group-wide), while the server counts per (group, period) for period-aligned
+    /// spans.</para>
+    /// </remarks>
     public static string? RejectionReason(ActivityGroupDto group, Guid? studentGradeLevelId, DateOnly today)
     {
         ArgumentNullException.ThrowIfNull(group);
@@ -84,12 +101,13 @@ public static class ActivityGroupEligibility
                 : "Not offered to this grade";
         }
 
-        if (group.EnrollmentStartDate is { } opens && today < opens)
-        {
-            return $"Enrolment opens {opens:d}";
-        }
-
-        if (group.EnrollmentEndDate is { } closes && today > closes)
+        // Window — mirrors AddMembershipHandler.ResolveSpanAsync, INCLUDING its two asymmetries, because a
+        // mirror that is stricter than the server refuses a join the server would have accepted:
+        //   * only EnrollmentSpan.DateRange is window-checked (OpenEnded/Termly/… have no window at all), and
+        //   * only the END date rejects — a future START date is never refused by the server.
+        if (string.Equals(group.Span, "DateRange", StringComparison.Ordinal)
+            && group.EnrollmentEndDate is { } closes
+            && today > closes)
         {
             return $"Enrolment window closed ({closes:d})";
         }

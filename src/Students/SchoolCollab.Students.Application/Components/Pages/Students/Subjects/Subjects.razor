@@ -8,7 +8,6 @@
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
-@inject IFeatureFlagService FeatureFlags
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
@@ -282,17 +281,6 @@
         _activityGroupOptions = [];
         _activityGroups = null;
 
-        if (false)
-        {
-            // Never leave the page parked on a filter whose option is not rendered.
-            if (_ownerType == "ActivityGroup")
-            {
-                _ownerType = "GradeLevel";
-                _selectedActivityGroup = null;
-            }
-            return;
-        }
-
         try
         {
             _activityGroups = await Api.ListActivityGroupsAsync(token);
@@ -301,6 +289,10 @@
                 .OrderBy(g => g.Name)
                 .Select(g => new ActivityGroupOption(g.Id.ToString(), g.Name))
                 .ToArray();
+
+            // The filter is offered when the load SUCCEEDED — not when a flag says so. Removing the flag
+            // must never remove the capability (owner, 2026-10-26: "do not remove the feature").
+            _activityGroupsEnabled = true;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

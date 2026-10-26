@@ -25,7 +25,8 @@ public class ActivityGroupEligibilityTests
         int? capacity = null,
         int activeMembers = 0,
         DateOnly? opens = null,
-        DateOnly? closes = null) =>
+        DateOnly? closes = null,
+        string span = "OpenEnded") =>
         new(
             Id: Guid.NewGuid(),
             Name: name,
@@ -33,7 +34,7 @@ public class ActivityGroupEligibilityTests
             Category: null,
             Capacity: capacity,
             IsActive: isActive,
-            Span: "OpenEnded",
+            Span: span,
             EnrollmentStartDate: opens,
             EnrollmentEndDate: closes,
             AutoRenewDefault: true,
@@ -110,29 +111,46 @@ public class ActivityGroupEligibilityTests
     }
 
     [TestMethod]
-    public void A_closed_window_is_rejected_with_its_date()
+    public void A_closed_date_range_window_is_rejected_with_its_date()
     {
-        var option = EvaluateSingle(Group(closes: Today.AddDays(-1)), grade: Grade8);
+        var option = EvaluateSingle(Group(span: "DateRange", closes: Today.AddDays(-1)), grade: Grade8);
 
         option.CanAdd.Should().BeFalse();
         option.InvalidReason.Should().StartWith("Enrolment window closed (");
     }
 
+    /// <summary>
+    /// The server window-checks <b>only</b> <c>EnrollmentSpan.DateRange</c>
+    /// (<c>AddMembershipHandler.ResolveSpanAsync</c>); every other span carries no window, so a stray date on an
+    /// OpenEnded group must NOT block it here either. A mirror stricter than the server refuses a join the
+    /// server would have accepted — the review caught exactly this (2026-10-26).
+    /// </summary>
     [TestMethod]
-    public void A_future_window_is_rejected_with_its_opening_date()
+    public void A_date_on_a_non_date_range_group_does_not_block_it()
     {
-        var option = EvaluateSingle(Group(opens: Today.AddDays(3)), grade: Grade8);
+        var option = EvaluateSingle(Group(span: "OpenEnded", closes: Today.AddDays(-30)), grade: Grade8);
 
-        option.CanAdd.Should().BeFalse();
-        option.InvalidReason.Should().StartWith("Enrolment opens ");
+        option.CanAdd.Should().BeTrue("an OpenEnded group has no enrolment window, whatever dates it carries");
+    }
+
+    [TestMethod]
+    public void A_future_opening_date_does_not_block_a_date_range_group()
+    {
+        // Matches the server, which rejects only a PAST end date and never a future start date
+        // (AddMembershipHandler.ResolveSpanAsync, DateRange branch).
+        var option = EvaluateSingle(
+            Group(span: "DateRange", opens: Today.AddDays(3), closes: Today.AddDays(30)), grade: Grade8);
+
+        option.CanAdd.Should().BeTrue("the server never refuses a future opening date");
     }
 
     [TestMethod]
     public void A_window_that_includes_today_is_addable()
     {
-        var option = EvaluateSingle(Group(opens: Today.AddDays(-7), closes: Today), grade: Grade8);
+        var option = EvaluateSingle(
+            Group(span: "DateRange", opens: Today.AddDays(-7), closes: Today), grade: Grade8);
 
-        option.CanAdd.Should().BeTrue("both bounds are inclusive");
+        option.CanAdd.Should().BeTrue("the end date is inclusive — closing today is still joinable today");
     }
 
     [TestMethod]

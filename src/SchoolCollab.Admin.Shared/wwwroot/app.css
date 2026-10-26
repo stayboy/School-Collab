@@ -30,6 +30,27 @@ body {
     --neutral-stroke-focus: #0f6cbd;
     --neutral-foreground-1: #242424;
     --neutral-fill-rest: #f5f5f5;
+
+    /* Consumed but previously UNDEFINED (review finding, 2026-10-26): the fallbacks kept light mode alive,
+       which is exactly how an undefined token hides — it only shows up the moment a theme relies on the
+       token rather than the fallback. panel-layout-pattern.md §3 requires the token AND its dark value. */
+    --neutral-stroke-2: #d1d1d1;
+    --neutral-foreground-hint: #616161;
+    --neutral-foreground-hover: #242424;
+    --accent-fill-rest: #0f6cbd;
+    --accent-foreground-rest: #ffffff;
+
+    /* The rail-band palette. Each band tint pairs a background with a left accent and a label colour, so a
+       band reads as one block in both themes and never relies on colour alone (it always carries a label). */
+    --band-groups-bg: #f3efff;
+    --band-groups-accent: #d6c9fb;
+    --band-groups-fg: #523aa0;
+    --band-required-bg: #fdf3e2;
+    --band-required-accent: #eccf9b;
+    --band-required-fg: #7a5314;
+    --band-assumed-bg: #e9f6f3;
+    --band-assumed-accent: #b7ded6;
+    --band-assumed-fg: #1d5c52;
 }
 
 [data-theme="dark"],
@@ -41,6 +62,23 @@ body {
     --neutral-stroke-focus: #479ef5;
     --neutral-foreground-1: #ffffff;
     --neutral-fill-rest: #333333;
+    --neutral-stroke-2: #525252;
+    --neutral-foreground-hint: #b0b0b0;
+    --neutral-foreground-hover: #ffffff;
+    --accent-foreground-rest: #ffffff;
+
+    /* Dark band tints: the light pastels would glare, so the bands become low-chroma dark surfaces with the
+       same left accent and a light label. Colour still never carries the meaning — every band keeps its text
+       label, so the rail reads in greyscale in both themes. */
+    --band-groups-bg: #2a2340;
+    --band-groups-accent: #5d4b8f;
+    --band-groups-fg: #cdbdf7;
+    --band-required-bg: #3a2f1c;
+    --band-required-accent: #7a6234;
+    --band-required-fg: #f0d9a8;
+    --band-assumed-bg: #1e3531;
+    --band-assumed-accent: #3f6f66;
+    --band-assumed-fg: #a9d8cf;
 }
 
 h1, h2, h3, h4, h5, h6 {
