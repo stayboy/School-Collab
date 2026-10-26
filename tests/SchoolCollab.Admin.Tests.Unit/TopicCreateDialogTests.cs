@@ -118,10 +118,11 @@ public class TopicCreateDialogTests : BunitContext
     /// it. The dialog must open and offer the Grade Level owner instead.
     /// </summary>
     [TestMethod]
-    public async Task CreateDialog_ActivityGroupsFlagOff_StillOpensWithGradeOwner()
+    public async Task CreateDialog_ActivityGroupsLoadFails_StillOpensWithGradeOwner()
     {
-        ActivityGroupsEnabled = false;
-
+        // FEATURE:EnableActivityGroups is retired (2026-10-26); what remains worth pinning is the ISOLATION:
+        // an unmapped/failing /activity-groups route must not stop the dialog opening or cost the caller the
+        // grade-level owner. That is the defect the flag-off test used to stand in for.
         var handler = new ScriptedHandler();
         Register(handler, mapActivityGroups: false);
 
@@ -134,8 +135,8 @@ public class TopicCreateDialogTests : BunitContext
 
         cut.Markup.Should().Contain("Grade Level",
             "the always-available grade-level owner must still be offered");
-        handler.Calls.Should().NotContain(c => c.Url.StartsWith("/activity-groups", StringComparison.OrdinalIgnoreCase),
-            "a route that is known to be unmapped should not be called at all");
+        handler.Calls.Should().Contain(c => c.Url.StartsWith("/activity-groups", StringComparison.OrdinalIgnoreCase),
+            "the dialog always tries the group owner now — the point is that it survives the answer");
 
         cut.Find("fluent-button[aria-label='Close']").Click();
         (await task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeNull();

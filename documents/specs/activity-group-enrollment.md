@@ -766,7 +766,9 @@ also turns the dormant `SelectedGroups` enum value into a real feature.
 - **NFR-10 (Accessibility)** — Group management UI MUST reuse existing FluentUI
   components, be fully keyboard navigable, and use ARIA labels consistent with
   the `GradeLevels` page. WCAG 2.1 AA target (inherited from the app baseline).
-- **NFR-11 (Feature flag)** — The group-management surface MUST be gated behind
+- **NFR-11 (Feature flag)** — **SUPERSEDED (owner, 2026-10-26): the flag was retired and the feature ships
+  ungated.** Nothing is blocked by `FEATURE:EnableActivityGroups` any more — the key was deleted and the routes
+  are always mapped. Kept below as the original requirement. The group-management surface MUST be gated behind
   a centralized feature flag `FEATURE:EnableActivityGroups` (fan-out via
   AppHost `Parameters`, per `centralized-feature-flags`), defaulting OFF, so
   the feature ships dark.

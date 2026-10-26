@@ -1,44 +1,142 @@
 @page "/students/create"
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Application.Components.Contacts
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.Contracts
+@using SchoolCollab.Admin.Shared.Components.Authoring
 @using SchoolCollab.Admin.Shared.Services
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
 @inject VisibleTenantService VisibleTenant
+@inject CodedValuesApiClient CodedValues
+@inject IDialogService DialogService
 @implements IDisposable
 
 <PageTitle>New Student</PageTitle>
 
 <ErrorBoundary>
     <ChildContent>
-        <FluentStack Orientation="Orientation.Vertical" class="page-container">
-            <div class="title-row">
-                <h1 class="page-title">New Student</h1>
-            </div>
+        @* The page action header owns Cancel + Create Student (panel-layout-pattern §4, owner 2026-10-24):
+           the pair left the block, so the block keeps no action row of its own
+           (RenderActions="false") and the primary drives the form through @ref.SubmitAsync() —
+           the same seam /students/{id}/edit already used when its pair lived in a sidebar. *@
+        <AuthoringShell Crumbs="@ShellCrumbs"
+                       Title="New Student"
+                       PrimaryId="authoring-primary-action"
+                       PrimaryLabel="@(_saving ? "Saving…" : "Create Student")"
+                       PrimaryDisabled="@(_saving || !_isRealTenant)"
+                       OnPrimaryAction="OnPrimaryActionAsync"
+                       LeadingActions="@PageCancel">
+            <ChildContent>
+                <TenantGate>
+                    <ChildContent>
+                        @* Main column: the student's own fields, then its contacts — the same two blocks,
+                           in the same order, as /students/{id}/edit (owner, 2026-10-24, mock v3). A draft
+                           contact is form state, so it stays in main; a guardian is a relationship, so it
+                           lives in the rail below (this page grew a rail so the two surfaces match). *@
+                        <div class="region-grid-host">
+                        <div class="region-grid">
+                            <div class="region-grid__main">
+                                <PanelSection Id="student-create-details"
+                                              Title="Details"
+                                              TitleId="student-create-details-title"
+                                              ShowHeader="false"
+                                              ShowBorder="false">
+                                    <StudentFormFields @ref="_form"
+                                                       Model="_model"
+                                                       ErrorMessage="@_error"
+                                                       OnValidSubmit="OnSaveAsync"
+                                                       Submitting="@_saving"
+                                                       RenderActions="false" />
+                                </PanelSection>
 
-            <TenantGate>
-                <ChildContent>
-                @* Field values live on _model directly now — the shared
-                   <StudentFormFields> binds to Model.StudentNumber / FirstName
-                   / LastName / DateOfBirth (DateOnly?) / GenderCodedValueId
-                   (Guid?), and DataAnnotations
-                   validation runs on the model via <DataAnnotationsValidator />. *@
-                <StudentFormFields Model="_model"
-                                   ShowGuardians="true"
-                                   ErrorMessage="@_error"
-                                   OnValidSubmit="OnSaveAsync"
-                                   SubmitLabel="Create Student"
-                                   SubmittingLabel="Saving…"
-                                   Submitting="@_saving"
-                                   OnCancel="@(() => Nav.NavigateTo("/students"))" />
+                                @* Contacts — the student's own reachability detail, so it stays in the main
+                                   flow (§5) and keeps the box. Buffered: the owner does not exist yet, so the
+                                   editor mutates Model.Contacts in memory and the page flushes the list to
+                                   /contacts once the student has an id. *@
+                                <PanelSection Id="student-create-contacts"
+                                              Title="Contacts"
+                                              TitleId="student-create-contacts-title">
+                                    <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                                    OwnerType="ContactOwnerType.Student"
+                                                    Contacts="_model.Contacts"
+                                                    ContactsChanged="OnContactsChanged" />
+                                </PanelSection>
+                            </div>
+
+                            @* Rail: Enrollment above Guardians, exactly as on the edit page (owner, 2026-10-24).
+                               Enrollment is muted here — a student that does not exist cannot be enrolled — and
+                               carries no action, because the save navigates away; it is drawn so Guardians sits
+                               "beneath Enrollment" on both pages and the reader learns why the panel is empty. *@
+                            <div class="region-grid__rail" id="student-create-rail">
+                                <PanelSection Id="student-create-enrollment"
+                                              Title="Enrollment"
+                                              TitleId="student-create-enrollment-title"
+                                              ShowBorder="true">
+                                    <p class="rail-empty" id="student-create-enrollment-empty">
+                                        Available once the student is saved — enrollment needs a student record.
+                                    </p>
+                                </PanelSection>
+
+                                @* Guardians — the panel's kebab is the ONLY add path (owner, 2026-10-24): it opens the
+                                   shared guardian picker, whose result is appended to the draft list and linked after
+                                   the student is saved (OnSaveAsync). A collection, so collapsible with a count. *@
+                                <PanelSection Id="student-create-guardians"
+                                              Title="Guardians"
+                                              TitleId="student-create-guardians-title"
+                                              Collapsible="true"
+                                              Count="@_model.GuardianLinks.Count"
+                                              CountId="student-create-guardians-count">
+                                    <HeaderActions>
+                                        <RowActionsMenu UseMenuService="false"
+                                                        ForceKebab="true"
+                                                        Actions="@GuardianPanelActions"
+                                                        AriaLabel="Guardian actions" />
+                                    </HeaderActions>
+                                    <ChildContent>
+                                        @if (_model.GuardianLinks.Count == 0)
+                                        {
+                                            <p class="rail-empty" id="student-create-guardians-empty">
+                                                No guardians yet — use the ⋮ menu to add the student's first guardian.
+                                            </p>
+                                        }
+                                        else
+                                        {
+                                            <ul class="rail-list" id="student-create-guardians-list">
+                                                @for (var i = 0; i < _model.GuardianLinks.Count; i++)
+                                                {
+                                                    var index = i;
+                                                    var draft = _model.GuardianLinks[i];
+                                                    <li class="rail-list__row" @key="index">
+                                                        <span class="rail-list__who">@DraftGuardianName(draft)</span>
+                                                        <span class="rail-list__meta">@RelationshipName(draft.RelationshipCodedValueId)</span>
+                                                        <RowActionsMenu UseMenuService="false"
+                                                                        ForceKebab="true"
+                                                                        Actions="@DraftGuardianRowActions(index, draft)"
+                                                                        AriaLabel="@($"Actions for {DraftGuardianName(draft)}")" />
+                                                    </li>
+                                                }
+                                            </ul>
+                                        }
+                                        @if (!string.IsNullOrEmpty(_guardianError))
+                                        {
+                                            <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
+                                        }
+                                    </ChildContent>
+                                </PanelSection>
+                            </div>
+                        </div>
+                        </div>
+                    </ChildContent>
+                    <Fallback>
+                        <FluentMessageBar Intent="MessageBarIntent.Warning">
+                            You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
+                        </FluentMessageBar>
+                    </Fallback>
+                </TenantGate>
             </ChildContent>
-            <Fallback>
-                <FluentMessageBar Intent="MessageBarIntent.Warning">
-                    You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
-                </FluentMessageBar>
-            </Fallback>
-            </TenantGate>
-        </FluentStack>
+        </AuthoringShell>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -47,21 +145,113 @@
 
 @code {
     private readonly StudentFormModel _model = new();
+
+    /// <summary>The form component's handle — the page action header's primary submits through it.</summary>
+    private StudentFormFields? _form;
     private bool _saving;
     private string? _error;
     private CancellationTokenSource? _saveCts;
     private volatile bool _disposed;
     private bool _isRealTenant;
+    private string? _guardianError;
+    private Dictionary<Guid, string> _relationshipNames = new();
 
     protected override async Task OnInitializedAsync()
     {
         var scope = await VisibleTenant.GetScopeAsync();
         _isRealTenant = scope.IsRealTenant;
+
+        // Relationship names for the draft rows. Loaded once; a failure only costs the row's subtitle
+        // (the row still shows the guardian's name), so it never blocks the form.
+        try
+        {
+            var items = await CodedValues.GetChildrenByParentCodeAsync(
+                CodedValueParent.Relationships.ToCode(), CancellationToken.None) ?? [];
+            _relationshipNames = items.ToDictionary(c => c.Id, c => c.Name);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not load relationship coded values for the guardian rail");
+        }
+    }
+
+    /// <summary>The Guardians panel's own menu (§6 item 3) — the only add path (owner, 2026-10-24): it
+    /// opens the shared guardian picker, whose picks/new guardians append to the draft list.</summary>
+    private IReadOnlyList<RowAction> GuardianPanelActions =>
+        [new RowAction { Label = "Add guardian…", OnClick = OnAddGuardiansAsync }];
+
+    /// <summary>A draft row is removable until the student is saved; the link itself is written in
+    /// <see cref="OnSaveAsync"/>.</summary>
+    private IReadOnlyList<RowAction> DraftGuardianRowActions(int index, GuardianAssignment draft) =>
+        [new RowAction
+        {
+            Label = "Remove guardian…",
+            Destructive = true,
+            ConfirmMessage = $"Remove {DraftGuardianName(draft)} from this new student?",
+            OnClick = () =>
+            {
+                if (index >= 0 && index < _model.GuardianLinks.Count)
+                {
+                    _model.GuardianLinks.RemoveAt(index);
+                }
+
+                return Task.CompletedTask;
+            }
+        }];
+
+    private static string DraftGuardianName(GuardianAssignment draft) =>
+        $"{draft.FirstName} {draft.LastName}".Trim() is { Length: > 0 } name ? name : "(unnamed guardian)";
+
+    private string RelationshipName(Guid? relationshipCodedValueId) =>
+        relationshipCodedValueId is { } id && _relationshipNames.TryGetValue(id, out var name) ? name : "Guardian";
+
+    /// <summary>The panel kebab's one action: the same picker the edit page uses. It needs no student id
+    /// (the model only carries the exclusion), so a draft student can pick an existing guardian or create
+    /// a new one; every result becomes a <see cref="GuardianAssignmentModel"/> the save links.</summary>
+    private async Task OnAddGuardiansAsync()
+    {
+        if (_disposed) return;
+        _guardianError = null;
+        try
+        {
+            var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
+                new GuardianPickerModel(), "Add guardians", DialogWidth.Large);
+            if (results is null) return;
+
+            // The picker already returns GuardianAssignment records — the same shape the draft list
+            // holds, so they are appended as-is; nothing is remapped.
+            foreach (var a in results) _model.GuardianLinks.Add(a);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Adding draft guardians failed");
+            _guardianError = ex.Message;
+        }
+    }
+
+    /// <summary>The trail (panel-layout-pattern §4). The current crumb stays sentence case, matching the
+    /// template spec's "New template" — only the page title is Title Case.</summary>
+    private IReadOnlyList<AuthoringCrumb> ShellCrumbs =>
+        [new AuthoringCrumb("Students", "/students"), new AuthoringCrumb("New student")];
+
+    /// <summary>Cancel leaves the surface without saving. The shell owns its placement; this owns the intent.</summary>
+    private RenderFragment PageCancel => @<FluentButton Appearance="ButtonAppearance.Outline"
+                                                         Id="authoring-cancel"
+                                                         Disabled="@_saving"
+                                                         OnClick="@(() => Nav.NavigateTo("/students"))">
+        Cancel
+    </FluentButton>;
+
+    /// <summary>The form's own submit seam: the pair lives outside the EditForm, so the header button
+    /// validates and submits through the component's public <c>SubmitAsync</c>.</summary>
+    private async Task OnPrimaryActionAsync()
+    {
+        if (_form is not null) await _form.SubmitAsync();
     }
 
     private async Task OnSaveAsync()
-    {
-        _saving = true;
+    {        _saving = true;
         _error = null;
 
         if (!_isRealTenant) return;
@@ -83,6 +273,22 @@
                 _model.TitleCodedValueId);
 
             var studentId = await Api.CreateStudentAsync(request, ct);
+
+            // Flush the contacts drafted on the form (Buffered editor): the owner id only exists now.
+            try
+            {
+                foreach (var contact in _model.Contacts)
+                {
+                    await Api.AddContactAsync(new AddContactRequest(
+                        ContactOwnerType.Student, studentId, contact.Channel, contact.Value, contact.Label), ct);
+                }
+            }
+            catch (Exception cEx)
+            {
+                Logger.LogError(cEx, "Student {StudentId} created but contact flush failed", studentId);
+                _error = $"Student created, but some contacts could not be saved: {cEx.Message}";
+                return;
+            }
 
             // Link any guardians drafted on the form (existing or newly created).
             try
@@ -117,6 +323,10 @@
             if (!_disposed) _saving = false;
         }
     }
+
+    /// <summary>The Buffered contacts editor mutates <c>Model.Contacts</c> in place and raises its
+    /// change callback; the page re-renders so the list and its count stay in step.</summary>
+    private void OnContactsChanged() => StateHasChanged();
 
     public void Dispose()
     {

@@ -17,9 +17,9 @@ namespace SchoolCollab.Admin.Shared.Components;
 /// repo's forms so migration is low-friction:</para>
 /// <list type="table">
 ///   <listheader><term>Step</term><description>Width / typical use</description></listheader>
-///   <item><term><see cref="W1"/></term><description>80px — Title/Salutation, Channel enum, tiny fields.</description></item>
-///   <item><term><see cref="W2"/></term><description>120px — Country calling code.</description></item>
-///   <item><term><see cref="W3"/></term><description>160px — Date picker (matches the student DOB field).</description></item>
+///   <item><term><see cref="W1"/></term><description>80px — tiny single-line text fields (never a dropdown, see below).</description></item>
+///   <item><term><see cref="W2"/></term><description>120px — short single-line text fields (never a dropdown, see below).</description></item>
+///   <item><term><see cref="W3"/></term><description>160px — Date picker (matches the student DOB field); the narrowest legal DROPDOWN.</description></item>
 ///   <item><term><see cref="W4"/></term><description>200px — Phone, display-order, contact Label.</description></item>
 ///   <item><term><see cref="W5"/></term><description>240px — Student / ID number.</description></item>
 ///   <item><term><see cref="W6"/></term><description>280px — Gender, Relationship.</description></item>
@@ -45,16 +45,26 @@ namespace SchoolCollab.Admin.Shared.Components;
 /// <c>fluent-field &gt; fluent-dropdown { width: inherit; }</c> in
 /// <c>src/SchoolCollab.Admin.Shared/wwwroot/app.css</c> (owner pin Q28(a),
 /// 2026-10-16) — remove either half and the ladder sizes only the wrapper.</para>
+/// <para><b>A DROPDOWN IS NEVER SIZED BELOW <see cref="W3"/> (owner, 2026-10-24).</b> Fluent v5
+/// hard-codes <c>min-width: 160px</c> on the <c>fluent-dropdown</c> shadow <c>.control</c>, and the
+/// host keeps <c>overflow: visible</c>, so a narrower host does not shrink the control — it PAINTS
+/// PAST it and covers the neighbouring field. Measured: the contact channel dropdown at <c>W2</c>
+/// (120px) painted 160px, 40px over the “Label (optional)” input, and hit-testing at that input's
+/// left edge returned <c>fluent-dropdown</c>. That is why the ladder's three <c>ContactChannel</c>
+/// sites moved to <see cref="W3"/>; the floor is not enforceable in CSS (the value is inside the
+/// web component's shadow root), so it is a review rule: <see cref="W1"/> and <see cref="W2"/> are
+/// for single-line text inputs only. A shared <c>overflow: hidden</c> clip was rejected — it would
+/// hide the next too-narrow dropdown instead of failing loudly.</para>
 /// </remarks>
 public enum FieldWidth
 {
-    /// <summary>80px — Title/Salutation, Channel enum, tiny fields.</summary>
+    /// <summary>80px — tiny single-line text fields. Not for dropdowns (floor is <see cref="W3"/>).</summary>
     W1,
 
-    /// <summary>120px — Country calling code.</summary>
+    /// <summary>120px — short single-line text fields. Not for dropdowns (floor is <see cref="W3"/>).</summary>
     W2,
 
-    /// <summary>160px — Date picker (matches the student DOB field).</summary>
+    /// <summary>160px — Date picker (matches the student DOB field); the narrowest legal dropdown.</summary>
     W3,
 
     /// <summary>200px — Phone, display-order, contact Label.</summary>

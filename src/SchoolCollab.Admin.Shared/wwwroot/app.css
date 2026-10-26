@@ -30,6 +30,27 @@ body {
     --neutral-stroke-focus: #0f6cbd;
     --neutral-foreground-1: #242424;
     --neutral-fill-rest: #f5f5f5;
+
+    /* Consumed but previously UNDEFINED (review finding, 2026-10-26): the fallbacks kept light mode alive,
+       which is exactly how an undefined token hides — it only shows up the moment a theme relies on the
+       token rather than the fallback. panel-layout-pattern.md §3 requires the token AND its dark value. */
+    --neutral-stroke-2: #d1d1d1;
+    --neutral-foreground-hint: #616161;
+    --neutral-foreground-hover: #242424;
+    --accent-fill-rest: #0f6cbd;
+    --accent-foreground-rest: #ffffff;
+
+    /* The rail-band palette. Each band tint pairs a background with a left accent and a label colour, so a
+       band reads as one block in both themes and never relies on colour alone (it always carries a label). */
+    --band-groups-bg: #f3efff;
+    --band-groups-accent: #d6c9fb;
+    --band-groups-fg: #523aa0;
+    --band-required-bg: #fdf3e2;
+    --band-required-accent: #eccf9b;
+    --band-required-fg: #7a5314;
+    --band-assumed-bg: #e9f6f3;
+    --band-assumed-accent: #b7ded6;
+    --band-assumed-fg: #1d5c52;
 }
 
 [data-theme="dark"],
@@ -41,6 +62,23 @@ body {
     --neutral-stroke-focus: #479ef5;
     --neutral-foreground-1: #ffffff;
     --neutral-fill-rest: #333333;
+    --neutral-stroke-2: #525252;
+    --neutral-foreground-hint: #b0b0b0;
+    --neutral-foreground-hover: #ffffff;
+    --accent-foreground-rest: #ffffff;
+
+    /* Dark band tints: the light pastels would glare, so the bands become low-chroma dark surfaces with the
+       same left accent and a light label. Colour still never carries the meaning — every band keeps its text
+       label, so the rail reads in greyscale in both themes. */
+    --band-groups-bg: #2a2340;
+    --band-groups-accent: #5d4b8f;
+    --band-groups-fg: #cdbdf7;
+    --band-required-bg: #3a2f1c;
+    --band-required-accent: #7a6234;
+    --band-required-fg: #f0d9a8;
+    --band-assumed-bg: #1e3531;
+    --band-assumed-accent: #3f6f66;
+    --band-assumed-fg: #a9d8cf;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -200,6 +238,191 @@ h1:focus {
     .region-grid {
         grid-template-columns: minmax(0, 1fr);
     }
+}
+
+/* ── Rail-panel internals: count chip, panel kebab, relationship rows, empty state ───────────────
+   Shared, because a rail panel's body looks the same on every authoring surface (owner,
+   2026-10-24): the student create AND edit pages both present Guardians under Enrollment, so these
+   rules cannot live in one page's scoped stylesheet. Global names are the point — the same markup
+   (`<ul class="rail-list">`, `.rail-empty`) renders in both pages. The COUNT chip and the kebab
+   live in `PanelSection` itself now (`.panel-section__count` / `.panel-section__actions`), so nothing
+   here styles a header.
+
+   They are panel CONTENT, not the region: regions still draw nothing (§2) and each block still
+   owns exactly one box (§3). `.rail-list__row` is a two-track grid — the name/meta stack, then the
+   row's kebab column — so a wrapping name never drags the kebab to the middle of a taller row. */
+.rail-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.rail-list__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
+    align-items: center;
+    padding: 4px 0;
+}
+
+.rail-list__row > .row-actions-menu {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+}
+
+.rail-list__who {
+    grid-column: 1;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    overflow-wrap: anywhere;
+}
+
+.rail-list__meta {
+    grid-column: 1;
+    font-size: 0.75rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.rail-empty {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* ── Rail BANDS: a labelled slice of a panel body, one per KIND of fact ──────────────────────────
+   The Enrollment panel presents four kinds of fact and a reader must be able to tell them apart at a
+   glance (owner, 2026-10-25): placement (what the enrolment IS), activity groups (memberships the student
+   holds), enrolment-required subjects (an action or a gap) and assumed subjects (a derived fact). Each
+   band tints and gets its own left accent, and every band keeps a text label — colour never carries the
+   meaning on its own, so the panel still reads in greyscale and to a screen reader.
+
+   A band is panel CONTENT, not a box: it has no shadow, no radius fight with PanelSection and never nests
+   another PanelSection (§3's one-box rule). Round B adds the `.rail-band--required` / `.rail-band--assumed`
+   variants with the RequiresEnrollment flag. */
+.rail-band {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+    border-left: 3px solid var(--neutral-stroke-2, #d1d1d1);
+    border-radius: 6px;
+    background: var(--neutral-layer-2, #fafafa);
+}
+
+.rail-band__label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.rail-band__hint {
+    margin-left: auto;
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* Activity groups — the membership band (violet). */
+.rail-band--groups {
+    border-left-color: var(--band-groups-accent, #d6c9fb);
+    background: var(--band-groups-bg, #f3efff);
+}
+
+.rail-band--groups .rail-band__label {
+    color: var(--band-groups-fg, #523aa0);
+}
+
+/* Chips inside a band. `.rail-chip--blocked` is the struck-through state that carries an invalid
+   activity group WITH its reason, so an unavailable option reads as a rule rather than a bug. */
+.rail-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.rail-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--neutral-stroke-2, #d1d1d1);
+    background: var(--neutral-layer-1, #ffffff);
+    font-size: 0.6875rem;
+    white-space: nowrap;
+}
+
+.rail-chip--groups {
+    border-color: var(--band-groups-accent, #d6c9fb);
+    color: var(--band-groups-fg, #523aa0);
+}
+
+.rail-chip--blocked {
+    border-color: var(--neutral-stroke-2, #d1d1d1);
+    background: var(--neutral-layer-2, #fafafa);
+    color: var(--neutral-foreground-hint, #616161);
+    text-decoration: line-through;
+}
+
+.rail-chip__reason {
+    margin-left: 2px;
+    font-size: 0.625rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* Round-B variants (documents/specs/subject-enrollment-requirement-flag.md). Declared with the band
+   vocabulary so the flag's round lands as a call-site change, not a CSS change. */
+.rail-band--required {
+    border-left-color: var(--band-required-accent, #eccf9b);
+    background: var(--band-required-bg, #fdf3e2);
+}
+
+.rail-band--required .rail-band__label {
+    color: var(--band-required-fg, #7a5314);
+}
+
+.rail-band--assumed {
+    border-left-color: var(--band-assumed-accent, #b7ded6);
+    background: var(--band-assumed-bg, #e9f6f3);
+}
+
+.rail-band--assumed .rail-band__label {
+    color: var(--band-assumed-fg, #1d5c52);
+}
+
+.rail-chip__action {
+    border: 0;
+    background: transparent;
+    padding: 0 0 0 2px;
+    color: inherit;
+    font-size: 0.625rem;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.rail-chip__action:hover {
+    color: var(--neutral-foreground-hover, #242424);
+}
+
+.rail-add-link {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font-size: 0.6875rem;
+    color: var(--accent-foreground-rest, #0f6cbd);
+    cursor: pointer;
+    white-space: nowrap;
 }
 
 /* ── One offset for every sticky thing on an authoring surface (§6) ─────────────────────────────

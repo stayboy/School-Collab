@@ -296,10 +296,13 @@
                        Renders the selectable "Add Existing Guardian" sentinel with
                        a divider line drawn underneath the label as part of the
                        sentinel's option template, followed by the RELATSHIPS coded
-                       values. The sentinel sets _inExistingMode. Width shrunk to
-                       150px (from the old W4/200px) via inline Style so the Add
-                       stays inline (scoped CSS would lose to the web component's
-                       host width). *@
+                       values. The sentinel sets _inExistingMode. Width comes from the
+                       repo's W1–W9 ladder via FieldWidth.W3 (160px), not a literal: the
+                       old `Style="width: 150px"` was 10px BELOW the 160px floor Fluent v5
+                       hard-codes on a dropdown's shadow `.control`, and the host's
+                       `overflow: visible` let the control paint 2px over the adjacent
+                       Last-name input (measured 2026-10-24, owner Q8). The inline style is
+                       still required — scoped CSS loses to the web component's host width. *@
                     <FluentSelect TOption="RelationshipOption"
                                   TValue="RelationshipOption"
                                   Items="@(_relationshipOptions ?? [])"
@@ -307,7 +310,7 @@
                                   ValueChanged="@OnRelationshipOptionChanged"
                                   OptionValueToString="@(o => o.Id?.ToString() ?? "sentinel")"
                                   Placeholder="@(_relationshipOptions is null ? "Loading…" : "Relationship")"
-                                  Style="width: 150px"
+                                  Style="@FieldWidth.W3.ToCssStyle()"
                                   Disabled="@(_relationshipOptions is null)"
                                   class="guardian-rel-select">
                         @* Sentinel ("Add Existing Guardian") carries the divider

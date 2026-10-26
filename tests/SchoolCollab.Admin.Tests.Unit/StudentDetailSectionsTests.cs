@@ -482,8 +482,12 @@ public class StudentDetailSectionsTests
     public void Detail_ActivityGroups_Section_Gated_By_FeatureFlag()
     {
         var source = ReadDetailSource();
-        source.Should().Contain("EnableActivityGroups",
-            "the Activity Groups section must be gated behind FEATURE:EnableActivityGroups");
+        source.Should().NotContain("FeatureFlagGate",
+            "the Activity Groups section is NOT gated any more — FEATURE:EnableActivityGroups was retired "
+            + "on 2026-10-26 and activity groups are an established feature, so re-wrapping this section in "
+            + "a gate would silently hide it again");
+        source.Should().Contain("Join Group",
+            "the section itself must survive the gate's removal — it is the student's group membership surface");
     }
 
     // ─── Contact history section (spec 2026-08-17 §6.3 / §7.3) ─────────

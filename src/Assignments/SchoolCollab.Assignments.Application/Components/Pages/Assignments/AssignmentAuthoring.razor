@@ -2605,24 +2605,23 @@
         }
     }
 
-    /// <summary>Loads the activity groups backing the SelectedGroups audience. Off flag = the
-    /// audience is not offered at all, so this is a normal no-op rather than an error.</summary>
+    /// <summary>
+    /// Loads the activity groups behind the <c>SelectedGroups</c> targeting category. The
+    /// <c>FEATURE:EnableActivityGroups</c> gate this method was written under is retired (2026-10-26), so the
+    /// load is always attempted; a failed load disables the category rather than leaving an empty picker.
+    /// </summary>
     private async Task LoadActivityGroupsAsync(CancellationToken ct)
     {
         _activityGroupOptions = [];
         _selectedGroupIds.Clear();
         _loadedGroupIds.Clear();
         _groupLinksLoaded = false;
+        // Fail-closed: the category is offered only after a successful load, so a throw can never leave it
+        // on screen with an empty picker. The dead-end rule outlived the flag that used to hide the category.
+        _activityGroupsEnabled = false;
 
         try
         {
-            if (!await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups, ct))
-            {
-                _activityGroupsEnabled = false;
-                return;
-            }
-
-            _activityGroupsEnabled = true;
             var groups = await StudentsApi.ListActivityGroupsAsync(ct);
             if (groups is null) return;
 
@@ -2633,6 +2632,7 @@
                 .OrderBy(g => g.Name)
                 .Select(g => new PickerOption(g.Id.ToString(), g.Name))
                 .ToArray();
+            _activityGroupsEnabled = true;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

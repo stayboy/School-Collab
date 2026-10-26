@@ -67,7 +67,6 @@ OutboxMapping.SetFlagsFor<AssignmentsDbContext>(OutboxConfigurationFlags.FromCon
 builder.Services.AddScoped<CodedValueSeeder>();
 builder.Services.AddScoped<TenantSeeder>();
 builder.Services.AddScoped<EntityCodeRuleSeeder>();
-builder.Services.AddScoped<PilotActivityGroupFlagOverrideSeeder>();
 builder.Services.AddScoped<GradeStreamAssignmentSeeder>();
 // ar-20: dev-only identity seed ("Dev School" tenant + "Dev Teacher") backing the
 // committed Keycloak realm's fixed claim values. Idempotent; dev/test only.
@@ -105,7 +104,6 @@ try
             await SeedEnableCodedValuesAiChatAsync(settingsDb, logger);
             await SeedEnableGradeLevelSetupOnEnrollDialogAsync(settingsDb, logger);
             await SeedEnableEnrollmentValidationAsync(settingsDb, logger);
-            await SeedEnableActivityGroupsAsync(settingsDb, logger);
             await SeedRequireAssignmentApprovalAsync(settingsDb, logger);
             await SeedEnableDeepLinksAsync(settingsDb, logger);
 
@@ -120,11 +118,10 @@ try
             var tenantSeeder = scope.ServiceProvider.GetRequiredService<TenantSeeder>();
             tenantIdsByName = await tenantSeeder.SeedAsync();
 
-            // Phase 6.1: turn FEATURE:EnableActivityGroups ON for the pilot tenant only
-            // (TenantFeatureFlagOverride). Global default stays OFF. Runs AFTER the flag
-            // seed and AFTER the tenant seed. Idempotent. See documents/rounds/plan-phase6-1.md.
-            var pilotOverrideSeeder = scope.ServiceProvider.GetRequiredService<PilotActivityGroupFlagOverrideSeeder>();
-            await pilotOverrideSeeder.SeedAsync(tenantIdsByName);
+            // FEATURE:EnableActivityGroups was RETIRED (owner, 2026-10-26): activity groups are an
+            // established feature, so there is no flag row to seed and no pilot override to pin. The
+            // rows already present in an existing Settings database are left in place — nothing reads
+            // them, and deleting seeded data is a migration, i.e. a separate, owner-approved change.
         }
         catch (Exception ex)
         {
@@ -348,48 +345,6 @@ static async Task SeedEnableEnrollmentValidationAsync(SettingsDbContext db, Micr
     var flag = FeatureFlag.Create(
         key,
         "Enable demographic (age, gender) and single-active-enrollment validation in EnrollStudentHandler",
-        null,
-        isEnabled: false);
-    db.FeatureFlags.Add(flag);
-    db.FlagAuditEntries.Add(FlagAuditEntry.Create(
-        tenantId: null,
-        featureFlagId: flag.Id,
-        featureFlagKey: flag.Key,
-        changeKind: FlagChangeKind.Created,
-        previousIsEnabled: null,
-        newIsEnabled: flag.IsEnabled,
-        reason: "Initial seed by migration service",
-        actorId: actorId,
-        actorDisplayName: actorName));
-
-    await db.SaveChangesAsync();
-    logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
-}
-
-// ── Settings seed: FEATURE:EnableActivityGroups ──
-// Seeds the runtime feature flag that gates the activity-group management
-// surface (groups, memberships, SelectedGroups assignment targeting). Default
-// false (disabled) so the feature ships dark — spec activity-group-enrollment.md
-// NFR-11. Idempotent — re-runs no-op on a pre-existing row. Records an audit
-// row with a system actor so the seed is traceable. Consumed in API endpoints
-// and Admin UI via IFeatureFlagService.IsEnabledAsync / <FeatureFlagGate>.
-static async Task SeedEnableActivityGroupsAsync(SettingsDbContext db, Microsoft.Extensions.Logging.ILogger logger)
-{
-    const string actorId = "system:migrator";
-    const string actorName = "Migration Service";
-
-    var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.EnableActivityGroups);
-
-    var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
-    if (exists)
-    {
-        logger.LogInformation("Seed flag {Key} already present; skipping", key);
-        return;
-    }
-
-    var flag = FeatureFlag.Create(
-        key,
-        "Enable activity-group management (groups, memberships, SelectedGroups assignment targeting)",
         null,
         isEnabled: false);
     db.FeatureFlags.Add(flag);

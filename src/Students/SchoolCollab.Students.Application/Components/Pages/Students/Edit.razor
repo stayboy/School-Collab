@@ -1,8 +1,10 @@
 @page "/students/{id:guid}/edit"
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Authoring
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Students.Core.Domain
+@using StudentGuardianViewDto = SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto
 @using SchoolCollab.Students.Core.Contracts
 @using SchoolCollab.Students.Application.Components.Students
 @using SchoolCollab.Admin.Shared.Services
@@ -21,215 +23,220 @@
 
 <ErrorBoundary>
     <ChildContent>
-        <FluentStack Orientation="Orientation.Vertical" class="page-container">
-            <div class="title-row">
-                <h1 class="page-title">Edit Student</h1>
-            </div>
-
-            <TenantGate>
-                <ChildContent>
-            @if (_student is null)
-            {
-                <div class="spinner-container">
-                    <FluentSpinner />
-                </div>
-            }
-            else
-            {
-                @* The /students/{id}/edit page is a long form: identity
-                   fields + guardians + Direct contact editor. Save and
-                   Cancel live in a sticky right-column sidebar so they
-                   stay visible as the user scrolls. The sidebar is a
-                   page-level FluentStack — NOT a wrapper inside
-                   <StudentFormFields> — so the same component can be
-                   embedded in dialogs (Create.razor,
-                   GradeLevelWizard.razor, StudentPickerDialog.razor)
-                   with the dialog-ui convention of bottom-horizontal
-                   Cancel/Save separated by a border-top.
-
-                   The 2-column grid:
-                     col 1: <StudentFormFields> (RenderActions="false"
-                             so the component skips its built-in bottom
-                             row) + <FluentDivider> + <ContactsEditor>
-                     col 2: <FluentStack Orientation="Vertical"
-                             HorizontalAlignment="Stretch"> Save (top)
-                             + Cancel (bottom), full-width, equal size.
-                   The Save button calls _form!.SubmitAsync() which
-                   mirrors the standard Blazor pattern for driving an
-                   EditForm submit from a button that sits outside
-                   the form. *@
-                <div class="student-edit-grid">
-                    <div class="student-edit-grid__fields">
-                        @* Page-side guardian management: the form is in
-                           <see cref="StudentFormFieldsMode.Linked"/>
-                           mode, so the guardians section is a compact
-                           "Guardians (N) — Manage" header that opens
-                           <c>GuardianPickerDialog</c> (page owns the link
-                           APIs + reload) + a read-only grid of current
-                           links with per-row delete. Each link / unlink
-                           is IMMEDIATE (no page-level Save dependency) —
-                           the wizard's "defer to save" semantics do not
-                           apply on a page. *@
-                        <StudentFormFields @ref="_form"
-                                           Model="_model"
-                                           ShowGuardians="true"
-                                           Mode="StudentFormFieldsMode.Linked"
-                                           StudentId="Id"
-                                           LinkedItems="_links.ToArray()"
-                                           OnManageGuardians="OnManageGuardiansAsync"
-                                           OnRemoveGuardian="OnRemoveGuardianAsync"
-                                           ReadOnlyStudentNumber="true"
-                                           ErrorMessage="@_error"
-                                           OnValidSubmit="OnSaveAsync"
-                                           RenderActions="false" />
-                        @if (!string.IsNullOrEmpty(_guardianError))
+        @* The page action header owns Cancel + Save Changes (§4, owner 2026-10-24). The pair used to sit in a
+           right-hand sidebar; with it gone that column becomes the sticky RELATIONSHIP RAIL (§5/§6), and the
+           grid is the shared `.region-grid` pair from SchoolCollab.Admin.Shared/wwwroot/app.css — nothing
+           is re-invented here. *@
+        <AuthoringShell Crumbs="@ShellCrumbs"
+                       Title="Edit Student"
+                       PrimaryId="authoring-primary-action"
+                       PrimaryLabel="@(_saving ? "Saving…" : "Save Changes")"
+                       PrimaryDisabled="@(_saving || _student is null || !_isRealTenant)"
+                       OnPrimaryAction="OnSidebarSaveAsync"
+                       LeadingActions="@PageCancel">
+            <ChildContent>
+                <TenantGate>
+                    <ChildContent>
+                        @if (_student is null)
                         {
-                            <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
-                        }
-
-                        @* ── Direct contact (email / SMS / WhatsApp).
-                           Lives in the edit form, NOT on the view page,
-                           so adding/verifying/setting primary on a
-                           contact is a write action that belongs with
-                           the rest of the student's editable data.
-                           Hosted by the shared
-                           <ContactsEditor OwnerType=Student> — same
-                           component used on GuardianDetail.razor for
-                           guardians' contacts. ShowSubscription=false:
-                           students don't subscribe to their own
-                           contact info (that's a guardian/teacher
-                           feature). *@
-                        @* FluentUI 5.0.1 removed FluentDivider.Role (and the DividerRole enum),
-                           so the presentational intent rides the native role attribute that the
-                           web component's own `role` property reflects. *@
-                        <FluentDivider class="student-edit-divider" Role="presentation" />
-                        <div class="student-edit-direct-contact">
-                            <h3 class="student-edit-section-title">Direct contact</h3>
-                            <ContactsEditor OwnerType="ContactOwnerType.Student"
-                                             OwnerId="@Id"
-                                             ShowSubscription="false" />
-                        </div>
-
-                        @* ── Active enrollment (read-only display + actions).
-                           The student's grade is NOT a property of the Student
-                           record — it lives on a StudentEnrollment (one per
-                           grade/period the student has been in). Exactly one
-                           is the "primary active enrollment" (= the most
-                           recent one with Status == "Active" and ExitDate
-                           null). The spec says: existing primary active
-                           enrollment CANNOT be edited on this page — it is
-                           only displayed. The user can act on it via the
-                           Transfer / Withdraw actions (which create a new
-                           enrollment record and mark the current as
-                           Transferred / Withdrawn) or add a brand-new
-                           enrollment via Enroll (which becomes the new
-                           primary active enrollment). *@
-                        <FluentDivider class="student-edit-divider" Role="presentation" />
-                        <div class="student-edit-enrollment">
-                            <div class="section-header">
-                                <h3 class="student-edit-section-title">Active enrollment</h3>
-                                <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
-                                    <FluentButton Appearance="ButtonAppearance.Primary"
-                                                  Size="ButtonSize.Small"
-                                                  OnClick="OnEnrollAsync"
-                                                  Disabled="@(_enrollments is null || _savingEnrollment)"
-                                                  Title="@(_enrollments is null ? "Loading enrollments…" : "Enroll this student in a grade level for the active period")"
-                                                  IconStart="@FluentIcons.Add">
-                                        Enroll
-                                    </FluentButton>
-                                    @if (PrimaryActiveEnrollment is not null)
-                                    {
-                                        <FluentButton Appearance="ButtonAppearance.Outline"
-                                                      Size="ButtonSize.Small"
-                                                      OnClick="OnTransferAsync"
-                                                      Disabled="@_savingEnrollment"
-                                                      Title="Transfer to a different grade level (marks current as Transferred and creates a new active enrollment)">
-                                            <FluentIcon Icon="@(Icons.Regular.Size16.ArrowSwap)" Slot="start" />
-                                            Transfer
-                                        </FluentButton>
-                                        <FluentButton Appearance="ButtonAppearance.Outline"
-                                                      Size="ButtonSize.Small"
-                                                      OnClick="OnWithdrawAsync"
-                                                      Disabled="@_savingEnrollment"
-                                                      Title="Set an exit date on the current active enrollment">
-                                            <FluentIcon Icon="@(Icons.Regular.Size16.ArrowExit)" Slot="start" />
-                                            Withdraw
-                                        </FluentButton>
-                                    }
-                                </FluentStack>
+                            <div class="spinner-container">
+                                <FluentSpinner />
                             </div>
+                        }
+                        else
+                        {
+                            <div class="region-grid-host">
+                                <div class="region-grid">
 
-                            @if (_enrollments is null)
-                            {
-                                <div class="spinner-container">
-                                    <FluentSpinner />
+                                    @* ── Main column: the student's own fields, then its contacts ── *@
+                                    <div class="region-grid__main">
+
+                                        <PanelSection Id="student-edit-details"
+                                                      Title="Details"
+                                                      TitleId="student-edit-details-title"
+                                                      ShowHeader="false"
+                                                      ShowBorder="false">
+                                            @* Guardians leave this block for the rail (§5): they present another
+                                               aggregate. ShowGuardians="false" — the rail panel renders them. *@
+                                            <StudentFormFields @ref="_form"
+                                                               Model="_model"
+                                                               ShowGuardians="false"
+                                                               Mode="StudentFormFieldsMode.Linked"
+                                                               StudentId="Id"
+                                                               LinkedItems="_links.ToArray()"
+                                                               OnManageGuardians="OnManageGuardiansAsync"
+                                                               OnRemoveGuardian="OnRemoveGuardianAsync"
+                                                               ReadOnlyStudentNumber="true"
+                                                               ErrorMessage="@_error"
+                                                               OnValidSubmit="OnSaveAsync"
+                                                               RenderActions="false" />
+                                        </PanelSection>
+
+                                        @* Contacts stay in the MAIN column (owner Q81): they are the student's own
+                                           reachability detail rather than a separate relationship, and the editor is a
+                                           full inline form — it does not fit a rail. Non-collapsible, like every main block,
+                                           and BOXED (owner, 2026-10-24): it is a titled block with its own editor, not a
+                                           card-less form row, so it keeps the same frame the create page gives it. *@
+                                        <PanelSection Id="student-edit-contacts"
+                                                      Title="Contacts"
+                                                      TitleId="student-edit-contacts-title">
+                                            <ContactsEditor OwnerType="ContactOwnerType.Student"
+                                                             OwnerId="@Id"
+                                                             ShowSubscription="false" />
+                                        </PanelSection>
+
+                                        @* Guardians left this column (owner, 2026-10-24, mock v3): it is a rail
+                                           relationship and both pages must present it under Enrollment. *@
+                                    </div>
+
+                                    @* ── Rail: one panel per relationship; sticky, never a second pinned row ── *@
+                                    <div class="region-grid__rail" id="student-edit-rail">
+
+                                        @* Enrollment — the first rail relationship, and NOT collapsible (owner,
+                                           2026-10-24): one read-only fact set with its actions in a kebab. The record
+                                           is shown, never edited here; Transfer / Withdraw write a new enrollment.
+                                           Guardians sits BELOW it (owner, 2026-10-24, mock v3). *@
+                                        <PanelSection Id="student-edit-enrollment"
+                                                      Title="Enrollment"
+                                                      TitleId="student-edit-enrollment-title">
+                                            <HeaderActions>
+                                                <RowActionsMenu UseMenuService="false"
+                                                                ForceKebab="true"
+                                                                Actions="@EnrollmentPanelActions"
+                                                                AriaLabel="Enrollment actions" />
+                                            </HeaderActions>
+                                            <ChildContent>
+                                                @if (_enrollments is null)
+                                                {
+                                                    <div class="spinner-container">
+                                                        <FluentSpinner />
+                                                    </div>
+                                                }
+                                                else if (PrimaryActiveEnrollment is { } active)
+                                                {
+                                                    @* Two BANDS, one kind of fact each (owner, 2026-10-25, mock v4/v5):
+                                                       Placement is what the enrolment IS; Activity groups is the
+                                                       membership set. Both are RailBand (component-first policy,
+                                                       Q22a) so round B adds call sites, not markup. *@
+                                                    <RailBand Id="student-edit-enrollment-facts" Label="Placement" Hint="read-only">
+                                                        <RailChips>
+                                                            <RailChip Text="@(_gradeLevelNames.TryGetValue(active.GradeLevelId, out var gn) ? gn : active.GradeLevelId.ToString()[..8])" />
+                                                            <RailChip Text="@(_periodNames.TryGetValue(active.PeriodId, out var pn) ? pn : active.PeriodId.ToString()[..8])" />
+                                                            <RailChip Text="Active" />
+                                                            <RailChip Text="@($"enrolled {active.EnrolledOn:d}")" />
+                                                        </RailChips>
+                                                    </RailBand>
+
+                                                    <RailBand Id="student-edit-activity-groups"
+                                                              Label="Activity groups"
+                                                              Hint="@GroupCountHint"
+                                                              Variant="RailBandVariant.Groups">
+                                                        <RailChips>
+                                                            @if (_activityGroups is null)
+                                                            {
+                                                                <RailChip Text="Loading…" />
+                                                            }
+                                                            else if (_activityGroups.Count == 0)
+                                                            {
+                                                                @* An empty band is a WORD, never a struck-through chip:
+                                                                   a blocked chip here would make "nothing" read as
+                                                                   "rejected". *@
+                                                                <span class="rail-empty">No groups yet</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                @foreach (var group in _activityGroups)
+                                                                {
+                                                                    @* Q26a: the rail shows what IS — joined groups only.
+                                                                       Blocked chips belong to the picker, and to round B's
+                                                                       "needs explicit enrolment" band. *@
+                                                                    <RailChip @key="group.Id"
+                                                                              Text="@group.Name"
+                                                                              GroupStyle="true"
+                                                                              Disabled="@_savingGroup"
+                                                                              OnRemove="() => RemoveActivityGroupAsync(group)" />
+                                                                }
+                                                            }
+                                                            <button type="button"
+                                                                    class="rail-add-link"
+                                                                    id="student-edit-add-group"
+                                                                    disabled="@(_savingGroup || _activityGroups is null)"
+                                                                    @onclick="AddActivityGroupsAsync">＋ Add group</button>
+                                                        </RailChips>
+                                                        @if (!string.IsNullOrEmpty(_groupError))
+                                                        {
+                                                            <FluentMessageBar Intent="MessageBarIntent.Error">@_groupError</FluentMessageBar>
+                                                        }
+                                                    </RailBand>
+                                                }
+                                                else
+                                                {
+                                                    <p class="rail-empty" id="student-edit-enrollment-empty">
+                                                        This student has no active enrollment. Use <strong>Enroll</strong> to add one.
+                                                    </p>
+                                                }
+                                            </ChildContent>
+                                        </PanelSection>
+
+                                        @* Guardians — the second rail relationship, and the ONLY way to add one is this
+                                           panel's kebab (owner, 2026-10-24, mock v3): no inline add row anywhere in the
+                                           body. A collection, so it is collapsible with a count (§6); each row's own
+                                           kebab unlinks. Same panel, same order, on /students/create. *@
+                                        <PanelSection Id="student-edit-guardians"
+                                                      Title="Guardians"
+                                                      TitleId="student-edit-guardians-title"
+                                                      Collapsible="true"
+                                                      Count="@_links.Count"
+                                                      CountId="student-edit-guardians-count">
+                                            <HeaderActions>
+                                                <RowActionsMenu UseMenuService="false"
+                                                                ForceKebab="true"
+                                                                Actions="@GuardianPanelActions"
+                                                                AriaLabel="Guardian actions" />
+                                            </HeaderActions>
+                                            <ChildContent>
+                                                @if (_links.Count == 0)
+                                                {
+                                                    <p class="rail-empty" id="student-edit-guardians-empty">
+                                                        No guardians linked yet — use the ⋮ menu to link one.
+                                                    </p>
+                                                }
+                                                else
+                                                {
+                                                    <ul class="rail-list" id="student-edit-guardians-list">
+                                                        @foreach (var link in _links)
+                                                        {
+                                                            <li class="rail-list__row" @key="link.GuardianId">
+                                                                <span class="rail-list__who">@GuardianName(link)</span>
+                                                                <span class="rail-list__meta">@link.Role</span>
+                                                                <RowActionsMenu UseMenuService="false"
+                                                                                ForceKebab="true"
+                                                                                Actions="@GuardianRowActions(link)"
+                                                                                AriaLabel="@GuardianRowAriaLabel(link)" />
+                                                            </li>
+                                                        }
+                                                    </ul>
+                                                }
+                                                @if (!string.IsNullOrEmpty(_guardianError))
+                                                {
+                                                    <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
+                                                }
+                                            </ChildContent>
+                                        </PanelSection>
+
+                                    </div>
                                 </div>
-                            }
-                            else if (PrimaryActiveEnrollment is { } active)
-                            {
-                                @* FluentUI 5.0.1 removed FluentCard.AreaRestricted together with the
-                                   content-visibility/contain restriction it existed to lift. *@
-                                <FluentCard class="enrollment-display-card">
-                                    <FluentStack Orientation="Orientation.Vertical" Spacing="6">
-                                        <FluentStack Orientation="Orientation.Horizontal"
-                                                     HorizontalAlignment="HorizontalAlignment.Start"
-                                                     VerticalAlignment="VerticalAlignment.Center"
-                                                     HorizontalGap="12">
-                                            <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
-                                            <span class="enrollment-display-grade">
-                                                <strong>Grade:</strong>
-                                                @(_gradeLevelNames.TryGetValue(active.GradeLevelId, out var gn) ? gn : active.GradeLevelId.ToString()[..8])
-                                            </span>
-                                            <span class="enrollment-display-period">
-                                                <strong>Period:</strong>
-                                                @(_periodNames.TryGetValue(active.PeriodId, out var pn) ? pn : active.PeriodId.ToString()[..8])
-                                            </span>
-                                        </FluentStack>
-                                        <span class="enrollment-display-meta muted">
-                                            Enrolled on <strong>@active.EnrolledOn.ToString("d")</strong>
-                                            · read-only — edit via Transfer / Withdraw
-                                        </span>
-                                    </FluentStack>
-                                </FluentCard>
-                            }
-                            else
-                            {
-                                <FluentMessageBar Intent="MessageBarIntent.Info">
-                                    This student has no active enrollment. Use <strong>Enroll</strong> to add one.
-                                </FluentMessageBar>
-                            }
-                        </div>
-                    </div>
-
-                    <div class="student-edit-grid__sidebar">
-                        <FluentStack Orientation="Orientation.Vertical"
-                                     HorizontalAlignment="HorizontalAlignment.Stretch"
-                                     Spacing="8"
-                                     class="student-edit-action-stack">
-                            <FluentButton Appearance="ButtonAppearance.Primary"
-                                          Disabled="@_saving"
-                                          OnClick="OnSidebarSaveAsync"
-                                          class="student-edit-action-stack__button">
-                                @(_saving ? "Saving…" : "Save")
-                            </FluentButton>
-                            <FluentButton Appearance="ButtonAppearance.Outline"
-                                          Disabled="@_saving"
-                                          OnClick='@(() => Nav.NavigateTo($"/students/{Id}"))'
-                                          class="student-edit-action-stack__button">
-                                Cancel
-                            </FluentButton>
-                        </FluentStack>
-                    </div>
-                </div>
-            }
-                </ChildContent>
-                <Fallback>
-                    <FluentMessageBar Intent="MessageBarIntent.Warning">
-                        You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
-                    </FluentMessageBar>
-                </Fallback>
-            </TenantGate>
-        </FluentStack>
+                            </div>
+                        }
+                    </ChildContent>
+                    <Fallback>
+                        <FluentMessageBar Intent="MessageBarIntent.Warning">
+                            You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
+                        </FluentMessageBar>
+                    </Fallback>
+                </TenantGate>
+            </ChildContent>
+        </AuthoringShell>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -238,6 +245,64 @@
 
 @code {
     [Parameter] public Guid Id { get; set; }
+
+    /// <summary>The trail (§4). The current crumb stays sentence case; only the page title is Title Case.</summary>
+    private IReadOnlyList<AuthoringCrumb> ShellCrumbs => _student is null
+        ? [new AuthoringCrumb("Students", "/students"), new AuthoringCrumb("…")]
+        : [new AuthoringCrumb("Students", "/students"),
+           new AuthoringCrumb(StudentCrumbLabel(), $"/students/{Id}"),
+           new AuthoringCrumb("Edit")];
+
+    private string StudentCrumbLabel() =>
+        string.IsNullOrWhiteSpace(_student?.StudentNumber) ? Id.ToString()[..8] : _student!.StudentNumber;
+
+    /// <summary>Cancel leaves without saving — the same destination the sidebar's Cancel used.</summary>
+    private RenderFragment PageCancel => @<FluentButton Appearance="ButtonAppearance.Outline"
+                                                         Id="authoring-cancel"
+                                                         Disabled="@_saving"
+                                                         OnClick="@(() => Nav.NavigateTo($"/students/{Id}"))">
+        Cancel
+    </FluentButton>;
+
+    /// <summary>The Guardians panel's own menu (§6 item 3) — the only add path (owner, 2026-10-24):
+    /// the panel adds, each row's kebab unlinks.</summary>
+    private IReadOnlyList<RowAction> GuardianPanelActions =>
+        [new RowAction { Label = "Add guardian…", OnClick = OnManageGuardiansAsync }];
+
+    /// <summary>One row's actions — unlinking is the row's, and it is destructive, so it confirms.</summary>
+    private IReadOnlyList<RowAction> GuardianRowActions(StudentGuardianViewDto link) =>
+        [new RowAction
+        {
+            Label = "Unlink guardian…",
+            Destructive = true,
+            ConfirmMessage = $"Unlink {GuardianName(link)} from this student? The guardian record itself is kept.",
+            OnClick = () => OnRemoveGuardianAsync(link)
+        }];
+
+    private string GuardianRowAriaLabel(StudentGuardianViewDto link) => $"Actions for {GuardianName(link)}";
+
+    /// <summary>Enrollment's panel menu: Enroll adds a record; Transfer / Withdraw act on the current one.</summary>
+    private IReadOnlyList<RowAction> EnrollmentPanelActions
+    {
+        get
+        {
+            var actions = new List<RowAction>
+            {
+                new() { Label = "Enroll…", OnClick = OnEnrollAsync, Disabled = _enrollments is null || _savingEnrollment }
+            };
+            if (PrimaryActiveEnrollment is not null)
+            {
+                actions.Add(new RowAction { Label = "Transfer…", OnClick = OnTransferAsync, Disabled = _savingEnrollment });
+                actions.Add(new RowAction { Label = "Withdraw…", OnClick = OnWithdrawAsync, Disabled = _savingEnrollment });
+            }
+            return actions;
+        }
+    }
+
+    private static string GuardianName(StudentGuardianViewDto link) =>
+        string.IsNullOrWhiteSpace(link.DisplayName)
+            ? $"{link.FirstName} {link.LastName}".Trim()
+            : link.DisplayName;
 
     private StudentDto? _student;
     private readonly StudentFormModel _model = new();
@@ -294,7 +359,93 @@
     // user expects the action to land as soon as they confirm
     // the dialog, not wait for a page-level Save.
 
-    private List<SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto> _links = new();
+    private List<StudentGuardianViewDto> _links = new();
+
+    /// <summary>The student's active activity-group memberships, shown in the Enrollment rail band.
+    /// Null while loading — the band renders "Loading…" rather than an empty set, so "not loaded yet"
+    /// never reads as "belongs to nothing".</summary>
+    private List<ActivityGroupDto>? _activityGroups;
+
+    private bool _savingGroup;
+    private string? _groupError;
+
+    /// <summary>How many groups the student is in — the band's own total, which is what a count means here
+    /// (owner Q19: the panel itself carries no count chip). Renders as e.g. "3 joined".</summary>
+    private string GroupCountHint => _activityGroups is null ? string.Empty : $"{_activityGroups.Count} joined";
+
+    /// <summary>Loads the student's memberships. Called after the page's own loads and again after any
+    /// add/remove, because the band is a projection of the server's state, never a local guess.</summary>
+    private async Task LoadActivityGroupsAsync(CancellationToken ct)
+    {
+        try
+        {
+            _activityGroups = (await Api.ListStudentGroupsAsync(Id, ct))?.ToList() ?? [];
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "Loading activity groups for student {StudentId} failed", Id);
+            _groupError = ex.Message;
+            _activityGroups ??= [];
+        }
+    }
+
+    /// <summary>"＋ Add group" — the picker offers only what the display mirror considers addable, and
+    /// each confirmed pick becomes one membership write (the server re-checks every rule).</summary>
+    private async Task AddActivityGroupsAsync()
+    {
+        if (_disposed || PrimaryActiveEnrollment is not { } active) return;
+        _groupError = null;
+        try
+        {
+            var ids = await DialogService.ShowShellDialogAsync<ActivityGroupPickerDialog, ActivityGroupPickerModel, Guid[]>(
+                new ActivityGroupPickerModel(Id, active.GradeLevelId), "Add activity groups", DialogWidth.Medium);
+            if (ids is null || ids.Length == 0) return;
+
+            _savingGroup = true;
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            foreach (var groupId in ids)
+            {
+                // The request carries only the student + join date: the SERVER resolves the period and
+                // window from the group's EnrollmentSpan (FR-44/47/52) and re-checks every rule.
+                await Api.AddGroupMemberAsync(groupId, new AddActivityGroupMemberRequest(Id, today), ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Adding activity groups for student {StudentId} failed", Id);
+            _groupError = ex.Message;
+        }
+        finally
+        {
+            _savingGroup = false;
+            if (!_disposed) await LoadActivityGroupsAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+    }
+
+    /// <summary>A chip's ✕ — removes the membership (the group itself is untouched), then reloads.</summary>
+    private async Task RemoveActivityGroupAsync(ActivityGroupDto group)
+    {
+        if (_disposed) return;
+        _groupError = null;
+        try
+        {
+            _savingGroup = true;
+            await Api.RemoveGroupMemberAsync(group.Id, Id, _loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Removing student {StudentId} from group {GroupId} failed", Id, group.Id);
+            _groupError = ex.Message;
+        }
+        finally
+        {
+            _savingGroup = false;
+            if (!_disposed) await LoadActivityGroupsAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+    }
     private Dictionary<Guid, string> _relNames = new();
     private string? _guardianError;
 
@@ -373,6 +524,9 @@
                 var periods = await Api.ListPeriodsAsync(ct) ?? Array.Empty<PeriodDto>();
                 _periodNames = periods.ToDictionary(p => p.Id, p => p.Name);
             }
+
+            // The Enrollment rail band projects the student's activity-group memberships.
+            await LoadActivityGroupsAsync(ct);
 
             // Page-owned link list (the form is in Linked mode and is
             // a thin presenter — the page must hand the projected
@@ -603,7 +757,7 @@
         }
     }
 
-    private async Task OnRemoveGuardianAsync(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto row)
+    private async Task OnRemoveGuardianAsync(StudentGuardianViewDto row)
     {
         if (_disposed) return;
         _guardianError = null;

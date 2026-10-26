@@ -50,14 +50,10 @@ public static class FeatureFlagKeys
     /// </summary>
     public const string EnableEnrollmentValidation = "FEATURE:EnableEnrollmentValidation";
 
-    /// <summary>
-    /// Enables the activity-group management surface (groups, memberships,
-    /// assignment targeting via SelectedGroups). Disabled by default so the
-    /// feature ships dark behind the flag (spec activity-group-enrollment.md
-    /// NFR-11). Gated in API endpoints and Admin UI via
-    /// <c>IFeatureFlagService.IsEnabledAsync</c> / <c>&lt;FeatureFlagGate&gt;</c>.
-    /// </summary>
-    public const string EnableActivityGroups = "FEATURE:EnableActivityGroups";
+    // FEATURE:EnableActivityGroups was RETIRED (owner, 2026-10-26): activity groups are an established
+    // feature, so nothing is blocked by a flag any more — not the routes, not the nav, not the pickers.
+    // The key was deleted rather than left behind, because a flag nobody reads is a flag somebody
+    // re-gates with. The feature itself is untouched; only the gating went.
 
     /// <summary>
     /// Gates the assignment approval workflow (WS-A2 / spec §7 Q2).

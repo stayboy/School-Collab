@@ -66,13 +66,29 @@
     outline-offset: 1px;
 }
 
-/* The title takes the free space so the actions land on the right edge of the same row (§4). */
+/* The title takes only what it needs and can shrink; the ACTIONS wrapper takes the free space via
+   `margin-left: auto`. Until 2026-10-24 the title itself had `flex: 1 1 auto`, which pushed the whole
+   actions block — count chip included — to the far right, so a count read as unrelated to its title
+   (owner report). §6's header order is `[chevron] [Title] [count] … [kebab]`. */
 .panel-section__title {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
     margin: 0;
     font-size: 1.17em;
     font-weight: 600;
+}
+
+/* The count chip: a pill so "0" beside a title cannot be mistaken for part of the title text. */
+.panel-section__count {
+    flex: 0 0 auto;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 16px;
+    padding: 0 6px;
+    border-radius: 999px;
+    border: 1px solid var(--neutral-stroke-2, #d1d1d1);
+    background: var(--neutral-layer-2, #fafafa);
+    color: var(--neutral-foreground-hint, #616161);
 }
 
 /* The rule runs under the WHOLE header row — title AND actions — never as the title's own border. */
@@ -88,6 +104,9 @@
     align-items: center;
     gap: 8px;
     flex: 0 0 auto;
+    /* The actions block owns the free space from here to the right edge, so the title + count stay
+       adjacent and the kebab/page action stays pinned right (§4/§6). */
+    margin-left: auto;
 }
 
 .panel-section__body {

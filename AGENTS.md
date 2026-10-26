@@ -258,6 +258,7 @@ instead of duplicating it.
 | **.NET/C# best practices (all C# changes)** | `.github/copilot/rules/dotnet-best-practices.md` + `.github/skills/dotnet-best-practices/SKILL.md` |
 | **Portal (Python/FastAPI + Prefab UI)** | `documents/solution/portals-service-client-pattern.md` (pytest / `httpx.MockTransport` / FastAPI `TestClient` story, `.slnx` solution-items tripwire). The C# **code** rules do not apply to Python source in `src/SchoolCollab.Portals/` or `src/SchoolCollab.AuthPortal/`; their `.slnx` solution items are policed by .NET-side guards, and so is the auth portal's AppHost wiring. |
 | **Generic Blazor framework patterns** (render modes, prerendering, JS interop, disposal, cascading state, forms) | `documents/solution/blazor-agent-skills-adoption.md` — the nine installer-managed `dotnet/skills` → `dotnet-blazor` skills. Repo rules win on conflict. |
+| **Component-first reuse** (when to extract a component, where it lives, the approval gate for design/spec-derived components, and when to advise *against* extracting) | `documents/solution/component-first-policy.md` |
 
 **Generic Blazor skills vs. repo rules.** Nine user-level Blazor skills are installed from the
 `dotnet/skills` → `dotnet-blazor` plugin (`author-component`, `collect-user-input`,

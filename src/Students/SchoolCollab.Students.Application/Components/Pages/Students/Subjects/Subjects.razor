@@ -8,7 +8,6 @@
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
-@inject IFeatureFlagService FeatureFlags
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
@@ -132,10 +131,11 @@
     private ActivityGroupOption[] _activityGroupOptions = [];
 
     /// <summary>
-    /// Mirrors <c>FEATURE:EnableActivityGroups</c>. The <c>/activity-groups</c>
-    /// route group is only mapped when the flag is on, so an off flag simply means
-    /// the "Activity Group" owner filter is unavailable. It must never affect
-    /// whether topics themselves load.
+    /// Whether the "Activity Group" owner filter has groups to offer. This used to mirror
+    /// <c>FEATURE:EnableActivityGroups</c>; the flag was retired on 2026-10-26, so the value now means what
+    /// it always should have meant — the group load SUCCEEDED and returned something. A failed load still
+    /// hides the filter (and only the filter), because the lesson that produced the original guard stands:
+    /// an optional resource must never take down a required one.
     /// </summary>
     private bool _activityGroupsEnabled;
 
@@ -272,40 +272,14 @@
     }
 
     /// <summary>
-    /// Loads the activity groups backing the "Activity Group" owner filter.
-    /// <c>/activity-groups</c> is only mapped when <c>FEATURE:EnableActivityGroups</c>
-    /// is on, so an off flag is a normal state (the filter is simply unavailable),
-    /// not an error. Every failure path is contained here so it cannot escalate
-    /// into a page-level load failure.
+    /// Loads the activity groups backing the "Activity Group" owner filter. Every failure path is contained
+    /// here so a group-load failure cannot escalate into a page-level load failure — the reason this guard
+    /// existed never depended on the flag (issue #416 showed the failure is real).
     /// </summary>
     private async Task LoadActivityGroupsAsync(CancellationToken token)
     {
         _activityGroupOptions = [];
         _activityGroups = null;
-
-        try
-        {
-            _activityGroupsEnabled = await FeatureFlags.IsEnabledAsync(
-                FeatureFlagKeys.EnableActivityGroups, token);
-        }
-        catch (OperationCanceledException) { return; }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogWarning(ex, "Could not resolve FEATURE:EnableActivityGroups; hiding the Activity Group owner filter");
-            _activityGroupsEnabled = false;
-        }
-
-        if (!_activityGroupsEnabled)
-        {
-            // Never leave the page parked on a filter whose option is not rendered.
-            if (_ownerType == "ActivityGroup")
-            {
-                _ownerType = "GradeLevel";
-                _selectedActivityGroup = null;
-            }
-            return;
-        }
 
         try
         {
@@ -315,6 +289,10 @@
                 .OrderBy(g => g.Name)
                 .Select(g => new ActivityGroupOption(g.Id.ToString(), g.Name))
                 .ToArray();
+
+            // The filter is offered when the load SUCCEEDED — not when a flag says so. Removing the flag
+            // must never remove the capability (owner, 2026-10-26: "do not remove the feature").
+            _activityGroupsEnabled = true;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

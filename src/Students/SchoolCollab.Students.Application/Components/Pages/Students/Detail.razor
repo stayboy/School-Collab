@@ -174,9 +174,9 @@
                            below the Enrollments section. The "Join Group"
                            accent button opens the JoinGroupsDialog (multi-select
                            of available groups); each active row has a "Leave"
-                           lightweight button. Gated behind the
-                           FEATURE:EnableActivityGroups flag (NFR-11). *@
-                        <FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
+                           lightweight button. Always shown: the
+                           FEATURE:EnableActivityGroups flag was retired on 2026-10-26, so
+                           activity groups are part of the page rather than an option. *@
                             <div class="section-header">
                                 <h3>Activity Groups</h3>
                                 <FluentButton Appearance="ButtonAppearance.Primary"
@@ -225,7 +225,7 @@
                                     </TemplateColumn>
                                 </FluentDataGrid>
                             }
-                        </FeatureFlagGate>
+                        
 
                         @* ── Guardians (embedded, not in a tab) ───────────────────
                            Replaces the deprecated <GuardiansTab>. The

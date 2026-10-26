@@ -111,12 +111,13 @@ public class AssignmentReaderPolicyRouteTests
         ("POST", "assignments/{id:guid}/recipients/{contactId:guid}/opened"),
     ];
 
-    private sealed class StubFeatureFlags(bool disableOidcAuth, bool enableActivityGroups = true) : IFeatureFlagService
+    private sealed class StubFeatureFlags(bool disableOidcAuth) : IFeatureFlagService
     {
+        // FEATURE:EnableActivityGroups was retired on 2026-10-26 — the group routes are always mapped,
+        // so the stub no longer has a key to switch them off with.
         public bool IsEnabled(string featureKey) => featureKey switch
         {
             FeatureFlagKeys.DisableOIDCAuth => disableOidcAuth,
-            FeatureFlagKeys.EnableActivityGroups => enableActivityGroups,
             _ => false,
         };
 

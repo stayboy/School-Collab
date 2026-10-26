@@ -48,6 +48,14 @@
                 </button>
             }
             <h4 class="panel-section__title" id="@TitleId">@Title</h4>
+            @* The count belongs to the TITLE, not to the actions block (§6 header order:
+               `[chevron] [Title] [count] … [kebab]`). It sat inside HeaderActions until 2026-10-24, which
+               put it at the far right of the row — the title's `flex: 1 1 auto` pushed the whole actions
+               wrapper away, so "Guardians" and its "0" read as unrelated (owner report). *@
+            @if (Count is { } count)
+            {
+                <span class="panel-section__count" id="@CountId">@count</span>
+            }
             @if (HeaderActions is not null)
             {
                 <div class="panel-section__actions">@HeaderActions</div>
@@ -92,12 +100,15 @@
     /// the header line that is not the title. The rule beneath is drawn under THIS too.</summary>
     [Parameter] public RenderFragment? HeaderActions { get; set; }
 
-    /// <summary>
-    /// Opt-in collapse (§6): when true the header carries a chevron button immediately before the
-    /// title and the body collapses to the header row. Defaults to <b>false</b> — an opt-in default
-    /// means a caller has to ask for the affordance, and forgetting to ask can never silently add a
-    /// control the owner did not consent to. The main region is never collapsible.
-    /// </summary>
+    /// <summary>A count chip rendered immediately after the title (§6 header order:
+    /// <c>[chevron] [Title] [count] … [kebab]</c>). Null renders nothing — a panel whose body holds one
+    /// record, or none, must not show a count. Pass <see cref="CountId"/> when a test or a caller needs a
+    /// stable seam on the chip.</summary>
+    [Parameter] public int? Count { get; set; }
+
+    /// <summary>The count chip's element id. Optional; null renders the chip without one.</summary>
+    [Parameter] public string? CountId { get; set; }
+
     /// <summary>
     /// Whether the panel renders its header row (title, count, actions and the rule) at all.
     /// <b>True by default.</b>
@@ -111,13 +122,14 @@
     /// </summary>
     [Parameter] public bool ShowHeader { get; set; } = true;
 
+    /// <summary>
+    /// Opt-in collapse (§6): when true the header carries a chevron button immediately before the
+    /// title and the body collapses to the header row. Defaults to <b>false</b> — an opt-in default
+    /// means a caller has to ask for the affordance, and forgetting to ask can never silently add a
+    /// control the owner did not consent to. The main region is never collapsible.
+    /// </summary>
     [Parameter] public bool Collapsible { get; set; }
 
-    /// <summary>
-    /// Pin the header row (title + actions + its rule) to the top of the page's scroll port, at the
-    /// shared app-bar offset (§6). This is what lets the FIRST block own the page's primary action:
-    /// the actions never scroll out of view, so no second toolbar is needed.
-    /// </summary>
 
     /// <summary>
     /// Whether the block draws its frame (§3). Defaults to <b>true</b> — a panel is a box unless the

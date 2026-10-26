@@ -214,6 +214,9 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
     private sealed class StubFlagService : IFeatureFlagService
     {
+        // FEATURE:EnableActivityGroups was retired on 2026-10-26; the group target is always offered,
+        // so this stub answers true for every key. Kept as a class (not a lambda) so a future flag
+        // can be added here without rewriting the harness.
         public bool ActivityGroupsEnabled { get; set; } = true;
         public bool IsEnabled(string featureKey) => ActivityGroupsEnabled;
         public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(ActivityGroupsEnabled);
@@ -3997,31 +4000,6 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Select a subject."), TimeSpan.FromSeconds(5));
         createBody.Should().BeNull("the gate blocks the save before any request is sent");
-    }
-
-    /// <summary>R2: with FEATURE:EnableActivityGroups off the builder offers no activity-group values
-    /// (the category stays in the dialog; its picker is simply empty).</summary>
-    [TestMethod]
-    public async Task ActivityGroupsFlagOff_DoesNotOfferAGroupTargetValue()
-    {
-        _flags.ActivityGroupsEnabled = false;
-        _activityGroups = [Group(GroupAId, "Alpha")];
-        var stub = RegisterTargetsDialog();
-        var previewReads = SetupRecipientPreviewRead();
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
-        WaitForLoadSettled(cut, previewReads);
-
-        await AddTargetEntryAsync(cut);
-
-        cut.WaitForAssertion(() =>
-        {
-            stub.Models.Should().ContainSingle("the add dialog was opened");
-            stub.Models[0].ActivityGroupOptions.Should().BeEmpty(
-                "the group target must not be offered when FEATURE:EnableActivityGroups is off");
-            cut.Markup.Should().NotContain("By Group", "the retired group picker stays gone");
-        }, TimeSpan.FromSeconds(5));
     }
 
     /// <summary>TGT-16 (restored): the preview renders under the builder card and re-resolves from the

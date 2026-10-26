@@ -1,7 +1,14 @@
 # `FEATURE:EnableActivityGroups` — client-side isolation of a dark-launch flag
 
-> **Status (2026-09-26):** landed and covered by bUnit tests. Read this before
-> touching any surface that calls `ListActivityGroupsAsync`.
+> **Status:** **PARTLY SUPERSEDED (2026-10-26).** The *flag* is retired — `FEATURE:EnableActivityGroups` was
+> deleted and the group routes are always mapped — so the "dark-launch" premise below no longer holds.
+> **What still binds:** every isolation lesson here remains a repo rule, because a group load can still fail
+> (issue #416 reproduced the failure with the flag ON): an optional resource must never take down a required
+> one, a failed load must not read as "none exist", and a raw exception string must never reach a message bar.
+> Read this before touching any surface that calls `ListActivityGroupsAsync` — read it for the isolation
+> contract, not for the flag.
+>
+> **Original status (2026-09-26):** landed and covered by bUnit tests.
 >
 > **Folder:** `solution/` — findings + decision + implementation record. The
 > governing requirements live in `specs/activity-group-enrollment.md` (NFR-11 is

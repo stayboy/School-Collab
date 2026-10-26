@@ -1,0 +1,17 @@
+@namespace SchoolCollab.Admin.Shared.Components
+
+@*
+    The wrapping chip set of a <see cref="RailBand"/> — exists for the semantics, not the styling: one
+    `role="list"` per row of chips means a screen reader announces "list, 4 items" instead of reading four
+    unrelated spans. It also keeps the flex/wrap rule in one place, so a call site cannot accidentally
+    render chips as a bare run of inline elements.
+*@
+
+<div class="rail-chips" role="list">
+    @ChildContent
+</div>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

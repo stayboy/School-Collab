@@ -64,16 +64,12 @@ public static class AssignmentEndpoints
         var wardGroup = app.MapGroup("/students").RequireAuthIfOidc(featureFlags);
         wardGroup.MapWardAssignmentRoutes();
 
-        // Phase 3 (spec activity-group-enrollment.md §7.3): assignment ↔ group
-        // link endpoints + the FR-6 delete-guard query. Gated behind
-        // FEATURE:EnableActivityGroups (flag OFF by default — dark launch).
-        // Mounted at the root so /activity-groups/{id}/assignments matches the
-        // Students API's group route namespace.
-        if (featureFlags.IsEnabled(FeatureFlagKeys.EnableActivityGroups))
-        {
-            var activityGroupsGroup = app.MapGroup("").RequireAuthIfOidc(featureFlags);
-            activityGroupsGroup.MapActivityGroupLinkRoutes();
-        }
+        // Phase 3 (spec activity-group-enrollment.md §7.3): assignment ↔ group link endpoints + the
+        // FR-6 delete-guard query. Mounted at the root so /activity-groups/{id}/assignments matches the
+        // Students API's group route namespace. ALWAYS MAPPED (owner, 2026-10-26) — the
+        // FEATURE:EnableActivityGroups gate was removed with the flag.
+        var activityGroupLinksGroup = app.MapGroup("").RequireAuthIfOidc(featureFlags);
+        activityGroupLinksGroup.MapActivityGroupLinkRoutes();
 
         return app;
     }

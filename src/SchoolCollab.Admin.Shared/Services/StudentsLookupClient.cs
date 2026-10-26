@@ -25,7 +25,8 @@ public sealed record LookupOptionDto(Guid Id, string Name, bool? IsActive = null
 /// <para>
 /// An originator/enrichment read under <c>adr-cross-module-calls.md</c>: it degrades. Each method
 /// returns <b>null</b> when the route is not mapped for this host (404 — the
-/// <c>FEATURE:EnableActivityGroups</c> posture, the same convention as
+/// retired <c>FEATURE:EnableActivityGroups</c> posture (the flag is gone since 2026-10-26; the tolerance
+/// stays, because a route can still fail for other reasons), the same convention as
 /// <c>AssignmentsApiClient.GetLinkedActivityGroupIdsAsync</c>) and throws on any other failure, so
 /// the caller can tell "this school does not serve that" apart from "the lookup is down". The
 /// editor keeps rendering existing constraints' raw values either way (an edit round-trips without

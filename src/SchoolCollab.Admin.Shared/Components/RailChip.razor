@@ -1,0 +1,92 @@
+@namespace SchoolCollab.Admin.Shared.Components
+
+@*
+    One chip inside a <see cref="RailBand"/>. Four shapes, each a state of the same thing:
+
+      * a FACT        — Grade 4, Term 2, Active            → no interaction
+      * a REMOVABLE   — Chess Club ✕ (OnRemove supplied)    → the ✕ affordance
+      * a BLOCKED     — Choir · window closed               → struck through, Reason required
+      * a BADGE       — "0 joined" style markers            → use RailBand.Hint instead where possible
+
+    Blocked chips exist because an unavailable option must read as a RULE, not as a bug (Q18a): the
+    reason is in the visible text AND in title/aria-description, so it survives keyboard and screen
+    reader use. A blocked chip with no reason is the failure the Reason parameter exists to prevent.
+*@
+
+<span class="@ChipClass" role="listitem" title="@Tooltip" aria-description="@Reason" aria-disabled="@(Blocked ? "true" : null)">
+    @if (ChildContent is not null)
+    {
+        @ChildContent
+    }
+    else
+    {
+        @Text
+    }
+    @if (Blocked && !string.IsNullOrWhiteSpace(Reason))
+    {
+        <span class="rail-chip__reason">· @Reason</span>
+    }
+    @if (OnRemove.HasDelegate)
+    {
+        <button type="button"
+                class="rail-chip__action"
+                title="@($"Remove {Text}")"
+                aria-label="@($"Remove {Text}")"
+                disabled="@Disabled"
+                @onclick="OnRemove">✕</button>
+    }
+</span>
+
+@code {
+    /// <summary>The chip's text. Also the accessible name of its remove button ("Remove {Text}").</summary>
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>Struck through, and rendered <c>aria-disabled</c>. Requires <see cref="Reason"/>.</summary>
+    [Parameter]
+    public bool Blocked { get; set; }
+
+    /// <summary>Why the chip is blocked (e.g. "window closed"). Required when <see cref="Blocked"/>: it is
+    /// rendered as visible text after the name, and again as the tooltip and accessible description.</summary>
+    [Parameter]
+    public string? Reason { get; set; }
+
+    /// <summary>Tints the chip to match a <see cref="RailBandVariant.Groups"/> band.</summary>
+    [Parameter]
+    public bool GroupStyle { get; set; }
+
+    /// <summary>Supplying a delegate renders the ✕ affordance. Absent ⇒ no ✕ (facts are not removable).</summary>
+    [Parameter]
+    public EventCallback OnRemove { get; set; }
+
+    /// <summary>Disables the ✕ while a write is in flight, so a slow server cannot be double-clicked.</summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    /// <summary>Custom content instead of <see cref="Text"/> (the text is still used for the ✕'s label).</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private string ChipClass
+    {
+        get
+        {
+            var cls = "rail-chip";
+            if (GroupStyle)
+            {
+                cls += " rail-chip--groups";
+            }
+
+            if (Blocked)
+            {
+                cls += " rail-chip--blocked";
+            }
+
+            return cls;
+        }
+    }
+
+    private string? Tooltip => Blocked && !string.IsNullOrWhiteSpace(Reason)
+        ? $"{Text} — {Reason}"
+        : null;
+}
