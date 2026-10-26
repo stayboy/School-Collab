@@ -1,6 +1,18 @@
 ---
 name: orchestrator-worker-reviewer
-description: Tiered orchestrator-led workflow for implementing features and fixes in the School-Collab repo, optimized for speed and token usage. Tier 1 collapses to a single worker run with the parent authoring the plan and transcribing acceptance; Tier 2 adds a static diff-only reviewer; Tier 3 runs the full four-agent pipeline - orchestrator (document owner) plans and owns the round doc, worker implements, reviewer statically verifies against the plan, acceptance is always written by the plan's author (orchestrator on full rounds, the parent on light/lean rounds) and is a gate on every tier before work is reported complete, and a UI tester bug-hunts delivered UI work when the UI trigger fires. Use for feature implementation, multi-fix rounds, or any work where plans and reviews must be checked by a document owner before closing. Do NOT use for trivial single-file non-behavioural changes — those run at **Tier 0 (Solo)**, which is part of this ladder: self-review and self-acceptance still apply, but no child runs are dispatched.
+description: >-
+  Tiered orchestrator-led workflow for implementing features and fixes in the
+  School-Collab repo, optimized for speed and token usage. Tier 1 collapses to a
+  single worker run with the parent authoring the plan and transcribing
+  acceptance; Tier 2 adds a static diff-only reviewer; Tier 3 runs the full
+  four-agent pipeline - orchestrator (document owner) plans and owns the round
+  doc, worker implements, reviewer statically verifies against the plan, and
+  acceptance is written by the plan's author and gates every tier. A UI tester
+  bug-hunts delivered UI work when the UI trigger fires. Use for feature
+  implementation, multi-fix rounds, or any work where plans and reviews must be
+  checked by a document owner before closing. Do NOT use for trivial
+  single-file non-behavioural changes - those run at Tier 0 (Solo): self-review
+  and self-acceptance still apply, no child runs are dispatched.
 ---
 
 # Orchestrator-Worker-Reviewer (with UI Tester) — tiered
