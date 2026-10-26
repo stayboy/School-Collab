@@ -48,16 +48,6 @@ public class TeacherEditDialogBunitTests : BunitContext
             => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
     }
 
-    /// <summary>Feature-flag stub that disables only the activity-group feature.</summary>
-    private sealed class ActivityGroupsOffFeatureFlagService : IFeatureFlagService
-    {
-        public bool IsEnabled(string featureKey) => featureKey != FeatureFlagKeys.EnableActivityGroups;
-        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default)
-            => Task.FromResult(featureKey != FeatureFlagKeys.EnableActivityGroups);
-        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
-        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId = null, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
-    }
 
     private sealed class ScriptedHandler : HttpMessageHandler
     {
@@ -244,7 +234,10 @@ public class TeacherEditDialogBunitTests : BunitContext
     public async Task CreateMode_RendersProfileAndEmptyAssignmentsGrid()
     {
         var gradeId = Guid.NewGuid();
-        RegisterFor(grades: new[] { (gradeId, "Grade 5", 5) });
+        // A group is registered so "+ Activity" is on screen: since the flag was retired (2026-10-26) the
+        // button is offered when there is something to pick, not when a flag says so.
+        RegisterFor(grades: new[] { (gradeId, "Grade 5", 5) },
+                    activities: new[] { (Guid.NewGuid(), "Science Club") });
         var cut = RenderProvider();
 
         var task = OpenAsync(cut, new TeacherEditDialog.TeacherFormModel { TeacherId = null });
@@ -262,12 +255,16 @@ public class TeacherEditDialogBunitTests : BunitContext
         (await task).Should().BeNull();
     }
 
+    /// <summary>
+    /// "+ Activity" opens a group picker, so it must not be offered when there are no groups to pick. This
+    /// used to be asserted through FEATURE:EnableActivityGroups (retired 2026-10-26); the dead-end it guarded
+    /// against did not depend on the flag, so the assertion survives and the flag stub went.
+    /// </summary>
     [TestMethod]
-    public async Task CreateMode_ActivityGroupsFlagOff_HidesActivityButtonAndLoads()
+    public async Task CreateMode_NoActivityGroups_HidesActivityButtonAndLoads()
     {
         var gradeId = Guid.NewGuid();
         RegisterFor(grades: new[] { (gradeId, "Grade 5", 5) });
-        Services.AddSingleton<IFeatureFlagService>(new ActivityGroupsOffFeatureFlagService());
         var cut = RenderProvider();
 
         var task = OpenAsync(cut, new TeacherEditDialog.TeacherFormModel { TeacherId = null });

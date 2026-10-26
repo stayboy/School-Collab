@@ -26,17 +26,19 @@ public static class StudentEndpoints
             .MapStudentTopicAssignmentRoutes()
             .MapStudentGuardianRoutes();   // G2: inherits RequireAuthorization from studentsGroup
 
-        // Phase 2 (spec activity-group-enrollment.md §7.1/§7.2): activity-group
-        // CRUD + membership endpoints. Gated behind FEATURE:EnableActivityGroups
-        // (flag OFF by default — dark launch). Routes are root-level
-        // (/activity-groups/*) except the student→groups query which is
-        // /students/{id}/activity-groups.
-        if (featureFlags.IsEnabled(FeatureFlagKeys.EnableActivityGroups))
-        {
-            var activityGroupsGroup = app.MapGroup("");
-            activityGroupsGroup.RequireAuthIfOidc(featureFlags);
-            activityGroupsGroup.MapActivityGroupRoutes();
-        }
+        // Phase 2 (spec activity-group-enrollment.md §7.1/§7.2): activity-group CRUD + membership
+        // endpoints. Routes are root-level (/activity-groups/*) except the student→groups query, which
+        // is /students/{id}/activity-groups.
+        //
+        // ALWAYS MAPPED (owner, 2026-10-26). The previous FEATURE:EnableActivityGroups gate was
+        // removed along with the flag: the feature is established, so the routes are part of the host
+        // rather than an option. Removing the gate also removed a class of defect, because route
+        // MAPPING is a startup decision taken with no tenant in scope — a tenant-scoped runtime flag
+        // could never have unmasked these routes, and this host reads IConfiguration only
+        // (issue #416).
+        var activityGroupsGroup = app.MapGroup("");
+        activityGroupsGroup.RequireAuthIfOidc(featureFlags);
+        activityGroupsGroup.MapActivityGroupRoutes();
 
         // Phase 3 (spec §9): guardians + contacts + subscriptions.
         // G2: management endpoints are admin/teacher-only (not student/anonymous) —

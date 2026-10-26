@@ -53,8 +53,8 @@ public sealed class GradeStreamAssignmentSeeder(
     /// </summary>
     /// <param name="tenantIdsByName">
     /// Tenant registry keyed by name, as returned by <see cref="TenantSeeder.SeedAsync"/> —
-    /// the same delegate-the-map shape <see cref="PilotActivityGroupFlagOverrideSeeder"/>
-    /// uses. An empty map skips the pass (there is nothing to attribute rows to).
+    /// the same delegate-the-map shape the retired pilot-override seeder used. An empty map skips
+    /// the pass (there is nothing to attribute rows to).
     /// </param>
     public async Task<int> SeedAsync(
         IReadOnlyDictionary<string, Guid> tenantIdsByName,

@@ -2616,12 +2616,6 @@
 
         try
         {
-            if (!await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups, ct))
-            {
-                _activityGroupsEnabled = false;
-                return;
-            }
-
             _activityGroupsEnabled = true;
             var groups = await StudentsApi.ListActivityGroupsAsync(ct);
             if (groups is null) return;

@@ -14,8 +14,7 @@
 @inject INotificationService NotificationService
 @implements IDisposable
 
-<FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
-    <LandingPage TItem="ActivityGroupDto"
+<LandingPage TItem="ActivityGroupDto"
                  Title="Activity Groups"
                  CreateLabel="+ New Activity Group"
                  CreateEnabled="@_isRealTenant"
@@ -88,8 +87,7 @@
                 </FluentLink>
             </TemplateColumn>
         </Columns>
-    </LandingPage>
-</FeatureFlagGate>
+</LandingPage>
 
 
 @code {

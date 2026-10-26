@@ -9,8 +9,7 @@
 @inject ILogger<ActivityGroupDetails> Logger
 @implements IDisposable
 
-<FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
-    <SectionContent SectionName="page-toolbar">
+<SectionContent SectionName="page-toolbar">
         <div class="title-row">
             <h1 class="page-title">@(_group?.Name ?? "Activity Group")</h1>
             @if (_group is not null)
@@ -137,7 +136,6 @@
             </FluentDataGrid>
         }
     }
-</FeatureFlagGate>
 
 
 @code {

@@ -238,12 +238,14 @@ public class SubjectsLandingPageTests : BunitContext
 
     /// <summary>
     /// Registers the page's dependency graph and renders <c>Subjects</c>.
-    /// <paramref name="activityGroupsStatus"/> controls the <c>/activity-groups</c>
-    /// response so a test can reproduce the dark-launched (404) and enabled (200)
-    /// cases; pass <c>null</c> to leave the route unmapped entirely.
+    /// <paramref name="activityGroupsStatus"/> controls the <c>/activity-groups</c> response so a test can
+    /// reproduce a failed (404) and a healthy (200) group load; pass <c>null</c> to leave the route
+    /// unmapped entirely. <c>activityGroupsAvailable</c> is what the old <c>FEATURE:EnableActivityGroups</c>
+    /// flag stood in for — the flag was retired on 2026-10-26, the DEFENSIVE behaviour it was used to test
+    /// was not.
     /// </summary>
     private Harness RenderSubjects(
-        bool activityGroupsEnabled,
+        bool activityGroupsAvailable,
         HttpStatusCode? activityGroupsStatus = HttpStatusCode.OK,
         string? topicsJson = null,
         HttpStatusCode topicsStatus = HttpStatusCode.OK,
@@ -284,11 +286,10 @@ public class SubjectsLandingPageTests : BunitContext
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValuesClient));
         Services.AddSingleton(new VisibleTenantService(auth, NullLogger<VisibleTenantService>.Instance));
 
+        // FEATURE:EnableActivityGroups was retired on 2026-10-26. The page no longer probes a flag: whether
+        // the "Activity Group" owner filter appears is decided by the group LOAD (the harness's
+        // activityGroupsStatus), which is what `activityGroupsEnabled` used to stand in for.
         var flags = new Mock<IFeatureFlagService>();
-        flags.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups, It.IsAny<CancellationToken>()))
-             .ReturnsAsync(activityGroupsEnabled);
-        flags.Setup(f => f.IsEnabled(FeatureFlagKeys.EnableActivityGroups))
-             .Returns(activityGroupsEnabled);
         Services.AddSingleton(flags.Object);
 
         return new Harness
@@ -317,16 +318,16 @@ public class SubjectsLandingPageTests : BunitContext
     // ── Regression tests ───────────────────────────────────────────────────
 
     /// <summary>
-    /// THE regression test. With <c>FEATURE:EnableActivityGroups</c> off the
-    /// <c>/activity-groups</c> route is unmapped (404). Topics must still load and
-    /// the page must leave its loading state. Before the fix this rendered a
-    /// permanent spinner and zero topics.
+    /// THE regression test. When the <c>/activity-groups</c> call fails (404 — the case the retired
+    /// <c>FEATURE:EnableActivityGroups</c> flag used to create, and the case issue #416 reproduced with the
+    /// flag ON) topics must still load and the page must leave its loading state. Before the fix this
+    /// rendered a permanent spinner and zero topics.
     /// </summary>
     [TestMethod]
-    public void ActivityGroupsFlagOff_TopicsStillLoadAndPageLeavesLoadingState()
+    public void ActivityGroupsUnavailable_TopicsStillLoadAndPageLeavesLoadingState()
     {
         var harness = RenderSubjects(
-            activityGroupsEnabled: false,
+            activityGroupsAvailable: false,
             activityGroupsStatus: HttpStatusCode.NotFound);
 
         var cut = harness.Cut;
@@ -343,27 +344,29 @@ public class SubjectsLandingPageTests : BunitContext
     }
 
     /// <summary>
-    /// The off flag must short-circuit the request rather than firing a call that
-    /// 404s — the page should not depend on a route it knows is absent.
+    /// A failed group load must not be retried into a spiral, and the page must not depend on the route.
+    /// (Under the retired flag this asserted the request was never fired at all; now the page always asks
+    /// once and tolerates the answer.)
     /// </summary>
     [TestMethod]
-    public void ActivityGroupsFlagOff_DoesNotRequestTheActivityGroupsRoute()
+    public void ActivityGroupsUnavailable_DoesNotRequestTheActivityGroupsRoute()
     {
         var harness = RenderSubjects(
-            activityGroupsEnabled: false,
+            activityGroupsAvailable: false,
             activityGroupsStatus: HttpStatusCode.NotFound);
 
-        harness.Handler.Calls.Should().NotContain(
-            url => url.StartsWith(ActivityGroupsUrl, StringComparison.OrdinalIgnoreCase),
-            "the route is unmapped while the flag is off, so calling it is pure noise");
+        harness.Handler.Calls.Count(url => url.StartsWith(ActivityGroupsUrl, StringComparison.OrdinalIgnoreCase))
+            .Should().Be(1, "the page asks once and tolerates the answer — a failed load must not spiral into retries");
+
+        harness.Cut.Markup.Should().Contain("Mathematics", "and the failure still must not cost the page its topics");
     }
 
     /// <summary>
-    /// With the flag off the "Activity Group" owner option must not be offered —
-    /// selecting a filter that cannot list anything is a dead end.
+    /// When the groups cannot be loaded the "Activity Group" owner option must not be offered — selecting a
+    /// filter that cannot list anything is a dead end.
     /// </summary>
     [TestMethod]
-    public void ActivityGroupsFlagOff_OwnerSelectOmitsTheActivityGroupOption()
+    public void ActivityGroupsUnavailable_OwnerSelectOmitsTheActivityGroupOption()
     {
         // FluentSelect does not materialise its FluentOption children while the
         // popup is closed, so the conditional option cannot be observed in the
@@ -376,25 +379,24 @@ public class SubjectsLandingPageTests : BunitContext
         // itself) — the pinned text tracks the guard as written today.
         source.Should().MatchRegex(
             @"@if \(_activityGroupsEnabled\)\s*\{\s*<FluentOptionString Value=""ActivityGroup"">",
-            "the Activity Group owner option must be gated on the feature flag");
+            "the Activity Group owner option is offered only when the group load succeeded");
     }
 
     /// <summary>
-    /// Happy path preserved: with the flag on, the option is offered and the route
-    /// is called.
+    /// Happy path: when the groups load, the option is offered and the route was called.
     /// </summary>
     [TestMethod]
-    public void ActivityGroupsFlagOn_LoadsGroupsAndOffersTheActivityGroupOption()
+    public void ActivityGroupsAvailable_LoadsGroupsAndOffersTheActivityGroupOption()
     {
         var harness = RenderSubjects(
-            activityGroupsEnabled: true,
+            activityGroupsAvailable: true,
             activityGroupsStatus: HttpStatusCode.OK);
 
         var cut = harness.Cut;
 
         harness.Handler.Calls.Should().Contain(
             url => url.StartsWith(ActivityGroupsUrl, StringComparison.OrdinalIgnoreCase),
-            "an enabled flag must actually load the groups");
+            "a healthy group load must actually populate the picker");
 
         cut.Markup.Should().Contain("Mathematics", "topics still load alongside the groups");
         cut.FindComponents<FluentSpinner>().Should().BeEmpty();
@@ -410,7 +412,7 @@ public class SubjectsLandingPageTests : BunitContext
     public void ActivityGroupsRequestFails_TopicsStillLoadAndPageStaysUsable()
     {
         var harness = RenderSubjects(
-            activityGroupsEnabled: true,
+            activityGroupsAvailable: true,
             activityGroupsStatus: HttpStatusCode.InternalServerError);
 
         var cut = harness.Cut;
@@ -435,7 +437,7 @@ public class SubjectsLandingPageTests : BunitContext
     public void TopicLoadFails_ShowsErrorAndLeavesLoadingState()
     {
         var harness = RenderSubjects(
-            activityGroupsEnabled: false,
+            activityGroupsAvailable: false,
             activityGroupsStatus: HttpStatusCode.NotFound,
             topicsJson: """{"message":"boom"}""",
             topicsStatus: HttpStatusCode.InternalServerError);
@@ -500,7 +502,7 @@ public class SubjectsLandingPageTests : BunitContext
         var topicId = Guid.NewGuid();
 
         var harness = RenderSubjects(
-            activityGroupsEnabled: false,
+            activityGroupsAvailable: false,
             gradeIdOverride: gradeId,
             topicIdOverride: topicId,
             exceptionsJson: JsonSerializer.Serialize(new[]
@@ -530,7 +532,7 @@ public class SubjectsLandingPageTests : BunitContext
         var topicId = Guid.NewGuid();
 
         var harness = RenderSubjects(
-            activityGroupsEnabled: false,
+            activityGroupsAvailable: false,
             gradeIdOverride: gradeId,
             topicIdOverride: topicId,
             exceptionsJson: JsonSerializer.Serialize(new[]
@@ -582,7 +584,7 @@ public class SubjectsLandingPageTests : BunitContext
         var topicId = Guid.NewGuid();
 
         var harness = RenderSubjects(
-            activityGroupsEnabled: false,
+            activityGroupsAvailable: false,
             gradeIdOverride: gradeId,
             topicIdOverride: topicId,
             exceptionsJson: JsonSerializer.Serialize(new[]
@@ -610,7 +612,7 @@ public class SubjectsLandingPageTests : BunitContext
     public void ExceptionLoadFails_TopicsStillLoadAndTheBadgeIsAbsent()
     {
         // exceptionsJson left null → the route 404s.
-        var harness = RenderSubjects(activityGroupsEnabled: false);
+        var harness = RenderSubjects(activityGroupsAvailable: false);
 
         harness.Cut.Markup.Should().Contain("Mathematics", "topics must survive an exception-load failure");
         harness.Cut.Markup.Should().NotContain("1 exception",

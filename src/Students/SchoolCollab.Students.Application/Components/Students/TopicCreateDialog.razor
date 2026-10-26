@@ -154,10 +154,10 @@
     private ActivityGroupDto[] _activityGroups = [];
 
     /// <summary>
-    /// Mirrors <c>FEATURE:EnableActivityGroups</c>. The <c>/activity-groups</c>
-    /// route group is only mapped when the flag is on, so an off flag means the
-    /// group owner simply is not available here. It must never prevent the dialog
-    /// from opening or the grade-level owner from working.
+    /// Whether the group owner is available here. This used to mirror
+    /// <c>FEATURE:EnableActivityGroups</c> (retired 2026-10-26); it now records whether the group load
+    /// SUCCEEDED. The isolation it provides is kept on purpose: a failed group load must never prevent the
+    /// dialog from opening or the grade-level owner from working.
     /// </summary>
     private bool _activityGroupsEnabled;
     private SubjectDto[] _groupExistingTopics = [];
@@ -221,11 +221,11 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Activity groups first, but fully isolated: /activity-groups is only
-        // mapped when FEATURE:EnableActivityGroups is on, so with the flag off the
-        // call would 404 and — being unguarded here previously — take the whole
-        // dialog down, including the grade-level owner path.
-        _activityGroupsEnabled = await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups);
+        // Activity groups first, but fully isolated: a failed group load previously 404'd and — being
+        // unguarded here — took the whole dialog down, including the grade-level owner path. The flag is
+        // retired (2026-10-26) but the isolation still earns its place: an optional resource must never
+        // take down a required one.
+        _activityGroupsEnabled = true;
         if (_activityGroupsEnabled)
         {
             try

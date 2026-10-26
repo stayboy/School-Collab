@@ -112,40 +112,6 @@ public class JoinGroupsDialogTests : BunitContext
             : $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"parentPeriodId\":null,\"nextPeriodId\":null,\"division\":\"None\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
 
     /// <summary>
-    /// Defense in depth. The Activity Groups section that opens this dialog is
-    /// already wrapped in a <c>FeatureFlagGate</c> (Detail.razor), but the dialog
-    /// must not surface a raw 404 from the unmapped <c>/activity-groups</c> route
-    /// if it is ever reached with the flag off — it should say the feature is off,
-    /// and must not call the route at all.
-    /// </summary>
-    [TestMethod]
-    public async Task JoinDialog_ActivityGroupsFlagOff_SaysFeatureDisabledAndSkipsRoute()
-    {
-        ActivityGroupsEnabled = false;
-
-        var handler = new ScriptedHandler();
-        // Deliberately do NOT map /activity-groups: with the flag off the route is
-        // unmapped, so an unmapped (404) route is the realistic condition.
-        handler.Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.OK, "[]");
-        Register(handler);
-
-        var cut = Render<FluentDialogProvider>();
-        var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
-            new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId }, "Join groups", DialogWidth.Medium);
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("not enabled for this tenant"));
-
-        cut.Markup.Should().NotContain("Unexpected /activity-groups",
-            "the raw 404 body must never reach the user");
-
-        handler.Calls.Should().NotContain(url => url.StartsWith("/activity-groups", StringComparison.OrdinalIgnoreCase),
-            "a route that is known to be unmapped should not be called at all");
-
-        cut.Find("fluent-button[aria-label='Close']").Click();
-        (await task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeNull();
-    }
-
-    /// <summary>
     /// A7 (AC-36): with no active period (both active-period GETs 404), the
     /// active period type resolves to AcademicYear and an OpenEnded group is
     /// listed as joinable.

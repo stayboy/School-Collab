@@ -645,27 +645,34 @@ but is **superseded** by the two-kind model above.
 | Flag | Default | Notes |
 | :--- | :--- | :--- |
 | `FEATURE:EnableCodedValuesAiChat` | `true` | Gates the AI-chat surfaces on the CodedValues landing page. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
-| `FEATURE:EnableActivityGroups` | `false` | Gates the activity-group management surface: Admin **Activity Groups** nav/page, group CRUD + membership endpoints in `SchoolCollab.Students.Api`, and the assignment↔group link endpoints + `SelectedGroups` targeting in `SchoolCollab.Assignments.Api`. Ships **dark** (default OFF) per [`activity-group-enrollment.md`](./specs/activity-group-enrollment.md) NFR-11. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. The global default remains OFF; the migration service additionally seeds a `TenantFeatureFlagOverride` turning the flag ON for the pilot tenant `Hydeson School` only (Phase 6.1 — see below). |
+| `FEATURE:EnableActivityGroups` | **RETIRED (2026-10-26)** | Was the dark-launch gate for the activity-group management surface. **The feature is established and ships ungated**: the flag key was deleted, the routes are always mapped in `SchoolCollab.Students.Api` + `SchoolCollab.Assignments.Api`, and no UI is gated. See §1.1 *Retired flags* below and [`solution/activity-groups-flag-client-isolation.md`](./solution/activity-groups-flag-client-isolation.md). |
 | `FEATURE:RequireAssignmentApproval` | `false` | Gates the assignment approval workflow (WS-A2 / spec §7 Q2): when on, every assignment requires approval before publish — the publish + schedule command handlers throw `AssignmentApprovalRequiredException` (HTTP 400), and the Admin Assignments Index/Detail UI surfaces Submit-for-approval / Approve / Reject controls. Ships **dark** (default OFF). Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Admin/appsettings.json` + AppHost parameter fan-out. **Reconciled with a policy field, retirement planned (D3, round `assignment-policy-core`):** each gate now fires on `effectiveAssignmentPolicy.RequiresApprovalBeforePublish \|\| flag`. The new field is the tenant/grade-scoped home for this knob and takes no UI surface until Round B, so **while this flag is OFF the approval surfaces stay flag-gated and the policy field is reachable only through the API** (intended, D8); a tenant that relies on the field alone must turn the flag off itself in Round B. See [`solution/assignment-policy-fields.md`](./solution/assignment-policy-fields.md) §5/§8. |
 | `FEATURE:EnableDeepLinks` | `false` | Gates the Families public deep-link landing route group (`GET /deeplink/{token}`) for assignment recipients (WS-E1 / `ar-14-deep-links`) **and the guardian sign-off surface (WS-F3 / `ar-15-signoff-relocation`)**: the Assignments API's public `/guardian/...` route group (token-gated by `GuardianTokenEndpointFilter`, which 401s when the flag is OFF) and the Families-hosted `Ward/SignOff.razor` guardian page. Ships **dark** (default OFF): tokens are minted at publish regardless of this flag, and the runtime flag only decides whether the public route validates, stamps `OpenedAt`, signs the guardian into a cookie, redirects to the ward surface, and accepts the guardian route group's `x-deeplink-token` calls. Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Families/appsettings.json`. |
 
-### Pilot-tenant override (Phase 6.1)
+### Retired flags
 
-`FEATURE:EnableActivityGroups` is enabled for exactly one pilot tenant at seed
-time via a `TenantFeatureFlagOverride` row, without changing the global default.
+#### `FEATURE:EnableActivityGroups` — retired 2026-10-26
 
-- **Mechanism:** a `TenantFeatureFlagOverride` row (`IsEnabled = true`,
-  `EffectiveFrom`/`EffectiveTo` null → always in effect) is seeded idempotently
-  by `SchoolCollab.MigrationService` after the tenant + flag seeds.
-- **Pilot tenant:** `Hydeson School` (configurable via
-  `PilotActivityGroupFlagOverrideSeeder.PilotTenantName`).
-- **Traceability:** a `FlagAuditEntry` with `ChangeKind = OverrideCreated`, actor
-  `system:migrator` / "Migration Service", is written with the override.
-- **Effect:** `ConfigFeatureFlagService` (`ResolveFlagsForTenantHandler`) resolves
-  the flag to ON for the pilot tenant and to the global OFF default for every
-  other tenant. To turn the pilot off, delete the override row via the admin
-  `/config-flags` tenant-override surface (or run the `DeleteTenantFlagOverride`
-  command).
+Activity groups are an established feature, so the owner retired the flag and **kept the feature**. What went,
+and what deliberately did not:
+
+| Removed | Kept |
+| :--- | :--- |
+| The `FeatureFlagKeys.EnableActivityGroups` constant | The activity-group domain, routes, pages, dialogs and tests |
+| The `if (featureFlags.IsEnabled(...))` gate around route mapping in `SchoolCollab.Students.Api` and `SchoolCollab.Assignments.Api` — the routes are **always mapped** | The 404/failure **isolation** on every client call site: a failed group load still cannot take down a page, a dialog or the grade-level owner path (that lesson never depended on the flag — issue #416 reproduced the failure with the flag ON) |
+| `<FeatureFlagGate>` around the Activity Groups nav item, the Activity Groups landing + detail pages, and the student-detail Activity Groups section | Those surfaces themselves |
+| `SeedEnableActivityGroupsAsync` and `PilotActivityGroupFlagOverrideSeeder` (and its test) | The feature-flag *infrastructure* — other flags still use it |
+| The `EnableActivityGroups` cold-start fallback in `SchoolCollab.Admin/appsettings.json` | — |
+
+**Rows already present in a Settings database are left in place** (`feature_flags` row + the hydeson-school
+`TenantFeatureFlagOverride`). Nothing reads them, and deleting seeded data is a migration — i.e. a separate,
+owner-approved change.
+
+**Why the routes were the real defect.** Route *mapping* is a startup decision taken with no tenant in scope, so
+a tenant-scoped runtime flag could never have unmasked them — and `SchoolCollab.Students.Api` /
+`SchoolCollab.Assignments.Api` resolve `IFeatureFlagService` from `IConfiguration` only (only `Admin` and
+`Families` register `AddConfigFeatureFlagClient`). Under the flag, the group API was therefore unreachable in
+development at **any** flag state (issue #416). Retiring the flag removed that whole class of failure.
 
 ### Historical AppHost-`Parameters:` model (superseded)
 
@@ -684,7 +691,7 @@ restoration and its guards.
 | Flag | Default | Consumers |
 | :--- | :--- | :--- |
 | `FEATURE:DisableOIDCAuth` | `false` (base; dev `true`) | **Deployment-time AppHost parameter fan-out — not a Settings/Config-service flag.** Fanned to the six hosts that call `AddAuthAndTenancy`: `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Admin`, `SchoolCollab.Families` and the `auth` service. The `auth` service is the one host with a dev carve-out: it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy`, so with the flag ON it still registers the OIDC **relying-party pipeline (cookie + OIDC)** — it IS the relying party (D16) — while `TestAuth` stays its default scheme. Every other consumer's dev pipeline is unchanged. |
-| `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+| ~~`FEATURE:EnableActivityGroups`~~ | **retired** | No consumer — the flag was deleted on 2026-10-26 and the activity-group surface ships ungated. See §6 *Retired flags*. |
 | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers — now OR'd with the assignment-policy field `RequiresApprovalBeforePublish`; D3, retirement planned) |
 | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
 | `FEATURE:DisableKeycloakLoginUi` | `false` | **Deployment-time AppHost parameter fan-out — not a Settings/Config-service flag** (auth schemes are registered once, so a startup read is the only correct one). AppHost parameter `feature-flag-disable-keycloak-login-ui`, fanned to `SchoolCollab.Admin` + `SchoolCollab.Families` (the browser-facing challenges that redirect to the portal), the `auth` service (its own startup read; without `Auth:Portal:LoginUrl` there it fails closed with 401) and the `auth-portal` Python app. See §4 for the three portal-URL keys. |

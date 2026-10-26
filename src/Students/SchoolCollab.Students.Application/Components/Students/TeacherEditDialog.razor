@@ -265,13 +265,14 @@
     {
         try
         {
-            _activityGroupsEnabled = await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups);
-
             _allTopics = await Api.ListTopicsAsync() ?? [];
             _allGradeLevels = await Api.ListGradeLevelsAsync() ?? [];
-            _allActivities = _activityGroupsEnabled
-                ? await Api.ListActivityGroupsAsync() ?? []
-                : [];
+            _allActivities = await Api.ListActivityGroupsAsync() ?? [];
+
+            // "+ Activity" opens a group picker, so it is offered only when there is something to pick.
+            // This used to be FEATURE:EnableActivityGroups (retired 2026-10-26); the dead-end it prevented
+            // — a picker with nothing in it — is real whatever the flag says.
+            _activityGroupsEnabled = _allActivities.Length > 0;
             _allQualifications = await CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.Qualification.ToCode()) ?? [];
             _allTeacherRoles = await CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.TeacherRoles.ToCode()) ?? [];
 
