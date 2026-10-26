@@ -117,6 +117,16 @@ and archive the flag from the admin UI (archived flags are excluded from
 resolution but kept for audit). Delete it (soft-delete, recoverable) once no
 audit window needs it.
 
+**Removing the flag is converting every consumer, not deleting the gate.** The key is gone by
+then, so grepping it proves nothing — grep the residue shape the compiler cannot see: an
+`if (false)`, a `return;` that now always fires, or a `bool enabled` that nothing ever assigns
+to `true`. And verify the **capability** survived, not just the code: a test that asserts "we
+called `/activity-groups`" passes against a page that then hides every option the call returned,
+because bUnit cannot see `FluentOption` children while the popup is closed. Assert the rendered
+consequence. (2026-10-26: the `FEATURE:EnableActivityGroups` retirement lost the Activity Group
+owner filter exactly this way — `Subjects.razor` kept `if (false)`, the guard test only checked
+the HTTP call, and only a pre-flight code review caught it. PR #420.)
+
 ### Replaced by a policy field (the reconciliation pattern)
 
 A runtime flag whose knob becomes tenant/grade configuration is retired in two
