@@ -14,6 +14,26 @@ entry here shrinks to a pointer at that check.
 
 ---
 
+## A half-converted gate is a capability loss (2026-10-26)
+
+**Promoted to `documents/solution/feature-flag-workflow.md` § "Retiring a flag".** Removing a flag means
+*converting every consumer* — grep the residue shape (`if (false)`, an always-firing `return;`, a `bool`
+nothing assigns `true`), never the deleted key — and assert the **rendered consequence**, not the request.
+That doc is read during a retirement, when the rule must fire. Evidence: PR #420 — `Subjects.razor` kept
+`if (false)` and the Activity Group owner filter silently vanished, hidden by a guard test that asserted
+only the HTTP call.
+
+---
+## An over-broad assertion reports itself as timing (2026-10-26)
+
+**Promoted to `.github/copilot/rules/testing.md` § "A render-time exception looks like a FLAKY TIMEOUT"**
+as its second cause: `Single`/`First`/`Count` over a shared request log is a **session** claim, not an
+endpoint claim — filter to the endpoint and put the observed values in the failure message. Evidence: PR
+#420/#418 (`NotificationTemplateCreateTests` reddened two of three full-suite runs with
+`Sequence contains more than one matching element`). Five latent sibling sites remain unfixed:
+`EnrollmentExceptionsDialogTests.cs:648, 796, 853, 944, 975`.
+
+---
 ## Kill the repo's own processes yourself — do not ask (2026-10-24)
 
 **Rule.** A `MSB3021` / `MSB3027` lock on a solution build is yours to clear. The locked outputs

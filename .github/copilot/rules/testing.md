@@ -124,6 +124,15 @@ in this repo so far is an `Icon` instance passed to the generic `Icon=` paramete
 2. Run the single failing test; read the inner exception in the rendered fallback.
 3. Revert the widening — never commit the widened form.
 
+The **same** signature has a second, unrelated cause: an over-broad assertion.
+`Single`/`First`/`Count` over a shared request log is a claim about the **session**, not about the
+endpoint. `handler.Calls.Single(c => c.Method == "POST")` over every call throws
+`Sequence contains more than one matching element` whenever anything else in the session POSTs, and
+reports a message naming neither the component nor the endpoint — so it reads as a race even though
+every poll saw the extra call. Filter to the endpoint the test is about
+(`c.Url.StartsWith(...)`) and put the observed URLs in the failure message. (2026-10-26:
+`NotificationTemplateCreateTests` — PR #420/#418.)
+
 ### Dialog round-trip tests need one named, generous budget
 
 Show → interact → submit through the real dialog shell (harness below) is
