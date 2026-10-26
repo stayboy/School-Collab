@@ -136,20 +136,18 @@
         }
         else
         {
-        @* Labeled add-contact layout (spec: "Add contact" caption header +
-           channel/country/label row; the contact value + Add icon button sit
-           inline in the value row so the Add affordance lives next to the
-           data it commits). The Add button is icon-only (Title="Add contact"
-           supplies the tooltip + accessible name) so it doesn't push the
-           value input off-screen. Country code stays with the channel group
-           (it's channel-gated). *@
+        @* Labeled add-contact layout. ONE row (owner, 2026-10-24): channel · label · value · Add.
+           The value input + Add button travel together as a nowrap group, so the row stays a single
+           line while there is room and drops the whole group to line 2 when there is not — the email
+           box never starts a line on its own with the Add button stranded beside it. Country code
+           stays with the channel group (it's channel-gated). *@
         <div class="contacts-editor-add contacts-editor-add--labeled">
-            <div class="contacts-editor-add__row contacts-editor-add__row--top">
+            <div class="contacts-editor-add__row">
                 <DropdownForEnum TEnum="ContactChannel"
                                  @bind-SelectedValue="_newContactModel.Channel"
                                  @bind-SelectedValue:after="OnChannelChanged"
                                  Placeholder="Channel"
-                                 Width="FieldWidth.W2" />
+                                 Width="FieldWidth.W3" />
                 @if (_newContactModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
                 {
                     <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
@@ -158,20 +156,24 @@
                                         Width="FieldWidth.W3"
                                         OptionText="@FormatCountryCodeOption" />
                 }
-                <FluentTextInput @bind-Value="_newContactModel.Label"
-                                 Placeholder="Label (optional)"
-                                 class="contacts-label" />
-            </div>
-            <div class="contacts-editor-add__row contacts-editor-add__row--bottom">
-                <FluentTextInput @bind-Value="_newContactModel.Value"
-                                 Placeholder="@ValuePlaceholder"
-                                 class="contacts-value" />
-                <FluentButton Appearance="ButtonAppearance.Primary"
-                              IconStart="@FluentIcons.Add"
-                              Title="Add contact"
-                              OnClick="AddAsync"
-                              Disabled="@(_adding || string.IsNullOrWhiteSpace(_newContactModel.Value))"
-                              class="contacts-editor-add__submit" />
+                @* REQUIRED before OPTIONAL (owner, 2026-10-25): the label used to sit before the value,
+                   so an optional input took the earlier, stronger position and the required one read as
+                   an afterthought. The trio travels as one nowrap group — value, label, Add — so the row
+                   still wraps as a unit instead of stranding the button. *@
+                <span class="contacts-editor-add__value">
+                    <FluentTextInput @bind-Value="_newContactModel.Value"
+                                     Placeholder="@ValuePlaceholder"
+                                     class="contacts-value" />
+                    <FluentTextInput @bind-Value="_newContactModel.Label"
+                                     Placeholder="Label (optional)"
+                                     class="contacts-label" />
+                    <FluentButton Appearance="ButtonAppearance.Primary"
+                                  IconStart="@FluentIcons.Add"
+                                  Title="Add contact"
+                                  OnClick="AddAsync"
+                                  Disabled="@(_adding || string.IsNullOrWhiteSpace(_newContactModel.Value))"
+                                  class="contacts-editor-add__submit" />
+                </span>
             </div>
         </div>
 
@@ -275,7 +277,7 @@
                                   @bind-SelectedValue="_editContactModel.Channel"
                                   @bind-SelectedValue:after="OnInlineEditChannelChanged"
                                   Placeholder="Channel"
-                                  Width="FieldWidth.W2" />
+                                  Width="FieldWidth.W3" />
                 @if (_editContactModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
                 {
                     <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"

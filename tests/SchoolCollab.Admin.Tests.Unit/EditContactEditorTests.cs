@@ -25,8 +25,9 @@ namespace SchoolCollab.Admin.Tests.Unit;
 ///     (i.e. outside the <c>&lt;EditForm&gt;</c> / DataAnnotationsValidator
 ///     scope) because contact mutations are independent of the
 ///     <c>UpdateStudentRequest</c> model
-///   - the edit form MUST have a "Direct contact" sub-section
-///     heading so the editor is visually grouped
+///   - the editor MUST sit in its own titled block so the user reads
+///     it as the student's own reachability detail (owner Q81: it is
+///     the "Contacts" block, in the main region, not the rail)
 /// </summary>
 [TestClass]
 public class EditContactEditorTests
@@ -85,16 +86,18 @@ public class EditContactEditorTests
     }
 
     [TestMethod]
-    public void Edit_Has_Direct_Contact_Section_Heading()
+    public void Edit_Has_Contacts_Panel_Around_The_Editor()
     {
-        // Visual grouping: a "Direct contact" heading under the form
-        // so the user understands the editor is part of the student
-        // record, not a separate concern. Heading sits on its own line
-        // (indented) so it's easy to find and hard to accidentally
-        // remove when refactoring the surrounding markup.
+        // Visual grouping: the editor sits in its own titled block so the user reads it as
+        // part of the student record, not as a separate concern. The heading is the block's
+        // title; the block carries the pinned #student-edit-contacts seam.
         var source = ReadEditSource();
-        source.Should().Contain("Direct contact",
-            "the Edit form has a 'Direct contact' section heading so the contact editor is visually grouped");
+        source.Should().Contain("Id=\"student-edit-contacts\"",
+            "the contact editor is wrapped in its own PanelSection, addressed by #student-edit-contacts");
+        source.Should().Contain("Title=\"Contacts\"",
+            "that block is titled Contacts so the editor is visually grouped");
+        source.Should().Contain("TitleId=\"student-edit-contacts-title\"",
+            "the block's title element keeps the pinned #student-edit-contacts-title seam");
     }
 
     [TestMethod]
