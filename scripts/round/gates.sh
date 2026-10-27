@@ -15,8 +15,14 @@
 #   `failed: 0` when zero tests ran).
 #
 # USAGE
-#   scripts/round/gates.sh [--no-maui] [--no-integration] [--no-portals]
+#   scripts/round/gates.sh [--serial] [--no-maui] [--no-integration] [--no-portals]
 #
+#   --serial           build the main solution with `-m:1` (one MSBuild node). Slower, but the
+#                      parallel build exhausts memory on this machine and has repeatedly killed the
+#                      agent running it (~0xC0000409, a silent process death with no compile error).
+#                      **Agents should pass this** when they run the gate themselves; a human on a
+#                      roomier machine need not. The tests executed are identical — only build
+#                      parallelism changes — so CI parity is preserved.
 #   --no-maui          skip the MAUI Blazor Hybrid head (adds it to "NOT checked")
 #   --no-integration   skip the Integration leg (adds it to "NOT checked")
 #   --no-portals       skip the two pytest legs (adds them to "NOT checked")
@@ -39,8 +45,10 @@ bad()  { printf '  %s✖ %s%s\n' "$RED" "$1" "$NC"; }
 RUN_MAUI=true
 RUN_INTEGRATION=true
 RUN_PORTALS=true
+MAIN_BUILD_ARGS=""
 for arg in "$@"; do
     case "$arg" in
+        --serial)         MAIN_BUILD_ARGS="-m:1" ;;
         --no-maui)        RUN_MAUI=false ;;
         --no-integration) RUN_INTEGRATION=false ;;
         --no-portals)     RUN_PORTALS=false ;;
@@ -77,7 +85,7 @@ step "Restore"
 if dotnet restore >"$LOG_DIR/restore.log" 2>&1; then ok "restore"; else bad "restore"; FAILURES+=("restore"); fi
 
 step "Build (Release)"
-if dotnet build --no-restore --configuration Release 2>&1 | tee "$LOG_DIR/build.log" | tail -5; then
+if dotnet build --no-restore --configuration Release $MAIN_BUILD_ARGS 2>&1 | tee "$LOG_DIR/build.log" | tail -5; then
     if grep -Eq '\b[1-9][0-9]* Error\(s\)' "$LOG_DIR/build.log"; then
         bad "build reported errors"; FAILURES+=("build")
     else
