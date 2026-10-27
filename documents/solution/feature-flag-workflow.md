@@ -28,7 +28,9 @@ document is the authority for the Config bounded context. See also
 ## Deployment-time flags (rare)
 
 Use only for genuine startup decisions that cannot be deferred to runtime
-(e.g. `FEATURE:DisableOIDCAuth`, `FEATURE:DisableKeycloakLoginUi`). The pattern is the
+(e.g. `FEATURE:DisableOIDCAuth`, `FEATURE:DisableKeycloakLoginUi`). **The same owner gate applies here** — the
+owner names a startup switch before it exists; an agent proposes and waits (§ "A flag is the OWNER's decision").
+The pattern is the
 **AppHost parameter** — one write-point, fanned out; the adopted design, its evidence and its
 guards are in [`startup-flag-governance.md`](../specs/startup-flag-governance.md).
 
@@ -59,18 +61,34 @@ Dev overrides go to user-secrets on the **AppHost** project
 These live in the Config service's `config-db` and are managed through the
 admin UI at `/config-flags` (or the `/api/config/*` endpoints).
 
+### A flag is the OWNER's decision, not the agent's
+
+**An agent never introduces a flag.** The owner names the key and its purpose before any work starts; if you
+believe a flag is needed, **propose it and wait** — key, default state, the consumers it would gate, and why the
+default alone cannot carry the risk. This applies to **both** kinds below, and to a flag added "just for the first
+release". The instruction is the owner's (2026-10-26) and it exists because a flag is a product decision about
+opt-in shape, not an implementation detail an agent can pick while coding.
+
+**Do not add a flag when the new behaviour already defaults to the safe state.** If the change is opt-in — a
+setting that defaults to today's behaviour, a per-record toggle, a surface nobody reaches without asking for it —
+then the default **is** the safety, and a dark-launch flag only adds a switch someone must later retire. Two
+consecutive rounds proved both halves of this: `FEATURE:EnableActivityGroups` was retired precisely because the
+feature had become established (PR #420), and the subject-enrolment round was explicitly built **without** a flag
+because `RequiresEnrollment` defaults `false` and therefore changes nothing until an admin flips one subject.
+
 ### Adding a new runtime flag
 
-1. **Pick a key** of the form `FEATURE:<AreaName>` (positive `Enable*` form is
+1. **Confirm the owner named it.** See above — a flag with no owner-stated key and purpose does not proceed.
+2. **Pick a key** of the form `FEATURE:<AreaName>` (positive `Enable*` form is
    preferred for new flags, e.g. `FEATURE:EnableNewDashboard`).
-2. **Create it in the admin UI** at `/config-flags` → *New Flag*. Set the
+3. **Create it in the admin UI** at `/config-flags` → *New Flag*. Set the
    default state and a reason. (Or seed it in the migrator for flags that must
    exist from day one, like `FEATURE:EnableCodedValuesAiChat`.)
-3. **Consume it** by injecting `IFeatureFlagService` and calling
+4. **Consume it** by injecting `IFeatureFlagService` and calling
    `IsEnabledAsync("FEATURE:<Area>")`. The host must have registered the
    cached client via `AddConfigFeatureFlagClient(...)` (the unified admin host
    does; an API that needs a runtime flag calls it too).
-4. **Tenant overrides** are added from the flag's detail page — one per tenant,
+5. **Tenant overrides** are added from the flag's detail page — one per tenant,
    with a required reason.
 
 ### How a runtime flag resolves

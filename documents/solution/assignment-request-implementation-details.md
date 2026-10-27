@@ -87,8 +87,10 @@ exist.** `SubmissionReview` (teacher post-submission grade) flips
 
 `AssignmentEndpoints.MapAssignmentEndpoints(this WebApplication app,
 IFeatureFlagService featureFlags)` — group `/assignments`, `RequireAuthorization()`
-unless `FeatureFlagKeys.DisableOIDCAuth`; `MapActivityGroupLinkRoutes` additionally
-gated by `EnableActivityGroups` (dark-launch precedent to copy for new flags).
+unless `FeatureFlagKeys.DisableOIDCAuth`; `MapActivityGroupLinkRoutes` was additionally
+gated by `EnableActivityGroups`, since **retired** (2026-10-26, PR #420). Historical record only:
+**do not copy this as a dark-launch pattern** — a flag is the owner's decision, named before work
+starts (`feature-flag-workflow.md` § "A flag is the OWNER's decision").
 Routes (all verified in `Endpoints/AssignmentRoutes.cs`): CRUD + publish/unpublish/
 close/review + `/{id}/recipients` + `/{id}/submissions` + review-queue +
 `/students/{sid}/submission` (GET/POST) + `/guardian-review` +
