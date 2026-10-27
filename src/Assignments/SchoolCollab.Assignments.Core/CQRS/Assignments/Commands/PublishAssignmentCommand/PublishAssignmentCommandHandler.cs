@@ -191,7 +191,7 @@ public sealed class PublishAssignmentCommandHandler(
         // source — D-6's documented widening, now per target rather than per authored primary grade).
         var request = new ResolveSubscribersRequest(
             tenantId, SubscriptionScope.AllAssignments,
-            AssignmentPolicyScope.GradeTargetIds(assignment), resolvedStudentIds);
+            AssignmentPolicyScope.GradeTargetIds(assignment), resolvedStudentIds, assignment.TopicId);
 
         var subscribers = await contactResolver.ResolveSubscribersAsync(request, cancellationToken);
 

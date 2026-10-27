@@ -42,6 +42,10 @@ public sealed record SubscriberInfo(
 /// The by-grade whole-roster fallback is gone (round <c>drop-primary-grade</c>): the target
 /// resolver is the sole student source and publish refuses an empty resolved set before this
 /// resolver is reached. When neither is supplied the result is empty.
+/// <para><see cref="TopicId"/> is the assignment's subject, when it has one
+/// (subject-enrollment-requirement-flag.md FR-ER-13b). It is <c>null</c> for a publish with no
+/// subject, which is <b>not</b> subject-scoped: the eligibility hop is skipped entirely and the
+/// recipient set is exactly what it was before the filter existed.</para>
 /// </summary>
 public sealed record ResolveSubscribersRequest(
     Guid TenantId,
@@ -49,4 +53,6 @@ public sealed record ResolveSubscribersRequest(
     /// <summary>The assignment's distinct grade-target ids — each grade's teachers are added to the
     /// cohort (fail-open per grade). Null/empty adds none.</summary>
     IReadOnlyList<Guid>? GradeLevelIds = null,
-    IReadOnlyList<Guid>? StudentIds = null);
+    IReadOnlyList<Guid>? StudentIds = null,
+    /// <summary>The assignment's subject (FR-ER-13b). <c>null</c> = no subject = no eligibility hop.</summary>
+    Guid? TopicId = null);

@@ -1938,6 +1938,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("period_id");
 
+                    b.Property<bool>("RequiresEnrollment")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_enrollment");
+
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()

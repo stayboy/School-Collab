@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,10 +35,25 @@ internal sealed class StudentsTestScope : IDisposable
     public IGradeStreamAssignmentRepository GradeStreamAssignments { get; }
 
     public StudentsTestScope(string name)
+        : this(name, interceptor: null)
     {
+    }
+
+    /// <summary>
+    /// As the default scope, with an optional <see cref="SaveChangesInterceptor"/> — the seam for
+    /// asserting write atomicity (how many <c>SaveChanges</c> calls a compound write makes) and
+    /// for forcing a save to fail so a rollback can be asserted.
+    /// </summary>
+    public StudentsTestScope(string name, SaveChangesInterceptor? interceptor)
+    {
+        _name = name;
         var services = new ServiceCollection();
         services.AddTenancy();
-        services.AddDbContext<StudentsDbContext>(o => o.UseInMemoryDatabase(name));
+        services.AddDbContext<StudentsDbContext>(o =>
+        {
+            o.UseInMemoryDatabase(name);
+            if (interceptor is not null) o.AddInterceptors(interceptor);
+        });
         services.AddDistributedMemoryCache();
         services.AddHybridCache();
         var sp = services.BuildServiceProvider();
@@ -66,6 +82,19 @@ internal sealed class StudentsTestScope : IDisposable
     }
 
     public void Dispose() => Db.Dispose();
+
+    private readonly string _name;
+
+    /// <summary>
+    /// A fresh context over the <b>same</b> in-memory database and the same tenant provider, with no
+    /// interceptor — so a test can read what was actually persisted after a failed save (the
+    /// original context still tracks the unsaved changes and would answer from them).
+    /// </summary>
+    public StudentsDbContext NewContext() =>
+        new(new DbContextOptionsBuilder<StudentsDbContext>()
+            .UseInMemoryDatabase(_name)
+            .Options,
+            Tenants);
 
     /// <summary>
     /// Builds an <see cref="IConfiguration"/> that sets the global period activation-window

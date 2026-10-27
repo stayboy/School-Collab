@@ -1,14 +1,18 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.AssignGradeTopic;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.AssignActivityGroupTopic;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.RemoveTopicAssignment;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.SetGradeTopicOrder;
+using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.SetRequiresEnrollment;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.UpdateTopicAssignmentPeriod;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.UpdateTopicAssignmentTags;
+using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.GetTopicEnrollment;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicAssignments;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListActivityGroupTopicAssignments;
 using SchoolCollab.Students.Core.Domain.Exceptions;
+using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -30,6 +34,19 @@ public static class TopicAssignmentRoutes
             var effective = effectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
             return Results.Ok(await handler.HandleAsync(new ListGradeTopicAssignments(gradeLevelId, effective), ct));
         });
+
+        // ── Enrolment eligibility (subject-enrollment-requirement-flag.md FR-ER-14) ────
+        // The publish filter's single hop. NO period parameter: the academic year is
+        // resolved server-side from the active period (FR-ER-3), so a caller can never
+        // choose the year eligibility is evaluated against. Two id arrays come back — the
+        // grade's Audience and the enrolled Eligible subset — because the filter must
+        // subtract Audience \ Eligible per grade while leaving non-grade legs untouched.
+        group.MapGet("/topic-enrollment", async (
+            Guid gradeLevelId,
+            Guid topicId,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<GetTopicEnrollment, SchoolCollab.Students.Core.DTOs.TopicEnrollmentDto> handler,
+            CancellationToken ct) =>
+            TypedResults.Ok(await handler.HandleAsync(new GetTopicEnrollment(gradeLevelId, topicId), ct)));
 
         group.MapGet("/topic-assignments/by-activity-group/{activityGroupId:guid}", async (
             Guid activityGroupId,
@@ -112,6 +129,18 @@ public static class TopicAssignmentRoutes
             }
         });
 
+        // Switches the subject between implied enrolment (false) and explicit per-student
+        // enrolment (true) — subject-enrollment-requirement-flag.md FR-ER-7/9. A false → true
+        // flip grandfathers the current audience server-side, in one transaction (FR-ER-10);
+        // the response carries the FR-ER-8 counts the switch surface's copy needs, so no
+        // second endpoint is required.
+        group.MapPut("/topic-assignments/{id:guid}/requires-enrollment", async (
+            Guid id,
+            [FromBody] SetRequiresEnrollmentRequest req,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<SetRequiresEnrollment, SchoolCollab.Students.Core.DTOs.TopicEnrollmentCountsDto> handler,
+            CancellationToken ct) =>
+            await HandleSetRequiresEnrollmentAsync(id, req, handler, ct));
+
         group.MapDelete("/topic-assignments/{id:guid}", async (
             Guid id,
             [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<RemoveTopicAssignment> handler,
@@ -152,10 +181,42 @@ public static class TopicAssignmentRoutes
 
         return group;
     }
+
+    /// <summary>
+    /// The switch's typed result union: 200 with the FR-ER-8 counts, 404 for an unknown /
+    /// other-tenant / activity-group assignment (the <c>SetGradeTopicOrder</c> discrimination),
+    /// 409 when no active academic year can carry the enrolment rows (FR-ER-3).
+    /// </summary>
+    private static async Task<Results<Ok<TopicEnrollmentCountsDto>, NotFound, Conflict<MessageResponse>>>
+        HandleSetRequiresEnrollmentAsync(
+            Guid id,
+            SetRequiresEnrollmentRequest req,
+            SchoolCollab.Core.CQRS.ICommandHandler<SetRequiresEnrollment, TopicEnrollmentCountsDto> handler,
+            CancellationToken ct)
+    {
+        try
+        {
+            return TypedResults.Ok(await handler.HandleAsync(new SetRequiresEnrollment(id, req.Value), ct));
+        }
+        catch (KeyNotFoundException)
+        {
+            return TypedResults.NotFound();
+        }
+        catch (PeriodNotOpenException ex)
+        {
+            return TypedResults.Conflict(new MessageResponse(ex.Message));
+        }
+    }
 }
 
 internal record UpdateTopicAssignmentTagsRequest(Guid? TopicStrandId);
 internal record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);
 
+/// <summary>Request body for switching a subject's explicit-enrolment requirement.</summary>
+internal record SetRequiresEnrollmentRequest(bool Value);
+
 /// <summary>Request body for moving one subject assignment to a position in its grade's list.</summary>
 internal record SetGradeTopicOrderRequest(int Order);
+
+/// <summary>Typed error payload for the routes in this file (the Settings.Api shape).</summary>
+internal sealed record MessageResponse(string Message);

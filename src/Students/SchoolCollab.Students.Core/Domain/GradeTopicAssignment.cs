@@ -32,6 +32,9 @@ public sealed class GradeTopicAssignment : TopicAssignment
     /// i.e. a parented strand) the grade uses for the topic.
     /// <paramref name="displayOrder"/> defaults to 0 so existing callers keep
     /// compiling; the create flows stamp the append-at-end position explicitly.
+    /// <para>A grade subject enrols by implication, so <see cref="TopicAssignment.RequiresEnrollment"/>
+    /// starts <c>false</c> (subject-enrollment-requirement-flag.md §2.2 / FR-ER-2) — in code,
+    /// never as a schema default.</para>
     /// </summary>
     public static GradeTopicAssignment Create(
         Guid gradeLevelId,
@@ -43,7 +46,7 @@ public sealed class GradeTopicAssignment : TopicAssignment
         int displayOrder = 0)
     {
         var assignment = new GradeTopicAssignment { GradeLevelId = gradeLevelId, DisplayOrder = displayOrder };
-        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId, periodId);
+        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId, periodId, requiresEnrollment: false);
         assignment.AddEvent(new GradeTopicAssignedEvent(
             assignment.Id, gradeLevelId, topicId, startDate, endDate));
         return assignment;

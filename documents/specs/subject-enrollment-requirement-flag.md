@@ -1,7 +1,11 @@
 # Spec: Subject Enrollment Requirement Flag
 
 > **Status:** Draft v1 — decisions locked by a design grilling session
-> (2026-09-26). **Nothing implemented.**
+> (2026-09-26). **Layer 1 (data + API) implemented** in round
+> `subject-enrollment-requirement` (2026-10-27): the flag column, the eligibility
+> endpoint, the publish filter, the switch command and the §6 union. The UI
+> surfaces (§8, including FR-ER-24's bands) and §7's rollover screen are not
+> built yet.
 > **Owner:** Students context (`SchoolCollab.Students.Core` / `.Api` / `.Application`)
 > **Cross-context impact:** `SchoolCollab.Assignments.Api`
 > (`StudentsContactResolver`) — recipient filtering, see §5.3. Compliant with
@@ -114,6 +118,14 @@ that no-ops when the value is unchanged and bumps `UpdatedAt` otherwise. That
 precedent is deliberate: the codebase already gates enrolment with exactly this
 shape, and `EnrollStudentHandler.cs:85` is the precedent for a consumer refusing.
 
+**The mirror is the flag mutation only.** The setter flips the boolean; it does
+not materialise enrolment rows. FR-ER-7/10's grandfather writes the flag update
+*and* one `StudentTopicAssignment` per current audience member in **one
+transaction** (one `SaveChanges` inside `IUnitOfWork<StudentsDbContext>.ExecuteAsync`),
+which is a multi-entity compound write the entity cannot own — a domain mutator
+that added rows through the repository would save per entity and could leave the
+flag set with students missing.
+
 ### 2.2 The TPH default problem
 
 `TopicAssignment` is table-per-hierarchy with discriminator `topic_assignment_type`
@@ -218,14 +230,22 @@ and one click from fixed.
 `StudentsContactResolver` lives in **`SchoolCollab.Assignments.Api`**, not in the
 Students context. It currently:
 
-1. `GET students/by-grade/{gradeLevelId}` → `StudentDto[]`
+1. starts from `ResolveSubscribersRequest.StudentIds` — the publish cohort the
+target resolver already produced. (The pre-`drop-primary-grade`
+`GET students/by-grade/{gradeLevelId}` whole-roster fallback is **gone**: publish
+resolves its students from the authored targets and refuses an empty set before
+this resolver is reached, so the by-grade path was dead.)
 2. per student: `GET students/{studentId}/guardians` → `StudentGuardianViewDto[]`
-3. `GET grade-levels/{gradeLevelId}/teachers` → `TeacherWithRoleDto[]`
-4. `GET …` subscribed contacts → `SubscribedContactDto[]`
+3. per distinct grade target: `GET grade-levels/{gradeLevelId}/teachers` →
+`TeacherWithRoleDto[]` (fail-open per grade)
+4. per owner: `GET contacts/subscribed?ownerType=…&ownerId=…&scope=…` →
+`SubscribedContactDto[]`
 5. flattens to `SubscriberInfo[]` (contacts, not students)
 
 **FR-ER-13** — the eligibility filter is a step inserted **after** step 1, over
-the `studentIds` list, in `StudentsContactResolver`.
+the `StudentIds` list, in `StudentsContactResolver` — before the guardian,
+teacher and subscribed-contact legs, so a filtered student contributes no owners
+at all. It runs only when `ResolveSubscribersRequest.TopicId` is present.
 
 **FR-ER-13a — no new port in `Assignments.Core`.** The filter is an
 implementation detail of the existing `IContactResolver` implementation.
@@ -237,22 +257,54 @@ registered in `Assignments.Api/Program.cs:115` and `:162`. A new
 with nothing to mock separately, so it is rejected.
 
 **FR-ER-13b — `ResolveSubscribersRequest` gains a `TopicId` field.** It is a
-record in `Assignments.Core`; adding the id the filter needs is a field
-addition, not a new port. Confirm whether it already exposes `TopicId` (it was
-not verifiable from the spec-writing pass) — the `Assignment` entity already
-stores `TopicId`, so the value is available at the call site.
+record in `Assignments.Core`. **`TopicId` was absent** — the record carried
+`TenantId`, `Scope`, `GradeLevelIds` and `StudentIds` only. It is added as a
+trailing optional member (`Guid? TopicId = null`) and threaded from
+`PublishAssignmentCommandHandler`, where `assignment.TopicId` is already in scope
+for the FR-58 gate. A field addition, not a new port. `null` means the publish
+has no subject: it is **not** subject-scoped, so the eligibility hop is skipped
+entirely and the recipient set is exactly what it was before this filter existed.
 
-**FR-ER-14** — a **new** Students API endpoint supplies the eligible ids, e.g.
-`GET /students/topic-enrollment?gradeLevelId={id}&topicId={id}&periodId={id}`
-returning `studentId[]`. It returns **all** students when the subject is `false`,
-so the caller does not need to know the flag. Registered in
-`TopicAssignmentRoutes` per `endpoint-organization-pattern.md`.
+**FR-ER-14** — a **new** Students API endpoint supplies the eligible ids:
+`GET /students/topic-enrollment?gradeLevelId={id}&topicId={id}`. It takes **no
+period parameter** — the academic year is resolved server-side from the active
+period (`IActivePeriodProvider.GetActiveAcademicYearAsync`), because FR-ER-3
+makes the period server-resolved and never caller-chosen.
+
+It returns **two** id arrays — `Audience` and `Eligible`:
+
+| Subject | `Audience` | `Eligible` |
+|---|---|---|
+| `false` | the grade's roster | the same array — membership is the enrolment, so nothing is excludable |
+| `true` | the grade's roster | the students holding a row for the active academic year |
+
+*Why two arrays and not one.* The publish filter must exclude exactly
+`Audience \ Eligible` per targeted grade while leaving students who arrived on a
+stream/student/all-students/activity-group leg untouched (decision 10,
+§5.3 below). `ResolveSubscribersRequest` carries one flat `StudentIds` and
+`ResolveStudentIdsAsync` returns `Guid[]` with no per-student grade, so a single
+eligible array cannot tell a grade member who is *not enrolled* from a student
+who was never in the grade — both would be absent, and a naive intersect would
+truncate every mixed cohort. Returning the audience alongside the eligible set
+makes the exclusion computable in **one** hop.
+
+Edge cases, pinned: the flag is read from the grade↔topic bridge row **effective
+today** (the `StartDate <= today && (EndDate ?? today) >= today` filter every
+existing reader applies). **No effective bridge row ⇒ both arrays empty** — an
+absent link means no subject to be enrolled in, and assuming `false` would
+over-send. **No active academic year ⇒ no error:** `Eligible` is empty (nothing
+can be enrolled without a year) while `Audience` stays the grade roster, so a
+`true` subject excludes the whole grade. Both arrays empty would be a different
+— and wrong — answer: the resolver would compute an empty exclusion set and
+over-send.
 
 **FR-ER-14a — the response carries `Guid[]` only.** No Students domain or DTO
-type crosses into `Assignments`. `StudentDto`, `StudentGuardianViewDto` and
-`SubscribedContactDto` are already consumed inside `StudentsContactResolver`
-(an `Assignments.Api` type) — this endpoint follows suit and returns primitives,
-so the hop does not widen the existing coupling surface.
+type crosses into `Assignments`; both arrays are plain ids. `StudentDto`,
+`StudentGuardianViewDto` and `SubscribedContactDto` are already consumed inside
+`StudentsContactResolver` (an `Assignments.Api` type) — this endpoint follows
+suit and returns primitives, so the hop does not widen the existing coupling
+surface. One small read DTO (`TopicEnrollmentDto(Audience, Eligible)`) is the
+deserialisation target on both sides of the wire; it carries no domain type.
 
 **FR-ER-15** — the filter must be **fail-open**: if the eligibility endpoint
 errors, publish proceeds unfiltered and the failure is logged. A transient error
@@ -329,9 +381,13 @@ subjectsForStudent(grade, student) =
 ```
 
 `StudentTopicAssignmentRepository.ListByStudentAsync(studentId, periodId)` already
-provides the second half; the first half comes from
-`ListGradeTopicsByGradeAsync`. The union is a new query — neither existing
-repository method produces it.
+provides the second half; the first half is the grade's bridge rows effective
+today joined to `Topics` (the `ListGradeTopicCurriculumByGradeHandler` shape).
+Neither the bridge repository (`IGradeTopicAssignmentRepository`, whose contract
+is bridge columns only) nor the client method `ListGradeTopicsByGradeAsync`
+(which returns `TopicAssignmentDto` — no topic name, and it cannot supply the
+per-student enrolled state) produces name + flag + enrolled state, so the union
+is a new query.
 
 **FR-ER-17** — the same union is the backing query for the student page's
 subject section (§8) and for the rollover screen's eligibility count (§7).
@@ -425,11 +481,11 @@ All in `SchoolCollab.Students.Api`, grouped per `endpoint-organization-pattern.m
 
 | Method | Route | Purpose |
 |---|---|---|
-| `GET` | `/students/topic-enrollment?gradeLevelId&topicId&periodId` | eligible student ids (FR-ER-14); returns the whole audience when the subject is `false` |
-| `GET` | `/students/students/{id}/subjects?gradeLevelId` | the union of §6 (FR-ER-16) |
+| `GET` | `/students/topic-enrollment?gradeLevelId&topicId` | eligible ids (FR-ER-14); `Audience` = grade roster, `Eligible` = the enrolled subset. **No `periodId`** — the year is server-resolved |
+| `GET` | `/students/{id}/subjects` | the union of §6 (FR-ER-16). **No `gradeLevelId`** — the grade is derived from the student's active enrolment; no active year/enrolment ⇒ `200` + `[]` |
 | `PUT` | `/students/topic-assignments/{id}/requires-enrollment` | set the flag; server-side grandfather (FR-ER-7) |
-| `POST` | `/students/topic-assignments/{id}/enroll-bulk` | "enrol the remaining N" (FR-ER-8) |
-| `POST` | `/students/topic-assignments/rollover` | grades × subjects carry-forward commit (FR-ER-22) |
+| `POST` | `/students/topic-assignments/{id}/enroll-bulk` | "enrol the remaining N" (FR-ER-8) — **not mapped yet** (deferred with the bulk action) |
+| `POST` | `/students/topic-assignments/rollover` | grades × subjects carry-forward commit (FR-ER-22) — **not mapped yet** (deferred with §7) |
 
 Existing `AssignStudentTopic` / `RemoveStudentTopic` are reused unchanged for
 per-student enrolment.

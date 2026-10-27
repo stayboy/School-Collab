@@ -32,6 +32,11 @@ public sealed class StudentsContactResolver(
         var client = httpClientFactory.CreateClient("students-api");
         var studentIds = (request.StudentIds ?? []).ToList();
 
+        // FR-ER-13/15: drop the cohort members who are in a targeted grade but not enrolled in
+        // the subject. Runs before the guardian/teacher/subscribed legs so a filtered student
+        // contributes no owners at all.
+        studentIds = await ExcludeUnenrolledAsync(client, request, studentIds, cancellationToken);
+
         var owners = new List<(ContactOwnerType OwnerType, Guid OwnerId, Guid? StudentId)>();
         foreach (var studentId in studentIds)
         {
@@ -107,5 +112,65 @@ public sealed class StudentsContactResolver(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// FR-ER-13/13a/13b/15 — the subject-enrolment filter over the resolved publish cohort.
+    /// <para><b>Rule 1:</b> no subject (<see cref="ResolveSubscribersRequest.TopicId"/> is null)
+    /// means the publish is not subject-scoped: no hop at all, cohort unchanged.</para>
+    /// <para><b>Rule 2:</b> with a subject, eligibility is resolved <b>per grade</b> in
+    /// <see cref="ResolveSubscribersRequest.GradeLevelIds"/>, one call each.</para>
+    /// <para><b>Rule 3:</b> a student is removed only when they are in a targeted grade's
+    /// <c>Audience</c> and absent from that grade's <c>Eligible</c> set — so a student who came
+    /// in on a stream/student/all-students/activity-group leg (absent from every audience) is
+    /// never touched. Enforcing on grades only is spec decision 10; over-filtering a mixed
+    /// cohort is the silent truncation decision 12 accepts.</para>
+    /// <para><b>Rule 4:</b> no grade scope means nothing to subtract — the cohort is unchanged.</para>
+    /// <para><b>Fail-open is per grade (FR-ER-15):</b> a failed call logs and contributes no
+    /// exclusions for that grade, while the other grades' answers still apply. A transient
+    /// error must never withhold work from a whole grade.</para>
+    /// </summary>
+    private async Task<List<Guid>> ExcludeUnenrolledAsync(
+        HttpClient client,
+        ResolveSubscribersRequest request,
+        List<Guid> studentIds,
+        CancellationToken cancellationToken)
+    {
+        if (request.TopicId is not { } topicId) return studentIds;
+
+        var gradeIds = (request.GradeLevelIds ?? []).Distinct().ToArray();
+        if (gradeIds.Length == 0) return studentIds;
+
+        var excluded = new HashSet<Guid>();
+        foreach (var gradeId in gradeIds)
+        {
+            TopicEnrollmentDto? enrollment;
+            try
+            {
+                // No period parameter: the academic year is resolved server-side (FR-ER-3).
+                enrollment = await client.GetFromJsonAsync<TopicEnrollmentDto>(
+                    $"students/topic-enrollment?gradeLevelId={gradeId}&topicId={topicId}",
+                    cancellationToken);
+            }
+            catch (HttpRequestException ex)
+            {
+                logger.LogWarning(ex,
+                    "Failed to resolve subject enrollment for grade {GradeId} / topic {TopicId}; the grade's recipients stay unfiltered",
+                    gradeId, topicId);
+                continue;
+            }
+
+            if (enrollment is null) continue;
+
+            var eligible = enrollment.Eligible.ToHashSet();
+            foreach (var studentId in enrollment.Audience)
+            {
+                if (!eligible.Contains(studentId)) excluded.Add(studentId);
+            }
+        }
+
+        return excluded.Count == 0
+            ? studentIds
+            : studentIds.Where(id => !excluded.Contains(id)).ToList();
     }
 }

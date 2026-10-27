@@ -1,10 +1,14 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Commands.AssignStudentTopic;
 using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Commands.RemoveStudentTopic;
+using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Queries.ListStudentSubjects;
 using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Queries.ListStudentTopicAssignmentsByPeriod;
 using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Queries.ListStudentTopicAssignmentsByStudent;
 using SchoolCollab.Students.Core.Domain.Exceptions;
+using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -12,6 +16,18 @@ public static class StudentTopicAssignmentRoutes
 {
     public static RouteGroupBuilder MapStudentTopicAssignmentRoutes(this RouteGroupBuilder group)
     {
+        // ── A student's subjects (subject-enrollment-requirement-flag.md §6 / FR-ER-16) ──
+        // The union: every false subject on the student's grade plus every true subject the
+        // student holds a row for in the active academic year. The grade is derived
+        // server-side from the student's active enrolment — a caller-supplied grade could
+        // disagree with the actual placement and silently return an empty or wrong union.
+        // No active academic year or no active enrolment ⇒ 200 with an empty array, never 404.
+        group.MapGet("/{studentId:guid}/subjects", async (
+            Guid studentId,
+            [FromServices] IQueryHandler<ListStudentSubjects, StudentSubjectEnrollmentDto[]> handler,
+            CancellationToken ct) =>
+            TypedResults.Ok(await handler.HandleAsync(new ListStudentSubjects(studentId), ct)));
+
         // ── Student Topic Assignments ───────────────────────────────────────────
 
         group.MapGet("/student-topics/by-student/{studentId:guid}/period/{periodId:guid}", async (
