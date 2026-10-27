@@ -12,7 +12,10 @@ namespace SchoolCollab.Students.Core.DTOs;
 /// (enrol/disenrol/enrol-remaining) without a second read.</para>
 /// <para><see cref="IsEnrolled"/> is implied <c>true</c> for a <c>false</c> subject (FR-ER-1:
 /// audience membership is the enrolment), and row-backed for a <c>true</c> subject
-/// (FR-ER-3: a <c>StudentTopicAssignment</c> for the active academic year).</para>
+/// (FR-ER-3: a <c>StudentTopicAssignment</c> for the active academic year). A <c>true</c>
+/// subject with no row is returned with <c>false</c> — that row is what the student page's
+/// "Needs explicit enrolment" band draws, struck through, so the gap is visible rather
+/// than absent.</para>
 /// </summary>
 public sealed record StudentSubjectEnrollmentDto(
     Guid TopicId,

@@ -2,12 +2,18 @@
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
+using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Application.Components.Students;
+using SchoolCollab.Students.Application.Services;
+using System.Net;
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 using GradeTopicCurriculumDto = SchoolCollab.Students.Application.Services.GradeTopicCurriculumDto;
 using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto;
@@ -34,17 +40,85 @@ public class GradeTopicsDialogGridTests : BunitContext
     private static readonly Guid EngTopicId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid MathAssignmentId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
     private static readonly Guid EngAssignmentId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000002");
+    private static readonly Guid GradeLevelId = Guid.Parse("bbbbbbbb-0000-0000-0000-00000000000b");
 
     public GradeTopicsDialogGridTests()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
+        // The dialog injects a logger for FriendlyError.Describe and the students client for the
+        // enrolment switch's pre-write audience count.
+        Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        RegisterStudentsApi(new ScriptedHandler());
+    }
+
+    /// <summary>A scripted students API: exact (method, url) answers, and every unmapped route 404s.</summary>
+    private sealed class ScriptedHandler : HttpMessageHandler
+    {
+        public readonly List<(string Method, string Url, string? Body)> Calls = new();
+        private readonly Dictionary<(string Method, string Url), (HttpStatusCode Status, string Body)> _responses = new();
+
+        public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
+        {
+            _responses[(method.ToUpperInvariant(), url)] = (status, body);
+            return this;
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var url = request.RequestUri!.PathAndQuery;
+            var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            Calls.Add((request.Method.Method.ToUpperInvariant(), url, body));
+
+            if (_responses.TryGetValue((request.Method.Method.ToUpperInvariant(), url), out var hit))
+            {
+                return new HttpResponseMessage(hit.Status)
+                {
+                    Content = new StringContent(hit.Body, Encoding.UTF8, "application/json"),
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent(
+                    $"Unexpected {request.Method.Method} {url}", Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
+    private void RegisterStudentsApi(ScriptedHandler handler)
+    {
+        var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
+        var codedValues = new CodedValuesApiClient(http);
+        Services.AddSingleton(codedValues);
+        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValues));
+    }
+
+    /// <summary>The audience answer for one topic: <paramref name="audienceSize"/> students, none of them
+    /// enrolled yet — the state a subject is in before a <c>false → true</c> flip.</summary>
+    private static string AudienceJson(int audienceSize) =>
+        $"{{\"audience\":[{string.Join(',', Enumerable.Range(0, audienceSize).Select(_ => $"\"{Guid.NewGuid():D}\""))}],\"eligible\":[]}}";
+
+    /// <summary>Scripts <c>GET /students/topic-enrollment</c> for both fixture subjects.</summary>
+    private static ScriptedHandler EnrolmentApi(int audienceSize)
+    {
+        var handler = new ScriptedHandler();
+        foreach (var topicId in new[] { MathTopicId, EngTopicId })
+        {
+            handler.Map("GET",
+                $"/students/topic-enrollment?gradeLevelId={GradeLevelId:D}&topicId={topicId:D}",
+                HttpStatusCode.OK, AudienceJson(audienceSize));
+        }
+        return handler;
     }
 
     private static GradeTopicCurriculumDto[] TwoSubjects() =>
     [
-        new(MathAssignmentId, MathTopicId, "Mathematics", "MATH", 2, 3),
-        new(EngAssignmentId, EngTopicId, "English", "ENG", 1, 0),
+        // Mathematics is implied (false) and English needs an explicit enrolment (true) — the two
+        // states the switch's kebab label reads its wording from (subject-enrollment round B).
+        new(MathAssignmentId, MathTopicId, "Mathematics", "MATH", 2, 3, RequiresEnrollment: false),
+        new(EngAssignmentId, EngTopicId, "English", "ENG", 1, 0, RequiresEnrollment: true),
     ];
 
     /// <summary>The dialog's inputs, as a bUnit parameter-seeding action. FluentUI 5.x
@@ -55,7 +129,9 @@ public class GradeTopicsDialogGridTests : BunitContext
         Func<GradeTopicCurriculumDto, Task>? moveUp = null,
         Func<GradeTopicCurriculumDto, Task>? moveDown = null,
         Func<GradeTopicCurriculumDto, Task>? edit = null,
-        Func<Guid, Task>? remove = null) => parameters =>
+        Func<Guid, Task>? remove = null,
+        Guid? gradeLevelId = null,
+        Func<GradeTopicCurriculumDto, bool, Task>? setRequiresEnrollment = null) => parameters =>
     {
         parameters.Add(p => p.Topics, TwoSubjects());
         parameters.Add(p => p.UnassignedTopics, Array.Empty<TopicDto>());
@@ -64,6 +140,9 @@ public class GradeTopicsDialogGridTests : BunitContext
         if (moveDown is not null) parameters.Add(p => p.MoveDown, moveDown);
         if (edit is not null) parameters.Add(p => p.Edit, edit);
         if (remove is not null) parameters.Add(p => p.Remove, remove);
+        if (gradeLevelId is { } grade) parameters.Add(p => p.GradeLevelId, grade);
+        if (setRequiresEnrollment is not null)
+            parameters.Add(p => p.SetRequiresEnrollment, setRequiresEnrollment);
     };
 
     private IRenderedComponent<GradeTopicsDialog> RenderDialog(
@@ -374,5 +453,161 @@ public class GradeTopicsDialogGridTests : BunitContext
             "the shell provides the grid's one scroll region").Subject;
         scroll.QuerySelector(".fluent-data-grid").Should().NotBeNull(
             "the grid lives inside the shell's region — the shell owns the scrolling, not the grid");
+    }
+
+    // ── The explicit-enrolment switch (subject-enrollment-requirement-flag.md round B) ──
+    //
+    // One kebab action per row whose LABEL states the state it will produce (owner Q39/Q44: the switch
+    // belongs to the bridge row, not the shared Topic), whose CONFIRM names the grandfather consequence
+    // before the write (FR-ER-8/10), and which reflects the new state without reopening anything.
+
+    [TestMethod]
+    public void KebabOnAnImpliedSubject_NamesTheActionItWillPerform_AndNeverSaysToggle()
+    {
+        var cut = RenderDialog(Content(
+            gradeLevelId: GradeLevelId,
+            setRequiresEnrollment: (_, _) => Task.CompletedTask));
+
+        var labels = KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).ToArray();
+
+        labels.Should().Contain("Require explicit enrolment",
+            "row 0 is implied (RequiresEnrollment = false), so the action that will RUN is 'require'");
+        labels.Should().NotContain("Stop requiring explicit enrolment",
+            "the label states what the click DOES, so it cannot offer both directions at once");
+        labels.Should().NotContain(l => l.Contains("Toggle", StringComparison.OrdinalIgnoreCase),
+            "a bare 'Toggle' makes the admin guess which way it goes (round doc P4)");
+    }
+
+    [TestMethod]
+    public void KebabOnARequiredSubject_NamesTheStopAction_SoTheRowStateIsReadableFromTheMenu()
+    {
+        var cut = RenderDialog(Content(
+            gradeLevelId: GradeLevelId,
+            setRequiresEnrollment: (_, _) => Task.CompletedTask));
+
+        KebabItems(OpenKebab(cut, row: 1)).Select(LabelOf).Should().Contain(
+            "Stop requiring explicit enrolment",
+            "row 1 is explicit (RequiresEnrollment = true), so the action that will run is 'stop requiring'");
+    }
+
+    [TestMethod]
+    public void KebabSwitch_ConfirmsTheGrandfatherConsequence_ThenInvokesThePageWithTheBridgeId()
+    {
+        RegisterStudentsApi(EnrolmentApi(audienceSize: 3));
+        var confirm = RegisterConfirmation(confirmed: true);
+        GradeTopicCurriculumDto? written = null;
+        bool? writtenValue = null;
+        var cut = RenderDialog(Content(
+            gradeLevelId: GradeLevelId,
+            setRequiresEnrollment: (topic, value) =>
+            {
+                written = topic;
+                writtenValue = value;
+                return Task.CompletedTask;
+            }));
+
+        KebabItem(cut, row: 0, "Require explicit enrolment").MenuItemClick();
+
+        confirm.Verify(d => d.ShowDialogAsync(
+                typeof(ConfirmDialog),
+                It.Is<DialogOptions>(o =>
+                    ConfirmContent(o).Message.Contains("all 3 students in this grade now")
+                    && ConfirmContent(o).Message.Contains("nobody loses the subject")
+                    && ConfirmContent(o).PrimaryText == "Require explicit enrolment")),
+            Times.Once,
+            "the confirm must name the grandfather consequence with the PRE-WRITE count, before anything is written");
+
+        written.Should().NotBeNull("the write happens only after the confirmation");
+        written!.AssignmentId.Should().Be(MathAssignmentId,
+            "the endpoint targets the bridge ASSIGNMENT — one topic may be assigned to several grades");
+        writtenValue.Should().BeTrue("the direction is the one the label promised");
+    }
+
+    [TestMethod]
+    public async Task KebabSwitch_WhenTheConfirmIsCancelled_WritesNothing()
+    {
+        RegisterStudentsApi(EnrolmentApi(audienceSize: 3));
+        RegisterConfirmation(confirmed: false);
+        var writes = 0;
+        var cut = RenderDialog(Content(
+            gradeLevelId: GradeLevelId,
+            setRequiresEnrollment: (_, _) => { writes++; return Task.CompletedTask; }));
+
+        KebabItem(cut, row: 0, "Require explicit enrolment").MenuItemClick();
+        await Task.Yield();
+
+        writes.Should().Be(0, "a cancelled confirmation must not write");
+        KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).Should().Contain(
+            "Require explicit enrolment", "the row is still implied, so the action is still 'require'");
+    }
+
+    [TestMethod]
+    public async Task KebabSwitch_AfterSuccess_TheRowStatesTheNewState_WithoutAReopen()
+    {
+        RegisterStudentsApi(EnrolmentApi(audienceSize: 2));
+        RegisterConfirmation(confirmed: true);
+        var writes = 0;
+        var cut = RenderDialog(Content(
+            gradeLevelId: GradeLevelId,
+            setRequiresEnrollment: (_, _) => { writes++; return Task.CompletedTask; }));
+
+        KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).Should().Contain("Require explicit enrolment");
+        KebabItem(cut, row: 0, "Require explicit enrolment").MenuItemClick();
+
+        cut.WaitForAssertion(() =>
+        {
+            writes.Should().Be(1, "one click, one write");
+            KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).Should().Contain(
+                "Stop requiring explicit enrolment",
+                "the row reflects the state the write produced — the dialog does not need a reload");
+        });
+    }
+
+    [TestMethod]
+    public void TheGradePage_WiresTheSwitchAndTheGradeId_AndPutsAgainstTheBridgeAssignment()
+    {
+        var source = ReadSource(
+            "Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor");
+
+        source.Should().Contain("{ GradeTopicsDialog.GradeLevelIdKey, Id }",
+            "the dialog needs the grade to read the pre-write audience count for its confirm");
+        source.Should().Contain("GradeTopicsDialog.SetRequiresEnrollmentKey",
+            "the switch's write is the page's, like every other row action here");
+
+        const string signature = "private async Task SetTopicRequiresEnrollmentAsync(";
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0, "the page owns the switch's write");
+        var body = source[start..source.IndexOf("\n    }", start, StringComparison.Ordinal)];
+
+        body.Should().Contain("Api.SetRequiresEnrollmentAsync(topic.AssignmentId, value)",
+            "the PUT targets the row's BRIDGE assignment id — one topic may be assigned to several "
+            + "grades with different flags (owner Q39/Q44)");
+        body.Should().NotContain("catch",
+            "a thin pass-through: the dialog is where the user is, so the failure must reach it and be "
+            + "rendered as the seam's plain sentence");
+    }
+
+    [TestMethod]
+    public void KebabSwitch_WhenTheWriteFails_LeavesTheRowAndShowsAPlainSentence()
+    {
+        RegisterStudentsApi(EnrolmentApi(audienceSize: 2));
+        RegisterConfirmation(confirmed: true);
+        var cut = RenderDialog(Content(
+            gradeLevelId: GradeLevelId,
+            setRequiresEnrollment: (_, _) =>
+                throw new HttpRequestException("Response status code 500 (InternalServerError): boom")));
+
+        KebabItem(cut, row: 0, "Require explicit enrolment").MenuItemClick();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("The enrolment setting for 'Mathematics' could not be changed. Try again.",
+                "a failure is the site's plain sentence (FriendlyError.Describe), not provider text");
+            cut.Markup.Should().NotContain("InternalServerError",
+                "the status code and the exception's own message never reach the message bar");
+            cut.Markup.Should().NotContain("boom");
+            KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).Should().Contain(
+                "Require explicit enrolment", "a failed write leaves the row exactly as it was");
+        });
     }
 }

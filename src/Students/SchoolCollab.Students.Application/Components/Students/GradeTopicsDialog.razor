@@ -25,11 +25,29 @@
    destructive: true with a confirmMessage so the SHARED RowActionsMenu enforces
    the prompt — this dialog holds no confirmation logic of its own
    (.github/copilot/rules/blazor-components.md §"Destructive actions require a
-   confirmation prompt"). MANUAL REORDER is the Order column — the row's FIRST
+   confirmation prompt"). The kebab ALSO carries the explicit-enrolment switch
+   (subject-enrollment-requirement-flag.md round B, owner Q39/Q44): it belongs to
+   the bridge ROW, because one topic can be assigned to several grades with
+   different flags, so the topic edit dialog is the wrong home for it. Its label
+   states the state it will produce (never a bare "Toggle") and its confirm names
+   the grandfather consequence before the write — a false → true flip enrols the
+   whole current roster server-side (FR-ER-7/10), so the admin is told that nobody
+   loses the subject rather than finding out afterwards.
+
+   WHY THIS DIALOG READS THE AUDIENCE ITSELF while every WRITE is the page's
+   callback: RowActionsMenu shows the confirmation it was HANDED, and the action
+   list is built during render — so the count must be known before the click, not
+   fetched between the click and the prompt. The switch's write stays the page's,
+   like every other action here.
+
+   MANUAL REORDER is the Order column — the row's FIRST
    column, icon-only (move-up/move-down buttons, no position text; the repo's
    reorder affordance — there is no drag-and-drop) — which invokes the page's
    MoveUp/MoveDown callbacks with the row, then swaps the two neighbours locally
    so the grid reflects the move at once. *@
+@inject StudentsApiClient Api
+@inject ILogger<GradeTopicsDialog> Logger
+
 <DialogShellBody>
 <ReadOnlyDialogShell Class="topic-dialog">
     @* The picker and the move error are FIXED above the scroll region, so assigning
@@ -52,6 +70,9 @@
         {
             <FluentMessageBar Intent="MessageBarIntent.Error">@moveError</FluentMessageBar>
         }
+
+        @* The switch's own failure — a plain sentence from the seam, never the exception's text. *@
+        <FriendlyErrorBar Message="@_switchError" />
     </Toolbar>
 
     <ChildContent>
@@ -146,6 +167,15 @@
     public const string MoveUpKey = nameof(MoveUp);
     public const string MoveDownKey = nameof(MoveDown);
 
+    /// <summary>The grade whose subject list this is, from its host page. The enrolment
+    /// switch needs it to ask <c>GET /students/topic-enrollment</c> how many students a
+    /// <c>false → true</c> flip would grandfather (FR-ER-8).</summary>
+    public const string GradeLevelIdKey = nameof(GradeLevelId);
+
+    /// <summary>Receives the enrolment switch's write: (row, newValue). The PAGE performs it —
+    /// one callback per action, like every other write here.</summary>
+    public const string SetRequiresEnrollmentKey = nameof(SetRequiresEnrollment);
+
     /// <summary>Receives the callback that OPENS the EnrollmentExceptionsDialog for a
     /// topic id, scoped to this dialog's grade owner. Provided by the page (which owns
     /// the dialog service), like the other callbacks here.</summary>
@@ -174,6 +204,19 @@
     [Parameter] public Func<GradeTopicCurriculumDto, Task>? Edit { get; set; }
     [Parameter] public Func<GradeTopicCurriculumDto, Task>? MoveUp { get; set; }
     [Parameter] public Func<GradeTopicCurriculumDto, Task>? MoveDown { get; set; }
+
+    /// <summary>The grade whose subjects these are. Supplied by the host page so the enrolment
+    /// switch can read the subject's audience size for its confirm. Absent (empty) only in a unit
+    /// test that does not exercise the switch — the switch's confirm then states the consequence
+    /// without a number rather than failing.</summary>
+    [Parameter] public Guid GradeLevelId { get; set; }
+
+    /// <summary>Performs the explicit-enrolment switch: <c>(row, newValue)</c>. The page writes it
+    /// (the row's bridge <c>AssignmentId</c> identifies the grade's entry). A THROWN exception means
+    /// the write failed and is what this dialog turns into the user's plain sentence — the callback
+    /// must not swallow it, or the failure would have no surface (unlike <see cref="Assign"/>, which
+    /// has to return an id either way).</summary>
+    [Parameter] public Func<GradeTopicCurriculumDto, bool, Task>? SetRequiresEnrollment { get; set; }
     [Parameter] public Func<Guid, Task>? Remove { get; set; }
 
     /// <summary>Assigns the picked topic and RETURNS the created bridge assignment id,
@@ -195,6 +238,43 @@
     private TopicDto? _topicToAdd;
     private bool _adding;
     private string? _moveError;
+    private string? _switchError;
+
+    /// <summary>Topic id → how many students the subject's grade holds today (the enrolment
+    /// audience). Read once when the dialog opens, so the switch's confirm can name the number
+    /// it would grandfather — see the file's comment on why this is not a page callback.</summary>
+    private readonly Dictionary<Guid, int> _audienceSizeByTopic = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (GradeLevelId == Guid.Empty) return;
+
+        var readings = await Task.WhenAll(_topics.Select(async topic =>
+            (topic.TopicId, Audience: await ReadAudienceSizeAsync(topic.TopicId))));
+
+        foreach (var (topicId, audience) in readings)
+        {
+            if (audience is { } size) _audienceSizeByTopic[topicId] = size;
+        }
+    }
+
+    /// <summary>The subject's audience size, or null when the read failed. A count is not worth
+    /// failing a dialog open over: the confirm then states the consequence without a number.</summary>
+    private async Task<int?> ReadAudienceSizeAsync(Guid topicId)
+    {
+        try
+        {
+            var enrollment = await Api.GetTopicEnrollmentAsync(GradeLevelId, topicId);
+            return enrollment?.Audience.Length;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex,
+                "Could not read the enrolment audience for topic {TopicId} in grade {GradeLevelId}",
+                topicId, GradeLevelId);
+            return null;
+        }
+    }
 
     /// <summary>The row's 0-based position in the grid's own list — the order the
     /// curriculum read returned, i.e. the bridge <c>DisplayOrder</c>.</summary>
@@ -240,6 +320,23 @@
             actions.Add(RowAction.Callback("Enrollment exceptions", () => openExceptions(topic.TopicId), FluentIcons.Calendar));
         }
 
+        // The explicit-enrolment switch (round B, owner Q39/Q44). The LABEL states what the click
+        // will DO — "Require…" when it is off, "Stop requiring…" when it is on — so the row's
+        // current state is readable from the menu and no bare "Toggle" is offered.
+        // `destructive: true` is the shared menu's ONLY confirmation switch; the write is not
+        // destructive (a false → true flip grandfathers instead of removing), but it changes who
+        // receives the subject, so it must be confirmed — see the round doc P4.
+        if (SetRequiresEnrollment is not null)
+        {
+            actions.Add(RowAction.Callback(
+                topic.RequiresEnrollment ? "Stop requiring explicit enrolment" : "Require explicit enrolment",
+                () => SwitchRequiresEnrollmentAsync(topic),
+                topic.RequiresEnrollment ? FluentIcons.People : FluentIcons.PersonAdd,
+                disabled: _adding,
+                destructive: true,
+                confirmMessage: RequiresEnrollmentConfirmation(topic)));
+        }
+
         actions.Add(RowAction.Separator());
         actions.Add(RowAction.Callback(
             "Remove",
@@ -253,6 +350,67 @@
 
     private static string RemoveConfirmation(GradeTopicCurriculumDto topic) =>
         $"Remove subject '{topic.Name}' from this grade? The subject stays in the catalog; only this grade's assignment is removed.";
+
+    /// <summary>
+    /// The switch's confirm, naming the GRANDFATHER consequence before the write (FR-ER-8/10):
+    /// flipping to <c>true</c> enrols every current grade member, so nobody loses the subject;
+    /// flipping back to <c>false</c> keeps the rows as history and enrols the grade by implication
+    /// (FR-ER-9). The audience number is the pre-write count read when the dialog opened; without it
+    /// (a failed read) the sentence states the same consequence without a number.
+    /// </summary>
+    private string RequiresEnrollmentConfirmation(GradeTopicCurriculumDto topic) =>
+        topic.RequiresEnrollment
+            ? $"Stop requiring explicit enrolment for '{topic.Name}'? Every student in this grade gets the "
+              + "subject again. The enrolment records already made are kept as history, so nothing is lost."
+            : $"Require explicit enrolment for '{topic.Name}'? {GrandfatherSentence(topic)} Then only the "
+              + "students you enrol will get it.";
+
+    private string GrandfatherSentence(GradeTopicCurriculumDto topic) =>
+        _audienceSizeByTopic.TryGetValue(topic.TopicId, out var size)
+            ? $"This enrols all {size} student{(size == 1 ? string.Empty : "s")} in this grade now, so nobody "
+              + "loses the subject."
+            : "This enrols every student in this grade now, so nobody loses the subject.";
+
+    /// <summary>
+    /// Flips the row's flag through the page's callback, then reflects the change in the dialog's own
+    /// list so the row reads its new state without reopening anything. A failure leaves the row
+    /// untouched and renders the site's plain sentence — the exception itself is logged, never shown.
+    /// </summary>
+    private async Task SwitchRequiresEnrollmentAsync(GradeTopicCurriculumDto topic)
+    {
+        if (_adding || SetRequiresEnrollment is null) return;
+
+        var next = !topic.RequiresEnrollment;
+        _adding = true;
+        _switchError = null;
+        try
+        {
+            await SetRequiresEnrollment(topic, next);
+
+            Topics = Topics
+                .Select(t => t.AssignmentId == topic.AssignmentId ? t with { RequiresEnrollment = next } : t)
+                .ToArray();
+            // The kebab is a CHILD component, so its click re-renders RowActionsMenu only — without
+            // this the row would keep offering the action it has just performed
+            // (section-card.md §"Reload after child-triggered mutations").
+            StateHasChanged();
+            if (OnChanged is not null) await OnChanged();
+        }
+        catch (Exception ex)
+        {
+            _switchError = FriendlyError.Describe(
+                ex,
+                $"The enrolment setting for '{topic.Name}' could not be changed. Try again.",
+                Logger);
+            // The click came from the kebab (a CHILD component), so nothing re-renders this dialog on
+            // failure — without this the sentence would be set and never shown.
+            StateHasChanged();
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
 
     /// <summary>
     /// How many exceptions the subject carries — zero renders no badge, because the
@@ -334,7 +492,10 @@
             // Reflect the assignment in the dialog's own lists so the topic moves
             // from the picker into the assigned list without reopening the dialog.
             Topics = Topics.Append(new GradeTopicCurriculumDto(
-                assignmentId, topic.Id, topic.Name, topic.Code, 0, 0)).ToArray();
+                assignmentId, topic.Id, topic.Name, topic.Code, 0, 0,
+                // A grade assignment is created with the flag OFF (FR-ER-2: implied enrolment is
+                // the default, so the appended row claims the state the server just created).
+                RequiresEnrollment: false)).ToArray();
             UnassignedTopics = UnassignedTopics.Where(t => t.Id != topic.Id).ToArray();
             _topicToAdd = null;
             if (OnChanged is not null) await OnChanged();

@@ -17,8 +17,10 @@ public static class StudentTopicAssignmentRoutes
     public static RouteGroupBuilder MapStudentTopicAssignmentRoutes(this RouteGroupBuilder group)
     {
         // ── A student's subjects (subject-enrollment-requirement-flag.md §6 / FR-ER-16) ──
-        // The union: every false subject on the student's grade plus every true subject the
-        // student holds a row for in the active academic year. The grade is derived
+        // The union: every subject on the student's grade, with IsEnrolled telling the caller
+        // whether the student holds an enrolment row for it (a false subject is enrolled by
+        // implication). An un-enrolled TRUE subject is returned with IsEnrolled = false: the
+        // student page draws it as the actionable "not chosen" chip. The grade is derived
         // server-side from the student's active enrolment — a caller-supplied grade could
         // disagree with the actual placement and silently return an empty or wrong union.
         // No active academic year or no active enrolment ⇒ 200 with an empty array, never 404.

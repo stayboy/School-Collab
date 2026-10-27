@@ -173,7 +173,8 @@ public sealed record TopicAssignmentDto(
     Guid? TopicStrandId,
     Guid? PeriodId,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    bool RequiresEnrollment);
 
 public sealed record GradeTopicCurriculumDto(
     Guid AssignmentId,
@@ -181,7 +182,8 @@ public sealed record GradeTopicCurriculumDto(
     string Name,
     string? Code,
     int StrandCount,
-    int LessonCount);
+    int LessonCount,
+    bool RequiresEnrollment);
 
 public sealed record StudentTopicAssignmentDto(
     Guid Id,
@@ -427,6 +429,10 @@ public record AssignActivityGroupTopicRequest(
     Guid? PeriodId = null);
 
 public record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);
+
+/// <summary>Body of <c>PUT /students/topic-assignments/{id}/requires-enrollment</c> — the subject's
+/// explicit-enrolment flag (mirrors the API's own request record).</summary>
+public sealed record SetRequiresEnrollmentRequest(bool Value);
 
 /// <summary>Body of the two per-grade list reorder endpoints (streams and subjects).</summary>
 public sealed record SetOrderRequest(int Order);
@@ -1754,6 +1760,36 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task UpdateTopicAssignmentPeriodAsync(Guid id, Guid? periodId, CancellationToken ct = default) =>
         (await _http.PutAsJsonAsync($"/students/topic-assignments/{id}/period",
             new UpdateTopicAssignmentPeriodRequest(periodId), ct)).EnsureSuccessStatusCode();
+
+    /// <summary>
+    /// One (grade, subject) pair's enrolment answer — <c>GET /students/topic-enrollment</c>
+    /// (subject-enrollment-requirement-flag.md FR-ER-14). <see cref="TopicEnrollmentDto.Audience"/>
+    /// is the grade's roster and <see cref="TopicEnrollmentDto.Eligible"/> its enrolled subset, so
+    /// the switch surface can state how many students a flip would grandfather BEFORE writing.
+    /// No period argument: the academic year is resolved server-side.
+    /// </summary>
+    public async Task<TopicEnrollmentDto?> GetTopicEnrollmentAsync(
+        Guid gradeLevelId, Guid topicId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TopicEnrollmentDto>(
+            $"/students/topic-enrollment?gradeLevelId={gradeLevelId:D}&topicId={topicId:D}", ct);
+
+    /// <summary>
+    /// Switches a subject between implied enrolment (<c>false</c>) and explicit per-student
+    /// enrolment (<c>true</c>) — <c>PUT /students/topic-assignments/{id}/requires-enrollment</c>
+    /// (FR-ER-7/9). The route targets the bridge ASSIGNMENT (one topic may be assigned to several
+    /// grades with different flags). A <c>false → true</c> flip grandfathers the current grade roster
+    /// server-side in one transaction (FR-ER-10); the response carries the FR-ER-8 counts.
+    /// </summary>
+    public async Task<TopicEnrollmentCountsDto> SetRequiresEnrollmentAsync(
+        Guid assignmentId, bool value, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync(
+            $"/students/topic-assignments/{assignmentId:D}/requires-enrollment",
+            new SetRequiresEnrollmentRequest(value), ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<TopicEnrollmentCountsDto>(ct);
+        return result!;
+    }
 
     // ── Subject enrollment exceptions ─────────────────────────────────────────
     // subject-period-exception-model.md v3 §6: the bridge row means the subject is

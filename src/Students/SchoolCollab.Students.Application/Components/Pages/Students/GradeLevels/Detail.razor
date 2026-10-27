@@ -373,7 +373,10 @@
             _catalog.TryGetValue(topicId, out var topic) ? topic.Name : "Subject",
             _catalog.TryGetValue(topicId, out var withCode) ? withCode.Code : null,
             0,
-            0);
+            0,
+            // Title-only fallback: a subject the curriculum read has not returned this row for
+            // is not the one the enrolment switch would act on, so it claims no explicit flag.
+            RequiresEnrollment: false);
 
     private TopicDto[] _unassignedTopics =>
         _catalog.Values
@@ -860,6 +863,21 @@
 
     private Task MoveTopicDownAsync(GradeTopicCurriculumDto topic) => MoveTopicAsync(topic, +1);
 
+    /// <summary>
+    /// The Subjects dialog's explicit-enrolment switch: PUT the new flag against the row's bridge
+    /// ASSIGNMENT (the topic may be assigned to several grades with different flags, so the bridge
+    /// row — not the topic — is what the endpoint targets).
+    /// <para>Deliberately a THIN pass-through with no catch: the failure must reach the dialog, which
+    /// is where the user is, and the dialog renders the seam's plain sentence. Swallowing it here
+    /// (the <see cref="AssignTopicAsync"/> shape, which has to return an id either way) would leave
+    /// the switch with no way to tell the admin it did not happen.</para>
+    /// </summary>
+    private async Task SetTopicRequiresEnrollmentAsync(GradeTopicCurriculumDto topic, bool value)
+    {
+        if (_disposed) return;
+        await Api.SetRequiresEnrollmentAsync(topic.AssignmentId, value);
+    }
+
     private async Task MoveTopicAsync(GradeTopicCurriculumDto topic, int delta)
     {
         if (_disposed) return;
@@ -878,6 +896,7 @@
             new Dictionary<string, object?>
             {
                 { GradeTopicsDialog.TopicsKey, _curriculum ?? [] },
+                { GradeTopicsDialog.GradeLevelIdKey, Id },
                 { GradeTopicsDialog.UnassignedTopicsKey, _unassignedTopics },
                 { GradeTopicsDialog.OpenStrandsKey, new Func<GradeTopicCurriculumDto, Task>(OpenStrandsAsync) },
                 { GradeTopicsDialog.RemoveKey, new Func<Guid, Task>(RemoveTopicAsync) },
@@ -887,6 +906,8 @@
                 { GradeTopicsDialog.EditKey, new Func<GradeTopicCurriculumDto, Task>(OpenTopicEditAsync) },
                 { GradeTopicsDialog.MoveUpKey, new Func<GradeTopicCurriculumDto, Task>(MoveTopicUpAsync) },
                 { GradeTopicsDialog.MoveDownKey, new Func<GradeTopicCurriculumDto, Task>(MoveTopicDownAsync) },
+                { GradeTopicsDialog.SetRequiresEnrollmentKey,
+                    new Func<GradeTopicCurriculumDto, bool, Task>(SetTopicRequiresEnrollmentAsync) },
                 // Per-topic exception COUNTS, not lists: the dialog renders a count
                 // badge only, and a count map cannot collide on a repeated topic key.
                 { GradeTopicsDialog.ExceptionCountsByTopicKey, _exceptions
