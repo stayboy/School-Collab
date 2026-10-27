@@ -222,6 +222,27 @@ public class TeacherDetailPageBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Teacher not found."));
     }
 
+    /// <summary>
+    /// A failed load shows the page's own plain sentence — and never the exception's text (#416). The
+    /// sentence comes from <c>FriendlyError.Describe</c>, which logs the detail instead of rendering it.
+    /// </summary>
+    [TestMethod]
+    public void Detail_LoadFailure_ShowsAPlainSentence_AndNeverTheExceptionText()
+    {
+        var teacherId = Guid.NewGuid();
+        Register(teacherId, teacherStatus: "InternalServerError");
+
+        var cut = Render<TeacherDetail>(p => p.Add(x => x.Id, teacherId));
+
+        cut.WaitForAssertion(() => cut.Markup.Should()
+            .Contain("This teacher could not be loaded. Try again, or go back to the teacher list.",
+                "a failed load states the failure in the page's own words"));
+
+        cut.Markup.Should().NotContain("Response status code",
+            "the exception's own text belongs in the log, never on screen (#416)");
+        cut.Markup.Should().NotContain("Internal Server Error");
+    }
+
     [TestMethod]
     public void Detail_NoSubjectsAndNoGradeLevels_ShowsEmptyState()
     {

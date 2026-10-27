@@ -179,9 +179,11 @@ public class ActivityGroupsPageTests : BunitContext
 
     /// <summary>
     /// AC-1a/1b: when the list API fails (404 here), the page shows the red
-    /// error message (via LandingPage Error), the empty-state bar reads "Could
-    /// not load activity groups.", and the loading spinner stops (no
-    /// fluent-spinner) instead of spinning forever.
+    /// error message (via LandingPage Error) carrying the page's own plain
+    /// sentence, and the loading spinner stops (no fluent-spinner) instead of
+    /// spinning forever. The empty-state bar no longer speaks for a failed load:
+    /// it would claim the tenant has no activity groups about a list that was
+    /// never read.
     /// </summary>
     [TestMethod]
     public void ListPage_ApiFailure_ShowsErrorAndStopsSpinner()
@@ -194,8 +196,13 @@ public class ActivityGroupsPageTests : BunitContext
         var cut = Render<ActivityGroups>();
         cut.WaitForState(() => cut.Markup.Contains("Could not load activity groups"), TimeSpan.FromSeconds(2));
 
-        cut.Markup.Should().Contain("Could not load activity groups.", "AC-1b: empty state reads as a failure, not an empty list");
-        cut.Markup.Should().Contain("404", "AC-1a: the rendered error text includes the failure (HttpRequestException message)");
+        cut.Markup.Should().Contain("Could not load activity groups.", "the error bar carries the page's own plain sentence");
+        cut.Markup.Should().NotContain("No activity groups yet.",
+            "an empty list paired with a failed load must not claim the tenant has no activity groups");
+        cut.Markup.Should().NotContain("404",
+            "AC-1a inverted (debt-sweep round): PR #194 pinned the raw HTTP message as user-facing "
+            + "copy; the friendly-error seam (FriendlyError.Describe) replaces it with the page's own "
+            + "sentence and logs the detail instead. This contract change is deliberate, not a loosened test.");
         cut.Markup.Should().NotContain("fluent-spinner", "AC-1b: the loading spinner stops on failure");
     }
 

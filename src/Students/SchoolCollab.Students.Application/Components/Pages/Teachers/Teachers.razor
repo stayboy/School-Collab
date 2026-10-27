@@ -97,8 +97,8 @@
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to load teachers");
-            _error = ex.Message;
+            _error = FriendlyError.Describe(
+                ex, "Teachers could not be loaded. Try again, and tell an administrator if it keeps happening.", Logger);
             _items = [];
         }
     }
@@ -125,9 +125,8 @@
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to delete teacher {Id}", id);
             _items = previous;
-            _error = ex.Message;
+            _error = FriendlyError.Describe(ex, $"Teacher '{name}' could not be deleted. Nothing was changed.", Logger);
             StateHasChanged();
         }
     }

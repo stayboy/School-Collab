@@ -26,7 +26,7 @@
                 }
                 else if (!string.IsNullOrEmpty(_error))
                 {
-                    <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                    <FriendlyErrorBar Message="@_error" Class="mt-3" />
                     <div class="mt-3">
                         <FluentButton Appearance="ButtonAppearance.Default" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back to teachers</FluentButton>
                     </div>
@@ -91,7 +91,7 @@
         </TenantGate>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FriendlyErrorBar Message="@DescribeRenderError(ex)" />
     </ErrorContent>
 </ErrorBoundary>
 
@@ -104,6 +104,7 @@
     private GradeLevelDto[]? _gradeLevels;
     private string? _titleName;
     private string? _error;
+    private string? _renderError;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -132,8 +133,8 @@
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to load teacher {Id}", Id);
-            _error = ex.Message;
+            _error = FriendlyError.Describe(
+                ex, "This teacher could not be loaded. Try again, or go back to the teacher list.", Logger);
         }
         finally
         {
@@ -146,6 +147,15 @@
     }
 
     private void Back() => Nav.NavigateTo("/students/teachers");
+
+    /// <summary>
+    /// The sentence the error boundary shows when rendering this page throws. Cached per instance: the
+    /// boundary re-invokes its content on every render of this component, and logging the same fault
+    /// again each time would bury the first entry.
+    /// </summary>
+    private string DescribeRenderError(Exception ex) =>
+        _renderError ??= FriendlyError.Describe(
+            ex, "Something went wrong drawing this page. Try again, and tell an administrator if it keeps happening.", Logger);
 
     private async Task OpenEditAsync()
     {

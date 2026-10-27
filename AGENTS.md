@@ -16,6 +16,28 @@ If your agent does not, read it manually before starting work.
 
 ---
 
+## Governing documents are review-gated
+
+`AGENTS.md` and every markdown file under `.pi/skills/orchestrator-worker-reviewer/` are **protected**: a
+change to any of them is reviewed by a **higher model** before it lands, in this order —
+**`deepseek-v4-pro`, build `0813`** first, **`glm-5.3`** only when no provider answers with that build
+(credit exhaustion, HTTP 429 and timeouts count as unavailable; a registry listing does not, which is why
+the two pools this repo cannot use still look healthy). The review is judged against the **stated reason**
+for the update, which names three things: what ruling changes, why it goes in now, and what was rejected.
+
+The record is `documents/agents/protected-doc-reviews.json` — one entry per file, carrying the **SHA-256 of
+the exact reviewed text** (line endings and trailing whitespace normalised) plus the reviewer and the
+reason. `ProtectedAgentDocReviewTests` recomputes each hash and fails the build when the text moved after
+the review, when the reviewer is not the first-choice model, or when a fallback is recorded without stating
+why the first choice was unavailable. **Edit → review → re-record.** There is no "trivial edit" bypass, and
+an unavailable reviewer parks the change rather than waving it through.
+
+The hash is a tripwire, not a signature: it catches text that changed **after** its review, and it cannot
+catch a document and its record being edited together — the record cannot hash itself. The review is the
+control for that; the recorded reason is the claim a human reads when the diff shows a hash moving.
+
+---
+
 ## Communication style
 
 Be concise. Do not over-explain, apologize repeatedly, or include large

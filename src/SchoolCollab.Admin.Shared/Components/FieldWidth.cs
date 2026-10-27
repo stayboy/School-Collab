@@ -25,7 +25,7 @@ namespace SchoolCollab.Admin.Shared.Components;
 ///   <item><term><see cref="W6"/></term><description>280px — Gender, Relationship.</description></item>
 ///   <item><term><see cref="W7"/></term><description>320px — Medium text field.</description></item>
 ///   <item><term><see cref="W8"/></term><description>400px — Long text field.</description></item>
-///   <item><term><see cref="W9"/></term><description>Fill — email, textarea, "fill the FormRow input cell" (width:100% + flex:1 1 0).</description></item>
+///   <item><term><see cref="W9"/></term><description>Fill — email, textarea, "fill the FormRow input cell" (width:100% + flex:1 1 auto; see <see cref="W9"/>).</description></item>
 /// </list>
 /// <para><b>Why an enum + inline style on the wrappers (not a CSS class)?</b>
 /// Blazor scoped CSS compiles each wrapper's base class (e.g.
@@ -82,7 +82,20 @@ public enum FieldWidth
     /// <summary>400px — Long text field.</summary>
     W8,
 
-    /// <summary>Fill — email, textarea, "fill the FormRow input cell" (width:100% + flex:1 1 0).</summary>
+    /// <summary>
+    /// Fill — email, textarea, "fill the FormRow input cell": <c>width:100%</c> plus
+    /// <c>flex:1 1 auto</c>.
+    /// <para><b>The <c>auto</c> basis is load-bearing — do not "tidy" it back to <c>1 1 0</c>.</b>
+    /// <c>.form-row-input</c> (the input cell in <c>FormRow.razor.css</c>) is a <c>display:flex</c>
+    /// container, so this style applies to a flex ITEM. With a zero flex-basis the used width is
+    /// resolved by the flex algorithm from the item's content, not from the <c>100%</c>, so a narrow
+    /// cell sized the field from its text and W9 read as the same width as a fixed <see cref="W4"/>
+    /// sibling (#414, measured 2026-10-27). An <c>auto</c> basis makes the <c>100%</c> the starting
+    /// size, so the field fills the cell before growing; in a non-flex parent the <c>100%</c> alone
+    /// still fills the block. This mirrors <c>.w-9</c> in
+    /// <c>src/SchoolCollab.Admin/wwwroot/css/app.css</c>, where the same cause is recorded — the two
+    /// expressions of the ladder must agree.</para>
+    /// </summary>
     W9,
 }
 
@@ -119,7 +132,8 @@ public static class FieldWidthExtensions
         FieldWidth.W6 => "width:280px; min-width:0; max-width:100%",
         FieldWidth.W7 => "width:320px; min-width:0; max-width:100%",
         FieldWidth.W8 => "width:400px; min-width:0; max-width:100%",
-        FieldWidth.W9 => "width:100%; min-width:0; max-width:100%; flex:1 1 0",
+        // W9's flex basis must be `auto`, not `0` — see the remark on FieldWidth.W9.
+        FieldWidth.W9 => "width:100%; min-width:0; max-width:100%; flex:1 1 auto",
         _ => throw new System.ArgumentOutOfRangeException(nameof(width), width, $"Unknown {nameof(FieldWidth)} value."),
     };
 }

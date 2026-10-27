@@ -115,11 +115,9 @@
     private string CurrentEmptyMessage =>
         !_isRealTenant
             ? "Select a tenant to manage activity groups."
-            : !string.IsNullOrWhiteSpace(_error)
-                ? "Could not load activity groups."
-                : (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
-                    ? $"No activity groups match '{_searchText}'."
-                    : "No activity groups yet. Create one to get started.");
+            : (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
+                ? $"No activity groups match '{_searchText}'."
+                : "No activity groups yet. Create one to get started.");
 
     private static Appearance StatusBadge(bool isActive) => isActive ? Appearance.Accent : Appearance.Neutral;
 
@@ -160,9 +158,11 @@
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to load activity groups");
-            _error = ex.Message;
-            _items = []; // stop the loading spinner; show the empty-state + error bars
+            // The failure sentence lives in the error bar (LandingPage's Error), never in the empty
+            // bar: an empty list paired with an error is a failed load, and "nothing exists yet"
+            // would be a claim about a list that was never read.
+            _error = FriendlyError.Describe(ex, "Could not load activity groups.", Logger);
+            _items = []; // stop the loading spinner; the error bar is this state's message
             StateHasChanged();
         }
     }
@@ -251,7 +251,10 @@
         catch (Exception ex)
         {
             if (_disposed) return;
-            _error = ex.Message;
+            _error = FriendlyError.Describe(
+                ex,
+                $"The activity group could not be {(active ? "activated" : "deactivated")}. Nothing was changed.",
+                Logger);
             StateHasChanged();
         }
     }
@@ -280,9 +283,16 @@
         {
             if (_disposed) return;
             _items = previous;
-            _error = ex.Message.Contains("referenced", StringComparison.OrdinalIgnoreCase)
-                ? "Cannot delete: members or assignments reference this group. Archive it instead."
-                : ex.Message;
+
+            // The provider's text is READ here only to choose between two plain sentences — the
+            // "still referenced" case is the one an operator can act on (archive instead of
+            // retrying). Neither sentence displays that text.
+            var isReferenced = ex.Message.Contains("referenced", StringComparison.OrdinalIgnoreCase);
+            _error = isReferenced
+                ? FriendlyError.Describe(
+                    ex, "Cannot delete: members or assignments reference this group. Archive it instead.", Logger)
+                : FriendlyError.Describe(
+                    ex, "The activity group could not be deleted. Nothing was changed.", Logger);
             StateHasChanged();
         }
     }

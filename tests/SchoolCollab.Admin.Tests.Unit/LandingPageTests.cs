@@ -147,6 +147,22 @@ public class LandingPageTests : BunitContext
     }
 
     [TestMethod]
+    public void EmptyItems_WithError_RendersErrorSentence_And_Not_EmptyMessage()
+    {
+        // A failed load arrives as an empty array AND an error: Teachers.razor assigns both in the
+        // same catch, so the empty branch used to tell the operator "No widgets yet." about a list
+        // it never managed to read, at the same time as the error bar. The defect is the
+        // coexistence, so the negative assertion is the point of this test — asserting only that
+        // the error appears would pass against the broken component.
+        var cut = RenderWrapper(items: [], error: "kaboom");
+
+        cut.Markup.Should().Contain("kaboom",
+            "the failed load's error sentence is still rendered");
+        cut.Markup.Should().NotContain("No widgets yet.",
+            "an empty Items array paired with an Error is a failed load, never a claim that nothing exists");
+    }
+
+    [TestMethod]
     public void SearchEnabled_False_Hides_SearchBox()
     {
         var cut = RenderWrapper(items: [], searchEnabled: false);

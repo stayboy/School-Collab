@@ -52,6 +52,15 @@
                 <FluentSpinner />
             </div>
         }
+        else if (Items.Length == 0 && !string.IsNullOrEmpty(Error))
+        {
+            @* A failed load arrives as an empty array AND an Error — pages assign both in the same
+               catch (Teachers.razor assigns _items = [] beside _error) — so an unqualified "nothing
+               exists yet" claims the list was read when it never was. Render nothing here: the error
+               bar below is this state's message. It is a separate branch rather than a guard on the
+               empty branch below, because falling through would hand the grid EmptyMessage with zero
+               rows and let the grid repeat the false statement by another route. *@
+        }
         else if (Items.Length == 0)
         {
             <FluentMessageBar Intent="MessageBarIntent.Info">@EmptyMessage</FluentMessageBar>
@@ -113,7 +122,11 @@
     public TItem[]? Items { get; set; }
 
     /// <summary>
-    /// Message bar text shown when <see cref="Items"/> is an empty array.
+    /// Message bar text shown when <see cref="Items"/> is an empty array and
+    /// <see cref="Error"/> is empty. A failed load arrives as an empty array
+    /// <em>plus</em> an error (pages assign both in the same <c>catch</c>), and
+    /// then only the error bar renders — "nothing exists yet" would be a claim
+    /// about a list that was never read.
     /// </summary>
     [Parameter, EditorRequired]
     public string EmptyMessage { get; set; } = string.Empty;

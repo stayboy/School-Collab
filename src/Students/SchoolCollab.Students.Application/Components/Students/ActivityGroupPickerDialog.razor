@@ -21,6 +21,13 @@
         {
             <div class="picker-loading"><FluentSpinner /></div>
         }
+        else if (_loadError is not null)
+        {
+            @* A FAILED load is not an empty tenant: this branch must not fall through to the
+               "No activity groups exist yet" message below, which would tell the admin the tenant has
+               none when in fact the list could not be read (owner round debt-sweep, gate N4). *@
+            <FriendlyErrorBar Message="@_loadError" />
+        }
         else if (_options.Count == 0)
         {
             <FluentMessageBar Intent="MessageBarIntent.Info">
@@ -82,6 +89,10 @@
     private readonly HashSet<Guid> _selected = [];
     private bool _loading = true;
 
+    /// <summary>Set only when the LIST could not be read — distinct from an empty list, which is a
+    /// tenant with no groups. The two render differently on purpose.</summary>
+    private string? _loadError;
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -95,8 +106,8 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Loading activity groups for student {StudentId} failed", Model.StudentId);
-            Error = ex.Message;
+            _loadError = FriendlyError.Describe(
+                ex, "The activity groups could not be loaded. Close this dialog and try again.", Logger);
         }
         finally
         {
