@@ -14,6 +14,49 @@ entry here shrinks to a pointer at that check.
 
 ---
 
+## A claim about the codebase is only as true as the search that produced it (2026-10-27)
+
+**Rule.** Before writing any claim of the form "there is no X" **or** "every X does Y", search for the
+**shape** of X across **every** bounded context and every naming convention the repo actually uses — then
+scope the sentence to the search you ran. Never assert absence *or* universality from a grep over the
+obvious project, seeded with identifiers you invented. If the search is not written next to the claim, the
+claim is a guess wearing a fact's clothes.
+
+**Evidence.** The agent wrote *"there is no student-numbering policy or generator in `src/Students`, and
+every `Sequence` belongs to `Period`"* after grepping that one directory for `GenerateStudentNumber`,
+`NextStudentNumber`, `numbering` and `Sequence`. The feature existed: `IEntityCodeGenerator` (contract in
+`SchoolCollab.Core/EntityCodes`), implemented by `EntityCodeGenerator` and `EntityCodeRule.GenerateNext`
+in `SchoolCollab.Settings.Core`, called from `CreateStudentHandler.cs:31` as `GenerateAsync("STUDENT_CODE")`,
+seeded at `EntityCodeRuleSeeder.cs:30`, with its own tests and design doc. The word is **"entity code"**,
+not "student number" — the search used a student-shaped name inside the student module, a place the
+feature was never going to be. Both halves of the claim were *narrowly true* and *operationally false*,
+which is why repeating the same grep confirmed it.
+
+**Trigger.** A sentence containing "no", "none", "does not exist", "missing", "every", "all … are" or
+"only" about this codebase. Same family as the retraction lesson below: enumerate the shapes, not the token.
+
+---
+
+## Retract a claim by enumerating its shapes, never by grepping the wording you remember (2026-10-27)
+
+**Rule.** When withdrawing a false statement that appeared in several places: enumerate **every wording
+variant** first (one grep over a candidate list, including the short forms), fix each, re-run the
+enumeration, and record the count beside the fix. A grep of the phrase you happen to recall is not a
+retraction; it is a fix of one copy.
+
+**Evidence.** The false claim "the acceptance seat is model-independent of worker **and** reviewer" was
+corrected in `SKILL.md` and `references/models.md`; the agent verified with a grep for
+`"independent of worker and reviewer"` and called it clean. It had missed **"acceptance is independent of
+both"**, which survived one line beneath a corrected twin and left the file contradicting itself. The
+higher-model document review found it on its first pass — and also that the recorded reason said "four
+places" when the true count was six. Related but distinct from the half-converted-gate lesson above: that
+one is about code residue after a flag retirement, this one about prose variants after a retraction.
+
+**Trigger.** Any change whose purpose is to **remove** a statement. Check: one grep over a variant list
+including short forms ("of both", "both"), and the count recorded next to the fix.
+
+---
+
 ## A half-converted gate is a capability loss (2026-10-26)
 
 **Promoted to `documents/solution/feature-flag-workflow.md` § "Retiring a flag".** Removing a flag means
