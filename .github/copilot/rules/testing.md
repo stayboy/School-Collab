@@ -133,6 +133,27 @@ every poll saw the extra call. Filter to the endpoint the test is about
 (`c.Url.StartsWith(...)`) and put the observed URLs in the failure message. (2026-10-26:
 `NotificationTemplateCreateTests` — PR #420/#418.)
 
+### Scope every negative assertion, and assert the positive first
+
+The over-broad-assertion cause above has a sibling that looks nothing like a timeout: a **negative**
+assertion over a large haystack. `cut.Markup.Should().NotContain("500")` reads like a precise check and is
+a lottery — every bUnit `blazor:elementReference` is a random 32-hex GUID, and a GUID contains `"500"`
+often enough to redden the test roughly one run in six (2026-10-27: 2 of 13, `ActivityGroupPickerDialogTests`).
+The contract was right; the blast radius was wrong.
+
+Two rules follow, and they apply to `Contain` too:
+
+1. **Scope the assertion to the element, message or endpoint that carries the meaning** —
+   `cut.Find(".some-root fluent-message-bar[intent='error']").TextContent`, not `cut.Markup`; the endpoint
+   predicate, not the whole call log. A short negative (`"500"`, `"404"`, `"error"`) over all markup is
+   a coin-flip; over one element's text it is a real assertion.
+2. **Precede every negative with a positive that proves the scope resolved.** Assert the element
+   *contains* the sentence you expect **first**, then assert the negatives. Without the anchor, a selector
+   that resolved to the wrong element — or to none — satisfies the negatives while asserting nothing.
+
+A negative assertion nobody has watched fail is a comment. Prove it by injecting the defect it claims to
+catch, rebuilding, and observing the red — then restore.
+
 ### Dialog round-trip tests need one named, generous budget
 
 Show → interact → submit through the real dialog shell (harness below) is
