@@ -1917,6 +1917,17 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task RemoveStudentTopicAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/students/student-topics/{id}", ct)).EnsureSuccessStatusCode();
 
+    /// <summary>
+    /// The student's subjects for their current grade — the §6 union
+    /// (subject-enrollment-requirement-flag.md FR-ER-16): every implied-enrolment subject on
+    /// the grade plus every explicit-enrolment subject the student holds a row for in the
+    /// active academic year. The grade is derived server-side from the student's active
+    /// enrolment, so there is no grade argument; no active academic year or no active
+    /// enrolment yields an empty array, never a 404.
+    /// </summary>
+    public async Task<StudentSubjectEnrollmentDto[]?> ListStudentSubjectsAsync(Guid studentId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<StudentSubjectEnrollmentDto[]>($"/students/{studentId}/subjects", ct);
+
     // ── Guardians ───────────────────────────────────────────────────────────
     // Guardian ENTITY routes (CRUD + name-history + students-for-guardian) are
     // the root-level /guardians group (StudentEndpoints.cs:

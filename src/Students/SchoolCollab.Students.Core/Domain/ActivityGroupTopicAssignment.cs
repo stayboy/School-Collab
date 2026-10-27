@@ -18,6 +18,10 @@ public sealed class ActivityGroupTopicAssignment : TopicAssignment
     /// Creates a bridge row assigning a topic to an activity group. The
     /// <see cref="TopicAssignment.TopicStrandId"/> selects which strand (or lesson,
     /// i.e. a parented strand) the group uses for the topic.
+    /// <para>An activity group subject enrols explicitly, so
+    /// <see cref="TopicAssignment.RequiresEnrollment"/> starts <c>true</c>
+    /// (subject-enrollment-requirement-flag.md §2.2 / FR-ER-2). Nothing reads the flag on a
+    /// group code path in v1 (§11) — the default is stored, not yet enforced.</para>
     /// </summary>
     public static ActivityGroupTopicAssignment Create(
         Guid activityGroupId,
@@ -28,7 +32,7 @@ public sealed class ActivityGroupTopicAssignment : TopicAssignment
         Guid? periodId = null)
     {
         var assignment = new ActivityGroupTopicAssignment { ActivityGroupId = activityGroupId };
-        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId, periodId);
+        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId, periodId, requiresEnrollment: true);
         assignment.AddEvent(new ActivityGroupTopicAssignedEvent(
             assignment.Id, activityGroupId, topicId, startDate, endDate));
         return assignment;

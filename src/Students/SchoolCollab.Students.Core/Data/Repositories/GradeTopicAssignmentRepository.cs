@@ -20,7 +20,8 @@ internal sealed class GradeTopicAssignmentRepository(StudentsDbContext db)
                 x.StartDate, x.EndDate,
                 x.TopicStrandId,
                 x.PeriodId,
-                x.CreatedAt, x.UpdatedAt))
+                x.CreatedAt, x.UpdatedAt,
+                x.RequiresEnrollment))
             .ToArrayAsync(cancellationToken);
 
     public async Task<GradeTopicAssignment[]> ListByGradeLevelForUpdateAsync(

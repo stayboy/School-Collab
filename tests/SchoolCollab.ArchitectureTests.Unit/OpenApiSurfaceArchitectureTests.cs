@@ -54,13 +54,16 @@ public class OpenApiSurfaceArchitectureTests
     /// the round-notification-templates-b3a applicability read, the redesigned authoring surface's
     /// by-id read, and that surface's adopt/promote copy routes (measured 2026-10-21 from the generated
     /// document);
-    /// Students.Api measures <b>0 of 146</b>, untouched by any of them. Raise the number in the same PR
+    /// Students.Api measures <b>3 of 164</b>: round <c>subject-enrollment-requirement</c> layer 1 made
+    /// its first three typed endpoints (<c>GET /students/topic-enrollment</c>,
+    /// <c>GET /students/{studentId}/subjects</c>, <c>PUT /students/topic-assignments/{id}/requires-enrollment</c>),
+    /// which is the whole delta — no other Students operation was touched. Raise the number in the same PR
     /// that converts handlers — a conversion that leaves it stale means the pin no longer describes the
     /// document.
     /// </summary>
     private const int SettingsSchemaPin = 55;
 
-    private const int StudentsSchemaPin = 0;
+    private const int StudentsSchemaPin = 3;
 
     /// <summary>Strips an ASP.NET route constraint (<c>{id:guid}</c>) into the OpenAPI template (<c>{id}</c>).</summary>
     private static readonly Regex RouteConstraint = new(@"\{([^}:]+):[^}]*\}", RegexOptions.Compiled);

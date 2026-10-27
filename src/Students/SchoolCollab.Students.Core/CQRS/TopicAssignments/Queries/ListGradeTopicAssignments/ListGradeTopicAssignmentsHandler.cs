@@ -64,7 +64,8 @@ public sealed class ListGradeTopicAssignmentsHandler(
                         a.TopicStrandId,
                         a.PeriodId,
                         a.CreatedAt,
-                        a.UpdatedAt)).ToArray();
+                        a.UpdatedAt,
+                        a.RequiresEnrollment)).ToArray();
             },
             CacheOptions,
             tags: ["students"],

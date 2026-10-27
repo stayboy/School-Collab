@@ -53,6 +53,22 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
     /// specific academic-year/term/semester period (FR-56/57). Additive.
     /// </summary>
     public Guid? PeriodId { get; private set; }
+
+    /// <summary>
+    /// When true, a student is enrolled in this topic for this audience ONLY if a
+    /// <see cref="StudentTopicAssignment"/> exists for them; there is no implied
+    /// enrolment from audience membership. When false (the default for a grade),
+    /// every member of the audience is assumed enrolled and no row is stored.
+    /// <para>
+    /// Lives on the TPH base so both audiences carry it. The default is NOT expressed
+    /// as a schema DEFAULT — both subtypes share one table, so a discriminator-dependent
+    /// default is impossible and the value is stamped by the two factories
+    /// (subject-enrollment-requirement-flag.md §2.2). Enforcement is wired for grades
+    /// only in v1.
+    /// </para>
+    /// </summary>
+    public bool RequiresEnrollment { get; private set; }
+
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     // Protected: only a subtype-owned mutation (GradeTopicAssignment.SetDisplayOrder)
@@ -64,6 +80,11 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
     /// <summary>
     /// Seeds the shared state for a derived subtype. Validates the effective
     /// window and stamps the audit timestamps.
+    /// <para><paramref name="requiresEnrollment"/> is a parameter rather than a value read from
+    /// here because the default is discriminator-dependent and therefore belongs to the two
+    /// factories (grade <c>false</c>, activity group <c>true</c>) — assignment through
+    /// <see cref="SetRequiresEnrollment"/> would bump <see cref="UpdatedAt"/> a second time on a
+    /// brand-new row.</para>
     /// </summary>
     protected void Initialize(
         Guid id,
@@ -71,7 +92,8 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
         DateOnly startDate,
         DateOnly? endDate,
         Guid? topicStrandId,
-        Guid? periodId)
+        Guid? periodId,
+        bool requiresEnrollment)
     {
         if (endDate is { } e && e < startDate)
             throw new ArgumentException("EndDate must be on or after StartDate.", nameof(endDate));
@@ -83,6 +105,7 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
         EndDate = endDate;
         TopicStrandId = topicStrandId;
         PeriodId = periodId;
+        RequiresEnrollment = requiresEnrollment;
         CreatedAt = now;
         UpdatedAt = now;
     }
@@ -117,6 +140,24 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
     {
         if (TopicStrandId == strandId) return;
         TopicStrandId = strandId;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Switches the audience between implied enrolment (<c>false</c>) and explicit
+    /// per-student enrolment (<c>true</c>). No-op when unchanged.
+    /// <para>
+    /// This is the <b>flag</b> mutation only: the transactional grandfather that
+    /// materialises a <see cref="StudentTopicAssignment"/> per current audience member
+    /// on a <c>false → true</c> flip is the command handler's job
+    /// (subject-enrollment-requirement-flag.md FR-ER-7/10), because it must commit the
+    /// flag and every row in one transaction.
+    /// </para>
+    /// </summary>
+    public void SetRequiresEnrollment(bool value)
+    {
+        if (RequiresEnrollment == value) return;
+        RequiresEnrollment = value;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
