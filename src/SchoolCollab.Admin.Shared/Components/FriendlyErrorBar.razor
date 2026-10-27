@@ -1,0 +1,21 @@
+@* The rendering half of the friendly-error seam (<see cref="SchoolCollab.Admin.Shared.Services.FriendlyError"/>).
+
+   A failure is a SENTENCE, and an absent failure renders NOTHING. Both rules live here so no call site
+   re-decides them: a blank or whitespace message is not "an empty red bar", it is no bar at all, which
+   is what keeps a "failed to load" state from reading as an empty one.
+
+   Pair it with FriendlyError.Describe at the catch site — the exception is logged there, and the string
+   that reaches this component is already the plain sentence. Never pass Exception.Message here. *@
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <FluentMessageBar Intent="MessageBarIntent.Error" class="@Class">@Message</FluentMessageBar>
+}
+
+@code {
+    /// <summary>The plain, user-facing sentence. Null or blank renders nothing.</summary>
+    [Parameter] public string? Message { get; set; }
+
+    /// <summary>Optional CSS classes for placement (e.g. <c>mt-3</c>) — styling only, never behaviour.</summary>
+    [Parameter] public string? Class { get; set; }
+}
