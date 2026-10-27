@@ -197,6 +197,31 @@ public class EnrollmentExceptionsDialogTests : BunitContext
 
     private static string GroupExceptionsUrl => $"{ExceptionsResource}?activityGroupId={GroupId:D}&topicId={TopicId:D}";
 
+    /// <summary>
+    /// The one <c>POST {ExceptionsResource}/bulk</c> this run made.
+    ///
+    /// <para><b>Scoped by URL, deliberately.</b> <c>Calls.Single(c =&gt; c.Method == "POST")</c> asserts two
+    /// things at once — "the dialog wrote the row" AND "nothing else in this session ever POSTs" — so an
+    /// unrelated write reddens a correct dialog with "more than one matching element" and no name for the
+    /// culprit (issue #418; the same shape cost the notification-template create suite two false flake
+    /// reports). The predicate here is the one every call site already asserts a few lines above.</para>
+    ///
+    /// <para><b>Not a silent pass.</b> A missing expected call still fails: <c>ContainSingle</c> rejects
+    /// zero matches as loudly as two, and the failure message lists every POST observed, so the next
+    /// occurrence diagnoses itself instead of needing a bisect.</para>
+    /// </summary>
+    private static (string Method, string Url, string? Body) TheBulkPost(ScriptedHandler handler)
+    {
+        var posts = handler.Calls.Where(c => c.Method == "POST").ToList();
+
+        return posts
+            .Should().ContainSingle(
+                c => c.Url == $"{ExceptionsResource}/bulk",
+                "the dialog writes one bulk exception per Add (observed POSTs: "
+                + string.Join(", ", posts.Select(p => p.Url)) + ")")
+            .Which;
+    }
+
     // ── Harness ────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -645,7 +670,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
 
-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
+        var post = TheBulkPost(harness.Handler);
         post.Body.Should().Contain($"\"gradeLevelId\":\"{GradeId:D}\"");
         post.Body.Should().Contain("\"activityGroupId\":null", "a grade-owned exception names no group");
         post.Body.Should().Contain($"\"topicId\":\"{TopicId:D}\"");
@@ -793,7 +818,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
 
-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
+        var post = TheBulkPost(harness.Handler);
         post.Body.Should().Contain("\"division\":2", "the CHOSEN part travels — Semesters, as picked");
         post.Body.Should().Contain("\"ordinal\":2", "and the chosen position travels as the ordinal (§0 decision 15)");
         post.Body.Should().Contain($"\"startDate\":\"{Sem2Start:yyyy-MM-dd}\"");
@@ -850,7 +875,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
 
-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
+        var post = TheBulkPost(harness.Handler);
         post.Body.Should().Contain($"\"activityGroupId\":\"{GroupId:D}\"");
         post.Body.Should().Contain("\"division\":1", "Terms — the only part FR-56 permits here");
         post.Body.Should().Contain("\"ordinal\":1");
@@ -941,7 +966,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
 
-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
+        var post = TheBulkPost(harness.Handler);
         post.Body.Should().Contain("\"division\":1");
         post.Body.Should().Contain("\"ordinal\":1", "the first chosen sequence travels");
         post.Body.Should().Contain("\"ordinal\":5",
@@ -972,7 +997,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
 
-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
+        var post = TheBulkPost(harness.Handler);
         post.Body.Should().Contain("\"startDate\":\"2028-03-01\"",
             "the ACTIVE year's Term 1, not the completed year's");
         post.Body.Should().Contain("\"endDate\":\"2028-06-30\"", "and that period's end");

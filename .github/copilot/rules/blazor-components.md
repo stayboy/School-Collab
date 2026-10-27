@@ -75,12 +75,56 @@ show a recovery UI instead of crashing the whole layout:
         @* main page content *@
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">
-            Something went wrong: @ex.Message
-        </FluentMessageBar>
+        <FriendlyErrorBar Message="@DescribeRenderError(ex)" />
     </ErrorContent>
 </ErrorBoundary>
 ```
+
+The boundary's `ex` is a **caught exception**, so it is subject to the same rule as every
+`catch` block — log it and show a sentence, never `@ex.Message` (see "Friendly errors"
+below). Cache the sentence per component instance (`_renderError ??=
+FriendlyError.Describe(…)`) so a re-render does not log the same fault twice.
+
+## Friendly errors — never render a caught exception's message
+
+**`Exception.Message` never reaches the UI.** It carries socket errors, stack frames, SQL
+detail and internal type names, and it does so invisibly: `_error = ex.Message` compiles,
+renders and reviews cleanly, and only leaks the day a real fault happens. Every `catch` and
+every `<ErrorBoundary>`'s `ErrorContent` uses the shared seam instead:
+
+```razor
+@* markup: the plain sentence, which is all the user ever sees *@
+<FriendlyErrorBar Message="@_error" Class="mt-3" />
+```
+
+```csharp
+catch (Exception ex)
+{
+    // Logs the exception with full detail (type, message, stack, inner chain);
+    // returns ONLY the sentence.
+    _error = FriendlyError.Describe(
+        ex, "Teachers could not be loaded. Try again, and tell an administrator if it keeps happening.", Logger);
+}
+```
+
+- `FriendlyError.Describe(Exception, string plainSentence, ILogger)` — `SchoolCollab.Admin.Shared.Services`.
+- `FriendlyErrorBar` — `SchoolCollab.Admin.Shared.Components`; a blank message renders nothing.
+
+**Each call site keeps its OWN wording.** Name what failed and what the reader can do about
+it; a generic "Something went wrong" trades a leak for a shrug. Never pass `ex.Message` as
+the sentence — that satisfies the guard while defeating it.
+
+**Failed is not empty.** A load that throws must not fall through to the "none exist yet"
+branch, which states a different (and false) fact. Give the failure its own branch and its
+own state field (`_loadError`), and assert the negative in a test: the empty message must
+not appear when the read failed.
+
+**Enforcement:** `FriendlyErrorArchitectureTests` (in `SchoolCollab.ArchitectureTests.Unit`)
+scans every `src/**/*.razor` for a `Message` read off a caught exception — a `catch (T ident)`
+local or an `ErrorContent Context="ident"`. It does not flag `@_error` / `@_msg` renders: the
+rule is about the source, and a render is the sink the fix keeps. Sites not yet converted are
+enumerated in `FriendlyErrorAllowList` (`file:line` + reason), whose length is ratcheted —
+convert a site, delete its line, lower `RecordedEntryCount`. The ledger may shrink, never grow.
 
 ## `@key` on dynamic lists
 
@@ -284,10 +328,10 @@ The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is th
        try { await (disable ? Api.DisableAsync(id) : Api.EnableAsync(id)); }
        catch (Exception ex)
        {
-           Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
            var i = Array.FindIndex(_items, x => x.Id == id);
            if (i >= 0) _items[i] = previous;   // rollback
-           _error = ex.Message;
+           _error = FriendlyError.Describe(
+               ex, $"Coded value '{previous.Name}' could not be switched off. Nothing was changed.", Logger);
            StateHasChanged();
        }
    }
@@ -319,7 +363,8 @@ The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is th
            catch (Exception ex)
            {
                if (_disposed) return;   // <-- and again on the error path
-               _error = ex.Message;
+               _error = FriendlyError.Describe(
+                   ex, "Coded values could not be loaded. Try again, and tell an administrator if it keeps happening.", Logger);
            }
        }
 

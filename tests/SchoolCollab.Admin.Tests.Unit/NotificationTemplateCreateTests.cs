@@ -32,6 +32,13 @@ public class NotificationTemplateCreateTests : BunitContext
 
     private TemplateApiHandler Register() => TemplateTestServices.Register<Create>(this);
 
+    /// <summary>The editor's live-preview endpoint — a <b>POST</b> that is not a store write.</summary>
+    private const string PreviewPath = "/assignments/notification-templates/preview";
+
+    private static bool IsStorePost((string Method, string Url, string? Body) call) =>
+        call.Method == "POST"
+        && call.Url.StartsWith(TemplateApiHandler.BasePath, StringComparison.OrdinalIgnoreCase);
+
     [TestMethod]
     public async Task Save_PostsTheWholeDraft_IncludingTheTitleAndDescription_WithNoReason()
     {
@@ -74,12 +81,14 @@ public class NotificationTemplateCreateTests : BunitContext
             // Filter to THIS endpoint, and report what else was posted if the expectation ever breaks.
             // `Single(c => c.Method == "POST")` over every call was the shape that reddened two of three
             // full-suite runs (issue #418): it couples this assertion — "the create posts the whole draft" —
-            // to the absence of any other POST in the whole session, so an unrelated write turns a correct
-            // page into a failure with the misleading message "more than one matching element".
+            // to the absence of any other POST in the whole session. The other POST is now KNOWN and is
+            // not unrelated: the editor's live preview is a POST to
+            // /assignments/notification-templates/preview, queued behind a 300 ms debounce on every draft
+            // edit and at editor init, so it lands whenever the run is slow enough to pass 300 ms between
+            // the last edit and Save — which the whole-solution leg is and this class alone usually is not.
+            // `DraftEdits_PostTheLivePreview_SoTheCreateCannotBeFoundByMethodAlone` pins that mechanism.
             var posts = handler.Calls.Where(c => c.Method == "POST").ToArray();
-            var createPosts = posts
-                .Where(p => p.Url.StartsWith(TemplateApiHandler.BasePath, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
+            var createPosts = posts.Where(IsStorePost).ToArray();
 
             createPosts.Should().ContainSingle(
                 $"the create must post the draft exactly once. All POSTs this run: "
@@ -118,10 +127,68 @@ public class NotificationTemplateCreateTests : BunitContext
             cut.Find("#template-editor-error").TextContent.Should().Contain("A title is required",
                 "no template can be created nameless (naming spec D1/D2)"));
 
-        // Nothing was dispatched: the page refuses a draft it could not save before asking the operator
-        // for anything or writing anything.
-        handler.Calls.Should().NotContain(c => c.Method == "POST",
+        // Nothing was dispatched to the store: the page refuses a draft it could not save before asking the
+        // operator for anything or writing anything. Scoped to the store endpoint, because the editor's
+        // live preview POSTs on its own timer (#418) and is not a write.
+        handler.Calls.Should().NotContain(c => IsStorePost(c),
             "the page refuses a blank title before the write is dispatched");
+    }
+
+    /// <summary>
+    /// <b>#418's cause, pinned.</b> The create page's Save is not the only POST in its session: the shared
+    /// editor renders a live preview through <c>POST {PreviewPath}</c>, queued behind a 300 ms debounce by
+    /// <c>QueuePreview</c> on every draft edit — and once at editor initialisation.
+    ///
+    /// <para>Therefore <c>handler.Calls.Single(c =&gt; c.Method == "POST")</c> never meant "the create": it
+    /// meant "the create, provided no preview has fired yet". Whether the preview lands before or after
+    /// Save is a function of wall-clock speed alone, which is exactly why the failure looked like a timing
+    /// flake, appeared only in the whole-solution leg, and never reproduced in isolation. The fix is the
+    /// one already in place — identify the create by its URL, not by its method — and this test is what
+    /// keeps anyone from "simplifying" it back.</para>
+    /// </summary>
+    [TestMethod]
+    public async Task DraftEdits_PostTheLivePreview_SoTheCreateCannotBeFoundByMethodAlone()
+    {
+        var handler = Register();
+        Services.GetRequiredService<NavigationManager>()
+            .NavigateTo($"/notification-templates/create?grade={TemplateApiHandler.GradeA}");
+
+        var cut = Render<Create>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 2"));
+
+        // A complete draft, so the Save below is dispatched rather than refused by validation.
+        await TypeTitleAsync(cut, "Grade 8 Science reminder");
+        var channel = cut
+            .FindComponents<DropdownComponent<TemplateEditor.ChannelOption, NotificationChannel>>()
+            .Single();
+        await cut.InvokeAsync(() => channel.Instance.SelectedValueChanged.InvokeAsync(NotificationChannel.SMS));
+
+        // One draft edit is enough to queue a preview; the editor also queues one at initialisation, so a
+        // run slow enough to pass 300 ms between render and Save has already posted the preview.
+        var body = cut.FindComponents<FluentTextArea>().Single(a => a.Instance.Id == "template-body-text");
+        await cut.InvokeAsync(() => body.Instance.ValueChanged.InvokeAsync("Hello {{Title}}"));
+
+        cut.WaitForAssertion(
+            () => handler.Calls.Should().Contain(c => c.Method == "POST" && c.Url == PreviewPath,
+                "the debounced live preview is a POST, and it is not a write to the template store"),
+            TimeSpan.FromSeconds(5));
+
+        handler.Calls.Should().NotContain(c => IsStorePost(c), "nothing has been saved yet");
+
+        // Now save. Both POSTs exist, so a method-only filter is ambiguous by construction.
+        cut.Find("#template-save").Click();
+
+        cut.WaitForAssertion(
+            () => handler.Calls.Where(IsStorePost).Should()
+                .ContainSingle("one Save dispatches exactly one store write"),
+            TimeSpan.FromSeconds(5));
+
+        var posts = handler.Calls.Where(c => c.Method == "POST").ToArray();
+        posts.Should().HaveCountGreaterThanOrEqualTo(2,
+            "the run has already made a preview POST and the save POST — `Single(Method == \"POST\")` would "
+            + "throw \"more than one matching element\", which is the #418 failure verbatim");
+        posts.Where(p => !IsStorePost(p)).Should().OnlyContain(p => p.Url == PreviewPath,
+            "and the only non-store POST is the preview endpoint");
     }
 
     [TestMethod]

@@ -1,0 +1,2071 @@
+diff --git a/.github/copilot/rules/blazor-components.md b/.github/copilot/rules/blazor-components.md
+index 00397281..09789027 100644
+--- a/.github/copilot/rules/blazor-components.md
++++ b/.github/copilot/rules/blazor-components.md
+@@ -75,13 +75,57 @@ show a recovery UI instead of crashing the whole layout:
+         @* main page content *@
+     </ChildContent>
+     <ErrorContent Context="ex">
+-        <FluentMessageBar Intent="MessageIntent.Error">
+-            Something went wrong: @ex.Message
+-        </FluentMessageBar>
++        <FriendlyErrorBar Message="@DescribeRenderError(ex)" />
+     </ErrorContent>
+ </ErrorBoundary>
+ ```
+ 
++The boundary's `ex` is a **caught exception**, so it is subject to the same rule as every
++`catch` block — log it and show a sentence, never `@ex.Message` (see "Friendly errors"
++below). Cache the sentence per component instance (`_renderError ??=
++FriendlyError.Describe(…)`) so a re-render does not log the same fault twice.
++
++## Friendly errors — never render a caught exception's message
++
++**`Exception.Message` never reaches the UI.** It carries socket errors, stack frames, SQL
++detail and internal type names, and it does so invisibly: `_error = ex.Message` compiles,
++renders and reviews cleanly, and only leaks the day a real fault happens. Every `catch` and
++every `<ErrorBoundary>`'s `ErrorContent` uses the shared seam instead:
++
++```razor
++@* markup: the plain sentence, which is all the user ever sees *@
++<FriendlyErrorBar Message="@_error" Class="mt-3" />
++```
++
++```csharp
++catch (Exception ex)
++{
++    // Logs the exception with full detail (type, message, stack, inner chain);
++    // returns ONLY the sentence.
++    _error = FriendlyError.Describe(
++        ex, "Teachers could not be loaded. Try again, and tell an administrator if it keeps happening.", Logger);
++}
++```
++
++- `FriendlyError.Describe(Exception, string plainSentence, ILogger)` — `SchoolCollab.Admin.Shared.Services`.
++- `FriendlyErrorBar` — `SchoolCollab.Admin.Shared.Components`; a blank message renders nothing.
++
++**Each call site keeps its OWN wording.** Name what failed and what the reader can do about
++it; a generic "Something went wrong" trades a leak for a shrug. Never pass `ex.Message` as
++the sentence — that satisfies the guard while defeating it.
++
++**Failed is not empty.** A load that throws must not fall through to the "none exist yet"
++branch, which states a different (and false) fact. Give the failure its own branch and its
++own state field (`_loadError`), and assert the negative in a test: the empty message must
++not appear when the read failed.
++
++**Enforcement:** `FriendlyErrorArchitectureTests` (in `SchoolCollab.ArchitectureTests.Unit`)
++scans every `src/**/*.razor` for a `Message` read off a caught exception — a `catch (T ident)`
++local or an `ErrorContent Context="ident"`. It does not flag `@_error` / `@_msg` renders: the
++rule is about the source, and a render is the sink the fix keeps. Sites not yet converted are
++enumerated in `FriendlyErrorAllowList` (`file:line` + reason), whose length is ratcheted —
++convert a site, delete its line, lower `RecordedEntryCount`. The ledger may shrink, never grow.
++
+ ## `@key` on dynamic lists
+ 
+ `@key` is **required** on a `@foreach`/`@for` whose collection can reorder, insert in the
+@@ -284,10 +328,10 @@ The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is th
+        try { await (disable ? Api.DisableAsync(id) : Api.EnableAsync(id)); }
+        catch (Exception ex)
+        {
+-           Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
+            var i = Array.FindIndex(_items, x => x.Id == id);
+            if (i >= 0) _items[i] = previous;   // rollback
+-           _error = ex.Message;
++           _error = FriendlyError.Describe(
++               ex, $"Coded value '{previous.Name}' could not be switched off. Nothing was changed.", Logger);
+            StateHasChanged();
+        }
+    }
+@@ -319,7 +363,8 @@ The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is th
+            catch (Exception ex)
+            {
+                if (_disposed) return;   // <-- and again on the error path
+-               _error = ex.Message;
++               _error = FriendlyError.Describe(
++                   ex, "Coded values could not be loaded. Try again, and tell an administrator if it keeps happening.", Logger);
+            }
+        }
+ 
+diff --git a/src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs b/src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs
+index a30559ed..6ba23d04 100644
+--- a/src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs
++++ b/src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs
+@@ -25,7 +25,7 @@ namespace SchoolCollab.Admin.Shared.Components;
+ ///   <item><term><see cref="W6"/></term><description>280px — Gender, Relationship.</description></item>
+ ///   <item><term><see cref="W7"/></term><description>320px — Medium text field.</description></item>
+ ///   <item><term><see cref="W8"/></term><description>400px — Long text field.</description></item>
+-///   <item><term><see cref="W9"/></term><description>Fill — email, textarea, "fill the FormRow input cell" (width:100% + flex:1 1 0).</description></item>
++///   <item><term><see cref="W9"/></term><description>Fill — email, textarea, "fill the FormRow input cell" (width:100% + flex:1 1 auto; see <see cref="W9"/>).</description></item>
+ /// </list>
+ /// <para><b>Why an enum + inline style on the wrappers (not a CSS class)?</b>
+ /// Blazor scoped CSS compiles each wrapper's base class (e.g.
+@@ -82,7 +82,20 @@ public enum FieldWidth
+     /// <summary>400px — Long text field.</summary>
+     W8,
+ 
+-    /// <summary>Fill — email, textarea, "fill the FormRow input cell" (width:100% + flex:1 1 0).</summary>
++    /// <summary>
++    /// Fill — email, textarea, "fill the FormRow input cell": <c>width:100%</c> plus
++    /// <c>flex:1 1 auto</c>.
++    /// <para><b>The <c>auto</c> basis is load-bearing — do not "tidy" it back to <c>1 1 0</c>.</b>
++    /// <c>.form-row-input</c> (the input cell in <c>FormRow.razor.css</c>) is a <c>display:flex</c>
++    /// container, so this style applies to a flex ITEM. With a zero flex-basis the used width is
++    /// resolved by the flex algorithm from the item's content, not from the <c>100%</c>, so a narrow
++    /// cell sized the field from its text and W9 read as the same width as a fixed <see cref="W4"/>
++    /// sibling (#414, measured 2026-10-27). An <c>auto</c> basis makes the <c>100%</c> the starting
++    /// size, so the field fills the cell before growing; in a non-flex parent the <c>100%</c> alone
++    /// still fills the block. This mirrors <c>.w-9</c> in
++    /// <c>src/SchoolCollab.Admin/wwwroot/css/app.css</c>, where the same cause is recorded — the two
++    /// expressions of the ladder must agree.</para>
++    /// </summary>
+     W9,
+ }
+ 
+@@ -119,7 +132,8 @@ public static class FieldWidthExtensions
+         FieldWidth.W6 => "width:280px; min-width:0; max-width:100%",
+         FieldWidth.W7 => "width:320px; min-width:0; max-width:100%",
+         FieldWidth.W8 => "width:400px; min-width:0; max-width:100%",
+-        FieldWidth.W9 => "width:100%; min-width:0; max-width:100%; flex:1 1 0",
++        // W9's flex basis must be `auto`, not `0` — see the remark on FieldWidth.W9.
++        FieldWidth.W9 => "width:100%; min-width:0; max-width:100%; flex:1 1 auto",
+         _ => throw new System.ArgumentOutOfRangeException(nameof(width), width, $"Unknown {nameof(FieldWidth)} value."),
+     };
+ }
+\ No newline at end of file
+diff --git a/src/SchoolCollab.Admin.Shared/Components/FriendlyErrorBar.razor b/src/SchoolCollab.Admin.Shared/Components/FriendlyErrorBar.razor
+new file mode 100644
+index 00000000..3bcb405f
+--- /dev/null
++++ b/src/SchoolCollab.Admin.Shared/Components/FriendlyErrorBar.razor
+@@ -0,0 +1,21 @@
++@* The rendering half of the friendly-error seam (<see cref="SchoolCollab.Admin.Shared.Services.FriendlyError"/>).
++
++   A failure is a SENTENCE, and an absent failure renders NOTHING. Both rules live here so no call site
++   re-decides them: a blank or whitespace message is not "an empty red bar", it is no bar at all, which
++   is what keeps a "failed to load" state from reading as an empty one.
++
++   Pair it with FriendlyError.Describe at the catch site — the exception is logged there, and the string
++   that reaches this component is already the plain sentence. Never pass Exception.Message here. *@
++
++@if (!string.IsNullOrWhiteSpace(Message))
++{
++    <FluentMessageBar Intent="MessageBarIntent.Error" class="@Class">@Message</FluentMessageBar>
++}
++
++@code {
++    /// <summary>The plain, user-facing sentence. Null or blank renders nothing.</summary>
++    [Parameter] public string? Message { get; set; }
++
++    /// <summary>Optional CSS classes for placement (e.g. <c>mt-3</c>) — styling only, never behaviour.</summary>
++    [Parameter] public string? Class { get; set; }
++}
+diff --git a/src/SchoolCollab.Admin.Shared/Components/Landing/LandingPage.razor b/src/SchoolCollab.Admin.Shared/Components/Landing/LandingPage.razor
+index 9718a4ce..3eeb8599 100644
+--- a/src/SchoolCollab.Admin.Shared/Components/Landing/LandingPage.razor
++++ b/src/SchoolCollab.Admin.Shared/Components/Landing/LandingPage.razor
+@@ -52,6 +52,15 @@
+                 <FluentSpinner />
+             </div>
+         }
++        else if (Items.Length == 0 && !string.IsNullOrEmpty(Error))
++        {
++            @* A failed load arrives as an empty array AND an Error — pages assign both in the same
++               catch (Teachers.razor assigns _items = [] beside _error) — so an unqualified "nothing
++               exists yet" claims the list was read when it never was. Render nothing here: the error
++               bar below is this state's message. It is a separate branch rather than a guard on the
++               empty branch below, because falling through would hand the grid EmptyMessage with zero
++               rows and let the grid repeat the false statement by another route. *@
++        }
+         else if (Items.Length == 0)
+         {
+             <FluentMessageBar Intent="MessageBarIntent.Info">@EmptyMessage</FluentMessageBar>
+@@ -113,7 +122,11 @@
+     public TItem[]? Items { get; set; }
+ 
+     /// <summary>
+-    /// Message bar text shown when <see cref="Items"/> is an empty array.
++    /// Message bar text shown when <see cref="Items"/> is an empty array and
++    /// <see cref="Error"/> is empty. A failed load arrives as an empty array
++    /// <em>plus</em> an error (pages assign both in the same <c>catch</c>), and
++    /// then only the error bar renders — "nothing exists yet" would be a claim
++    /// about a list that was never read.
+     /// </summary>
+     [Parameter, EditorRequired]
+     public string EmptyMessage { get; set; } = string.Empty;
+diff --git a/src/SchoolCollab.Admin.Shared/Services/FriendlyError.cs b/src/SchoolCollab.Admin.Shared/Services/FriendlyError.cs
+new file mode 100644
+index 00000000..baa60794
+--- /dev/null
++++ b/src/SchoolCollab.Admin.Shared/Services/FriendlyError.cs
+@@ -0,0 +1,62 @@
++using Microsoft.Extensions.Logging;
++
++namespace SchoolCollab.Admin.Shared.Services;
++
++/// <summary>
++/// <b>The one place a caught exception becomes text a user reads.</b> The helper logs the exception
++/// with its full detail — type, message, stack, inner exceptions — and returns only the caller's plain
++/// sentence, so a message bar can never show a stack frame, a socket error, a SQL error or an internal
++/// type name to a teacher, a guardian or an administrator.
++///
++/// <para><b>Why a helper and not a convention.</b> The admin surface had <c>_error = ex.Message</c> in
++/// well over a hundred <c>.razor</c> call sites, each of which looked correct in review: it sets an
++/// error, it shows an error, and nothing fails. What it leaks is invisible until the day a request
++/// times out and the operator reads "An error occurred while sending the request" beside a Save button,
++/// or a foreign-key violation reaches a parent's screen. The rule is therefore enforced by
++/// <c>FriendlyErrorArchitectureTests</c> in <c>SchoolCollab.ArchitectureTests.Unit</c>, which forbids a
++/// <c>Message</c> read off a caught exception inside any <c>.razor</c> file; this type is the migration
++/// target that scan points at.</para>
++///
++/// <para><b>Each call site keeps its own wording.</b> The sentence names what failed and what the reader
++/// can do about it ("Teachers could not be loaded. Try again…"), because one generic "Something went
++/// wrong" would trade a leak for a shrug. That is why the wording is a parameter rather than something
++/// this helper invents.</para>
++///
++/// <para><b>Do not pass the exception's own message as the sentence</b> — that is the defect this
++/// exists to prevent, and it would satisfy the guard while defeating it.</para>
++/// </summary>
++/// <example>
++/// <code>
++/// catch (Exception ex)
++/// {
++///     _error = FriendlyError.Describe(ex, "Teachers could not be loaded. Try again.", Logger);
++/// }
++/// </code>
++/// </example>
++public static class FriendlyError
++{
++    /// <summary>
++    /// Logs <paramref name="exception"/> with full detail and returns <paramref name="plainSentence"/>
++    /// — nothing from the exception — for display.
++    /// </summary>
++    /// <param name="exception">The caught exception. Logged; never rendered.</param>
++    /// <param name="plainSentence">The site's own user-facing sentence: what failed, and what the
++    /// reader can do next. Must read as a sentence a non-technical adult would understand.</param>
++    /// <param name="logger">The component's logger, so the entry carries the component's category.</param>
++    /// <returns><paramref name="plainSentence"/>, unchanged.</returns>
++    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
++    /// <exception cref="ArgumentException"><paramref name="plainSentence"/> is blank — a blank bar
++    /// renders nothing, which would hide the failure entirely.</exception>
++    public static string Describe(Exception exception, string plainSentence, ILogger logger)
++    {
++        ArgumentNullException.ThrowIfNull(exception);
++        ArgumentNullException.ThrowIfNull(logger);
++        ArgumentException.ThrowIfNullOrWhiteSpace(plainSentence);
++
++        // The sentence doubles as the log message: it names the operation in the operator's own words,
++        // and the exception attached to the entry carries the type, message, stack and inner chain.
++        logger.LogError(exception, "Surfaced to the user: {PlainSentence}", plainSentence);
++
++        return plainSentence;
++    }
++}
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroups.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroups.razor
+index 9bc5faad..56179305 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroups.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroups.razor
+@@ -115,11 +115,9 @@
+     private string CurrentEmptyMessage =>
+         !_isRealTenant
+             ? "Select a tenant to manage activity groups."
+-            : !string.IsNullOrWhiteSpace(_error)
+-                ? "Could not load activity groups."
+-                : (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
+-                    ? $"No activity groups match '{_searchText}'."
+-                    : "No activity groups yet. Create one to get started.");
++            : (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
++                ? $"No activity groups match '{_searchText}'."
++                : "No activity groups yet. Create one to get started.");
+ 
+     private static Appearance StatusBadge(bool isActive) => isActive ? Appearance.Accent : Appearance.Neutral;
+ 
+@@ -160,9 +158,11 @@
+         catch (Exception ex)
+         {
+             if (_disposed) return;
+-            Logger.LogError(ex, "Failed to load activity groups");
+-            _error = ex.Message;
+-            _items = []; // stop the loading spinner; show the empty-state + error bars
++            // The failure sentence lives in the error bar (LandingPage's Error), never in the empty
++            // bar: an empty list paired with an error is a failed load, and "nothing exists yet"
++            // would be a claim about a list that was never read.
++            _error = FriendlyError.Describe(ex, "Could not load activity groups.", Logger);
++            _items = []; // stop the loading spinner; the error bar is this state's message
+             StateHasChanged();
+         }
+     }
+@@ -251,7 +251,10 @@
+         catch (Exception ex)
+         {
+             if (_disposed) return;
+-            _error = ex.Message;
++            _error = FriendlyError.Describe(
++                ex,
++                $"The activity group could not be {(active ? "activated" : "deactivated")}. Nothing was changed.",
++                Logger);
+             StateHasChanged();
+         }
+     }
+@@ -280,9 +283,16 @@
+         {
+             if (_disposed) return;
+             _items = previous;
+-            _error = ex.Message.Contains("referenced", StringComparison.OrdinalIgnoreCase)
+-                ? "Cannot delete: members or assignments reference this group. Archive it instead."
+-                : ex.Message;
++
++            // The provider's text is READ here only to choose between two plain sentences — the
++            // "still referenced" case is the one an operator can act on (archive instead of
++            // retrying). Neither sentence displays that text.
++            var isReferenced = ex.Message.Contains("referenced", StringComparison.OrdinalIgnoreCase);
++            _error = isReferenced
++                ? FriendlyError.Describe(
++                    ex, "Cannot delete: members or assignments reference this group. Archive it instead.", Logger)
++                : FriendlyError.Describe(
++                    ex, "The activity group could not be deleted. Nothing was changed.", Logger);
+             StateHasChanged();
+         }
+     }
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianSetupWizard.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianSetupWizard.razor
+index 7245d4f2..af04018c 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianSetupWizard.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianSetupWizard.razor
+@@ -77,10 +77,7 @@
+                                 </FormRow>
+                             </FluentStack>
+ 
+-                            @if (!string.IsNullOrEmpty(_profileError))
+-                            {
+-                                <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_profileError</FluentMessageBar>
+-                            }
++                            <FriendlyErrorBar Message="@_profileError" Class="mt-3" />
+                         </section>
+                     </FluentWizardStep>
+ 
+@@ -122,7 +119,11 @@
+                                 </div>
+                             </div>
+ 
+-                            @if (_students is null)
++                            @if (_wardsLoadError is not null)
++                            {
++                                <FriendlyErrorBar Message="@_wardsLoadError" Class="mt-3" />
++                            }
++                            else if (_students is null)
+                             {
+                                 <div class="spinner-container"><FluentSpinner /></div>
+                             }
+@@ -218,10 +219,7 @@
+                                 }
+                             </div>
+ 
+-                            @if (!string.IsNullOrEmpty(_error))
+-                            {
+-                                <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3 mb-3">@_error</FluentMessageBar>
+-                            }
++                            <FriendlyErrorBar Message="@_error" Class="mt-3 mb-3" />
+                         </section>
+                     </FluentWizardStep>
+                 </FluentWizard>
+@@ -266,7 +264,7 @@
+         </TenantGate>
+     </ChildContent>
+     <ErrorContent Context="ex">
+-        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
++        <FriendlyErrorBar Message="@DescribeRenderError(ex)" />
+     </ErrorContent>
+ </ErrorBoundary>
+ 
+@@ -278,7 +276,9 @@
+     private Guid? _guardianId;
+     private string? _profileError;
+     private string? _wardsError;
++    private string? _wardsLoadError;
+     private string? _error;
++    private string? _renderError;
+     private bool _saving;
+     private CancellationTokenSource? _loadCts;
+     private volatile bool _disposed;
+@@ -326,7 +326,10 @@
+         catch (Exception ex)
+         {
+             if (_disposed) return;
+-            Logger.LogError(ex, "Failed to load students for guardian wizard");
++            // A FAILED read is not an empty tenant: the wards step must say the list could not be
++            // loaded, not "no students in this tenant yet" (and not spin forever).
++            _wardsLoadError = FriendlyError.Describe(
++                ex, "The student list could not be loaded, so wards cannot be linked right now. Try again later.", Logger);
+         }
+     }
+ 
+@@ -387,8 +390,8 @@
+         catch (Exception ex)
+         {
+             args.IsCancelled = true;
+-            _profileError = ex.Message;
+-            Logger.LogError(ex, "Failed to create/update guardian in wizard");
++            _profileError = FriendlyError.Describe(
++                ex, "Your guardian profile could not be saved. Check the details and try again.", Logger);
+         }
+     }
+ 
+@@ -447,8 +450,8 @@
+         catch (Exception ex)
+         {
+             if (_disposed) return;
+-            Logger.LogError(ex, "Failed to save guardian links");
+-            _error = ex.Message;
++            _error = FriendlyError.Describe(
++                ex, "The guardian was saved, but the ward links could not be added. Add them from the guardian's page.", Logger);
+         }
+         finally
+         {
+@@ -459,6 +462,15 @@
+ 
+     private void Cancel() => Nav.NavigateTo("/students/guardians");
+ 
++    /// <summary>
++    /// The sentence the error boundary shows when rendering this wizard throws. Cached per instance:
++    /// the boundary re-invokes its content on every render of this component, and logging the same
++    /// fault again each time would bury the first entry.
++    /// </summary>
++    private string DescribeRenderError(Exception ex) =>
++        _renderError ??= FriendlyError.Describe(
++            ex, "Something went wrong drawing this page. Try again, and tell an administrator if it keeps happening.", Logger);
++
+     public void Dispose()
+     {
+         _disposed = true;
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Teachers/TeacherDetail.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Teachers/TeacherDetail.razor
+index 5d03862e..59689242 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Teachers/TeacherDetail.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Teachers/TeacherDetail.razor
+@@ -26,7 +26,7 @@
+                 }
+                 else if (!string.IsNullOrEmpty(_error))
+                 {
+-                    <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
++                    <FriendlyErrorBar Message="@_error" Class="mt-3" />
+                     <div class="mt-3">
+                         <FluentButton Appearance="ButtonAppearance.Default" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back to teachers</FluentButton>
+                     </div>
+@@ -91,7 +91,7 @@
+         </TenantGate>
+     </ChildContent>
+     <ErrorContent Context="ex">
+-        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
++        <FriendlyErrorBar Message="@DescribeRenderError(ex)" />
+     </ErrorContent>
+ </ErrorBoundary>
+ 
+@@ -104,6 +104,7 @@
+     private GradeLevelDto[]? _gradeLevels;
+     private string? _titleName;
+     private string? _error;
++    private string? _renderError;
+     private CancellationTokenSource? _loadCts;
+     private volatile bool _disposed;
+ 
+@@ -132,8 +133,8 @@
+         catch (Exception ex)
+         {
+             if (_disposed) return;
+-            Logger.LogError(ex, "Failed to load teacher {Id}", Id);
+-            _error = ex.Message;
++            _error = FriendlyError.Describe(
++                ex, "This teacher could not be loaded. Try again, or go back to the teacher list.", Logger);
+         }
+         finally
+         {
+@@ -147,6 +148,15 @@
+ 
+     private void Back() => Nav.NavigateTo("/students/teachers");
+ 
++    /// <summary>
++    /// The sentence the error boundary shows when rendering this page throws. Cached per instance: the
++    /// boundary re-invokes its content on every render of this component, and logging the same fault
++    /// again each time would bury the first entry.
++    /// </summary>
++    private string DescribeRenderError(Exception ex) =>
++        _renderError ??= FriendlyError.Describe(
++            ex, "Something went wrong drawing this page. Try again, and tell an administrator if it keeps happening.", Logger);
++
+     private async Task OpenEditAsync()
+     {
+         if (_disposed) return;
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Teachers/Teachers.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Teachers/Teachers.razor
+index fef3c4c1..3050d4b3 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Teachers/Teachers.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Teachers/Teachers.razor
+@@ -97,8 +97,8 @@
+         catch (Exception ex)
+         {
+             if (_disposed) return;
+-            Logger.LogError(ex, "Failed to load teachers");
+-            _error = ex.Message;
++            _error = FriendlyError.Describe(
++                ex, "Teachers could not be loaded. Try again, and tell an administrator if it keeps happening.", Logger);
+             _items = [];
+         }
+     }
+@@ -125,9 +125,8 @@
+         catch (Exception ex)
+         {
+             if (_disposed) return;
+-            Logger.LogError(ex, "Failed to delete teacher {Id}", id);
+             _items = previous;
+-            _error = ex.Message;
++            _error = FriendlyError.Describe(ex, $"Teacher '{name}' could not be deleted. Nothing was changed.", Logger);
+             StateHasChanged();
+         }
+     }
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/ActivityGroupPickerDialog.razor b/src/Students/SchoolCollab.Students.Application/Components/Students/ActivityGroupPickerDialog.razor
+index 64fcdd9d..49c21506 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/ActivityGroupPickerDialog.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/ActivityGroupPickerDialog.razor
+@@ -21,6 +21,13 @@
+         {
+             <div class="picker-loading"><FluentSpinner /></div>
+         }
++        else if (_loadError is not null)
++        {
++            @* A FAILED load is not an empty tenant: this branch must not fall through to the
++               "No activity groups exist yet" message below, which would tell the admin the tenant has
++               none when in fact the list could not be read (owner round debt-sweep, gate N4). *@
++            <FriendlyErrorBar Message="@_loadError" />
++        }
+         else if (_options.Count == 0)
+         {
+             <FluentMessageBar Intent="MessageBarIntent.Info">
+@@ -82,6 +89,10 @@
+     private readonly HashSet<Guid> _selected = [];
+     private bool _loading = true;
+ 
++    /// <summary>Set only when the LIST could not be read — distinct from an empty list, which is a
++    /// tenant with no groups. The two render differently on purpose.</summary>
++    private string? _loadError;
++
+     protected override async Task OnInitializedAsync()
+     {
+         try
+@@ -95,8 +106,8 @@
+         }
+         catch (Exception ex)
+         {
+-            Logger.LogError(ex, "Loading activity groups for student {StudentId} failed", Model.StudentId);
+-            Error = ex.Message;
++            _loadError = FriendlyError.Describe(
++                ex, "The activity groups could not be loaded. Close this dialog and try again.", Logger);
+         }
+         finally
+         {
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/ActivityGroupPickerDialogTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/ActivityGroupPickerDialogTests.cs
+new file mode 100644
+index 00000000..8411c1a9
+--- /dev/null
++++ b/tests/SchoolCollab.Admin.Tests.Unit/ActivityGroupPickerDialogTests.cs
+@@ -0,0 +1,261 @@
++using System.Net;
++using System.Text;
++using System.Threading;
++using System.Threading.Tasks;
++using Bunit;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Admin.Shared.Components.Dialogs;
++using SchoolCollab.Admin.Shared.Services;
++using SchoolCollab.Students.Application.Components.Students;
++using SchoolCollab.Students.Application.Services;
++
++namespace SchoolCollab.Admin.Tests.Unit;
++
++/// <summary>
++/// bUnit coverage for the student rail's activity-group picker (#419). The picker's behaviour was
++/// verified live only — struck-through blocked rows, add → chip → remove — so every assertion here had
++/// only a human's eye behind it until now.
++///
++/// <para>What the picker promises, and what this suite pins:</para>
++/// <list type="bullet">
++///   <item>a blocked row is NOT selectable: it renders no checkbox at all, and the row carries the
++///         reason the mirror refused it for (owner Q18 — a hidden group reads as a bug, a struck-through
++///         one with its reason reads as a rule);</item>
++///   <item>picking an available row is what enables Add (the footer is disabled on an empty pick);</item>
++///   <item>the dialog hands back exactly the picked ids — the PAGE writes the memberships, so a partial
++///         failure cannot leave a closed dialog claiming success;</item>
++///   <item>a FAILED load is not an empty tenant: the picker says it could not read the list instead of
++///         "No activity groups exist yet", and never shows the exception's own text (the #416 seam).</item>
++/// </list>
++/// </summary>
++[TestClass]
++public class ActivityGroupPickerDialogTests : BunitContext
++{
++    private static readonly Guid StudentId = Guid.Parse("99999999-9999-9999-9999-999999999999");
++    private static readonly Guid GradeId = Guid.Parse("aaaaaaaa-0000-0000-0000-00000000000a");
++    private static readonly Guid OtherGradeId = Guid.Parse("bbbbbbbb-0000-0000-0000-00000000000b");
++    private static readonly Guid ChessClubId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid SwitchedOffId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid WrongGradeId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++
++    private IDialogService DialogService => Services.GetRequiredService<IDialogService>();
++
++    public ActivityGroupPickerDialogTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++        Services.AddSingleton<ILogger<ActivityGroupPickerDialog>>(
++            NullLogger<ActivityGroupPickerDialog>.Instance);
++    }
++
++    /// <summary>A scripted Students API: exact (method, url) answers, and every unmapped route 404s.</summary>
++    private sealed class ScriptedHandler : HttpMessageHandler
++    {
++        public readonly List<(string Method, string Url)> Calls = new();
++        private readonly Dictionary<(string Method, string Url), (HttpStatusCode Status, string Body)> _responses = new();
++
++        public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
++        {
++            _responses[(method.ToUpperInvariant(), url)] = (status, body);
++            return this;
++        }
++
++        protected override Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request, CancellationToken cancellationToken)
++        {
++            var url = request.RequestUri!.PathAndQuery;
++            Calls.Add((request.Method.Method.ToUpperInvariant(), url));
++
++            if (_responses.TryGetValue((request.Method.Method.ToUpperInvariant(), url), out var hit))
++            {
++                return Task.FromResult(new HttpResponseMessage(hit.Status)
++                {
++                    Content = new StringContent(hit.Body, Encoding.UTF8, "application/json"),
++                });
++            }
++
++            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
++            {
++                Content = new StringContent($"Unexpected {request.Method.Method} {url}", Encoding.UTF8, "application/json"),
++            });
++        }
++    }
++
++    private void Register(ScriptedHandler handler)
++    {
++        var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
++        var codedValues = new CodedValuesApiClient(http);
++        Services.AddSingleton(codedValues);
++        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValues));
++    }
++
++    /// <summary>
++    /// One activity-group row as the API serves it. <c>eligibleGradeIds</c> empty means "any grade"
++    /// (repository contract, FR-40), which is what makes the Chess Club addable.
++    /// </summary>
++    private static string GroupJson(
++        Guid id,
++        string name,
++        bool isActive = true,
++        Guid[]? eligibleGradeIds = null,
++        int? capacity = null,
++        int activeMemberCount = 0) =>
++        $"{{\"id\":\"{id:D}\",\"name\":\"{name}\",\"description\":null,\"category\":null,"
++        + $"\"capacity\":{(capacity is null ? "null" : capacity.Value.ToString())},"
++        + $"\"isActive\":{isActive.ToString().ToLowerInvariant()},\"span\":\"OpenEnded\","
++        + "\"enrollmentStartDate\":null,\"enrollmentEndDate\":null,\"autoRenewDefault\":true,"
++        + $"\"eligibleGradeIds\":[{(eligibleGradeIds ?? []).Aggregate(string.Empty, (acc, g) => acc + (acc.Length == 0 ? string.Empty : ",") + $"\"{g:D}\"")}],"
++        + $"\"activeMemberCount\":{activeMemberCount},"
++        + "\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}";
++
++    /// <summary>An available group, a switched-off one, and one offered only to another grade.</summary>
++    private static string MixedGroupsJson() =>
++        "["
++        + GroupJson(ChessClubId, "Chess Club")
++        + ","
++        + GroupJson(SwitchedOffId, "Robotics Club", isActive: false)
++        + ","
++        + GroupJson(WrongGradeId, "Semester Band", eligibleGradeIds: [OtherGradeId])
++        + "]";
++
++    /// <summary>Opens the picker through the real dialog pipeline and returns the rendered provider.</summary>
++    private IRenderedComponent<FluentDialogProvider> OpenPicker(
++        ScriptedHandler handler,
++        out Task<Guid[]?> result)
++    {
++        Register(handler);
++        var cut = Render<FluentDialogProvider>();
++        result = DialogService.ShowShellDialogAsync<ActivityGroupPickerDialog, ActivityGroupPickerModel, Guid[]>(
++            new ActivityGroupPickerModel(StudentId, GradeId), "Add activity groups", DialogWidth.Medium);
++        return cut;
++    }
++
++    /// <summary>The footer's Add button — the one control whose state the pick gates.</summary>
++    private static AngleSharp.Dom.IElement AddButton(IRenderedComponent<FluentDialogProvider> cut) =>
++        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Add");
++
++    /// <summary>
++    /// (a) A blocked row is not selectable: no checkbox exists in it, and its reason is in the visible
++    /// text. Both halves matter — an unselectable row with no reason reads as a bug (owner Q18).
++    /// </summary>
++    [TestMethod]
++    public void BlockedRows_AreNotSelectable_AndCarryTheirReason()
++    {
++        var handler = new ScriptedHandler()
++            .Map("GET", "/activity-groups", HttpStatusCode.OK, MixedGroupsJson())
++            .Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.OK, "[]");
++
++        var cut = OpenPicker(handler, out _);
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
++
++        var blocked = cut.FindAll("li.picker-row--blocked");
++        blocked.Should().HaveCount(2, "the switched-off group and the one offered to another grade");
++
++        foreach (var row in blocked)
++        {
++            row.QuerySelectorAll("fluent-checkbox").Should().BeEmpty(
++                "a blocked option must not be selectable at all — not merely refused on submit");
++        }
++
++        cut.Markup.Should().Contain("Group is switched off",
++            "the mirror's own reason is shown beside the struck-through row");
++        cut.Markup.Should().Contain("Not offered to this grade");
++
++        // The available row is the only selectable one.
++        cut.FindAll("fluent-checkbox").Should().ContainSingle("only Chess Club can be picked");
++    }
++
++    /// <summary>
++    /// (b) Picking an available row is what enables Add: the footer is disabled on an empty pick, and
++    /// nothing a blocked row can do changes that.
++    /// </summary>
++    [TestMethod]
++    public async Task SelectingAnAvailableRow_EnablesAdd()
++    {
++        var handler = new ScriptedHandler()
++            .Map("GET", "/activity-groups", HttpStatusCode.OK, MixedGroupsJson())
++            .Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.OK, "[]");
++
++        var cut = OpenPicker(handler, out _);
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
++
++        AddButton(cut).GetAttribute("disabled").Should().NotBeNull(
++            "an empty pick is not a submit — the page would write memberships for nothing");
++
++        var checkbox = cut.FindComponents<FluentCheckbox>().Single();
++        await cut.InvokeAsync(() => checkbox.Instance.ValueChanged.InvokeAsync(true));
++
++        cut.WaitForAssertion(() => AddButton(cut).GetAttribute("disabled").Should().BeNull(
++            "picking an available row is the one thing that arms Add"));
++    }
++
++    /// <summary>
++    /// (c) The dialog returns the picked ids — and only those. The page performs the writes, so this
++    /// result is the whole contract between the picker and the caller.
++    /// </summary>
++    [TestMethod]
++    public async Task Submitting_ReturnsTheSelectedIds()
++    {
++        var handler = new ScriptedHandler()
++            .Map("GET", "/activity-groups", HttpStatusCode.OK, MixedGroupsJson())
++            .Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.OK, "[]");
++
++        var cut = OpenPicker(handler, out var result);
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
++
++        var checkbox = cut.FindComponents<FluentCheckbox>().Single();
++        await cut.InvokeAsync(() => checkbox.Instance.ValueChanged.InvokeAsync(true));
++
++        cut.Find("form").Submit();
++
++        var ids = await result.WaitAsync(TimeSpan.FromSeconds(5));
++
++        ids.Should().NotBeNull("a pick closes the dialog with a result");
++        ids.Should().Equal(new[] { ChessClubId }, "exactly the available group the operator picked");
++        handler.Calls.Should().NotContain(c => c.Method == "POST",
++            "the PICKER never writes a membership — the page does, one call per id");
++    }
++
++    /// <summary>
++    /// (d) A FAILED load is not an empty tenant. The list read fails, so the picker must say it could not
++    /// be read — never "No activity groups exist yet" beside an error — and it must not echo the
++    /// exception's own text (the #416 seam; the raw text lives in the log).
++    /// </summary>
++    [TestMethod]
++    public void FailedLoad_SaysItCouldNotBeRead_NotThatTheTenantHasNone()
++    {
++        var handler = new ScriptedHandler()
++            .Map("GET", "/activity-groups", HttpStatusCode.InternalServerError, "boom")
++            .Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.InternalServerError, "boom");
++
++        var cut = OpenPicker(handler, out _);
++
++        cut.WaitForAssertion(() => cut.Markup.Should()
++            .Contain("The activity groups could not be loaded. Close this dialog and try again.",
++                "a failed load is a failure, stated in the picker's own words"));
++
++        cut.Markup.Should().NotContain("No activity groups exist yet",
++            "the empty state means 'this tenant has none', which is a different fact from 'the read failed'");
++
++        // The #416 assertions read the ERROR BAR's text, never the whole markup: every
++        // blazor:elementReference in bUnit markup is a random GUID, and a GUID contains "500" often
++        // enough to redden this test roughly one run in five. Positive first, so a selector that
++        // resolved to the wrong bar cannot satisfy the two negatives while asserting nothing.
++        var errorBar = cut.Find(".activity-group-picker fluent-message-bar[intent='error']").TextContent;
++
++        errorBar.Should().Contain("The activity groups could not be loaded.",
++            "the scoped element is the picker's own failure bar, not just any message bar");
++        errorBar.Should().NotContain("Response status code",
++            "the exception's own text belongs in the log, never on screen (#416)");
++        errorBar.Should().NotContain("500",
++            "and neither does the status code it carried");
++    }
++}
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/ActivityGroupsPageTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/ActivityGroupsPageTests.cs
+index 5d05377f..611bea19 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/ActivityGroupsPageTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/ActivityGroupsPageTests.cs
+@@ -179,9 +179,11 @@ public class ActivityGroupsPageTests : BunitContext
+ 
+     /// <summary>
+     /// AC-1a/1b: when the list API fails (404 here), the page shows the red
+-    /// error message (via LandingPage Error), the empty-state bar reads "Could
+-    /// not load activity groups.", and the loading spinner stops (no
+-    /// fluent-spinner) instead of spinning forever.
++    /// error message (via LandingPage Error) carrying the page's own plain
++    /// sentence, and the loading spinner stops (no fluent-spinner) instead of
++    /// spinning forever. The empty-state bar no longer speaks for a failed load:
++    /// it would claim the tenant has no activity groups about a list that was
++    /// never read.
+     /// </summary>
+     [TestMethod]
+     public void ListPage_ApiFailure_ShowsErrorAndStopsSpinner()
+@@ -194,8 +196,13 @@ public class ActivityGroupsPageTests : BunitContext
+         var cut = Render<ActivityGroups>();
+         cut.WaitForState(() => cut.Markup.Contains("Could not load activity groups"), TimeSpan.FromSeconds(2));
+ 
+-        cut.Markup.Should().Contain("Could not load activity groups.", "AC-1b: empty state reads as a failure, not an empty list");
+-        cut.Markup.Should().Contain("404", "AC-1a: the rendered error text includes the failure (HttpRequestException message)");
++        cut.Markup.Should().Contain("Could not load activity groups.", "the error bar carries the page's own plain sentence");
++        cut.Markup.Should().NotContain("No activity groups yet.",
++            "an empty list paired with a failed load must not claim the tenant has no activity groups");
++        cut.Markup.Should().NotContain("404",
++            "AC-1a inverted (debt-sweep round): PR #194 pinned the raw HTTP message as user-facing "
++            + "copy; the friendly-error seam (FriendlyError.Describe) replaces it with the page's own "
++            + "sentence and logs the detail instead. This contract change is deliberate, not a loosened test.");
+         cut.Markup.Should().NotContain("fluent-spinner", "AC-1b: the loading spinner stops on failure");
+     }
+ 
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs
+index 74d942da..1089459d 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs
+@@ -197,6 +197,31 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+ 
+     private static string GroupExceptionsUrl => $"{ExceptionsResource}?activityGroupId={GroupId:D}&topicId={TopicId:D}";
+ 
++    /// <summary>
++    /// The one <c>POST {ExceptionsResource}/bulk</c> this run made.
++    ///
++    /// <para><b>Scoped by URL, deliberately.</b> <c>Calls.Single(c =&gt; c.Method == "POST")</c> asserts two
++    /// things at once — "the dialog wrote the row" AND "nothing else in this session ever POSTs" — so an
++    /// unrelated write reddens a correct dialog with "more than one matching element" and no name for the
++    /// culprit (issue #418; the same shape cost the notification-template create suite two false flake
++    /// reports). The predicate here is the one every call site already asserts a few lines above.</para>
++    ///
++    /// <para><b>Not a silent pass.</b> A missing expected call still fails: <c>ContainSingle</c> rejects
++    /// zero matches as loudly as two, and the failure message lists every POST observed, so the next
++    /// occurrence diagnoses itself instead of needing a bisect.</para>
++    /// </summary>
++    private static (string Method, string Url, string? Body) TheBulkPost(ScriptedHandler handler)
++    {
++        var posts = handler.Calls.Where(c => c.Method == "POST").ToList();
++
++        return posts
++            .Should().ContainSingle(
++                c => c.Url == $"{ExceptionsResource}/bulk",
++                "the dialog writes one bulk exception per Add (observed POSTs: "
++                + string.Join(", ", posts.Select(p => p.Url)) + ")")
++            .Which;
++    }
++
+     // ── Harness ────────────────────────────────────────────────────────────
+ 
+     /// <summary>
+@@ -645,7 +670,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
+             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
+ 
+-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
++        var post = TheBulkPost(harness.Handler);
+         post.Body.Should().Contain($"\"gradeLevelId\":\"{GradeId:D}\"");
+         post.Body.Should().Contain("\"activityGroupId\":null", "a grade-owned exception names no group");
+         post.Body.Should().Contain($"\"topicId\":\"{TopicId:D}\"");
+@@ -793,7 +818,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
+             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
+ 
+-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
++        var post = TheBulkPost(harness.Handler);
+         post.Body.Should().Contain("\"division\":2", "the CHOSEN part travels — Semesters, as picked");
+         post.Body.Should().Contain("\"ordinal\":2", "and the chosen position travels as the ordinal (§0 decision 15)");
+         post.Body.Should().Contain($"\"startDate\":\"{Sem2Start:yyyy-MM-dd}\"");
+@@ -850,7 +875,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
+             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
+ 
+-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
++        var post = TheBulkPost(harness.Handler);
+         post.Body.Should().Contain($"\"activityGroupId\":\"{GroupId:D}\"");
+         post.Body.Should().Contain("\"division\":1", "Terms — the only part FR-56 permits here");
+         post.Body.Should().Contain("\"ordinal\":1");
+@@ -941,7 +966,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
+             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
+ 
+-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
++        var post = TheBulkPost(harness.Handler);
+         post.Body.Should().Contain("\"division\":1");
+         post.Body.Should().Contain("\"ordinal\":1", "the first chosen sequence travels");
+         post.Body.Should().Contain("\"ordinal\":5",
+@@ -972,7 +997,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+         harness.Dialog.WaitForAssertion(() => harness.Handler.Calls.Should()
+             .Contain(c => c.Method == "POST" && c.Url == $"{ExceptionsResource}/bulk"));
+ 
+-        var post = harness.Handler.Calls.Single(c => c.Method == "POST");
++        var post = TheBulkPost(harness.Handler);
+         post.Body.Should().Contain("\"startDate\":\"2028-03-01\"",
+             "the ACTIVE year's Term 1, not the completed year's");
+         post.Body.Should().Contain("\"endDate\":\"2028-06-30\"", "and that period's end");
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/FieldWidthW9FillTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/FieldWidthW9FillTests.cs
+new file mode 100644
+index 00000000..5110c895
+--- /dev/null
++++ b/tests/SchoolCollab.Admin.Tests.Unit/FieldWidthW9FillTests.cs
+@@ -0,0 +1,84 @@
++using System.Reflection;
++using System.Text.RegularExpressions;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Admin.Shared.Components;
++
++namespace SchoolCollab.Admin.Tests.Unit;
++
++/// <summary>
++/// <b>The ladder's "fill" step actually fills</b> (#414, owner round debt-sweep 2026-10-27).
++///
++/// <para><c>FieldWidth.W9.ToCssStyle</c> emitted <c>flex: 1 1 0</c> while <c>.w-9</c> in
++/// <c>src/SchoolCollab.Admin/wwwroot/css/app.css</c> — the same ladder step expressed as a class —
++/// used <c>flex: 1 1 auto</c>. The difference is not cosmetic. The ladder's inline style lands on an
++/// element that is a <b>flex item</b> (the dropdown wrappers' <c>fluent-field</c> host; a
++/// <c>FormRow</c> input cell is <c>display:flex</c> per <c>FormRow.razor.css</c>), and with a zero
++/// flex-basis the used width is resolved by the flex algorithm from the item's content instead of
++/// from the <c>width:100%</c> beside it — so a W9 field sized to its own text and read as the same
++/// width as a fixed-width sibling. An <c>auto</c> basis makes the <c>100%</c> the starting size, so
++/// the field fills the cell before it grows.</para>
++///
++/// <para>Two assertions, because the defect was the two expressions of one ladder step disagreeing:
++/// the emitted inline style, and its agreement with the <c>.w-9</c> class. Both fail if someone
++/// "tidies" the basis back to <c>0</c>.</para>
++/// </summary>
++[TestClass]
++public class FieldWidthW9FillTests
++{
++    /// <summary>The App host's global ladder sheet — the class half of the same step.</summary>
++    private static string ReadAppCss()
++    {
++        var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
++        var path = Path.GetFullPath(Path.Combine(
++            asmDir,
++            "..", "..", "..", "..", "..",
++            "src", "SchoolCollab.Admin", "wwwroot", "css", "app.css"));
++        File.Exists(path).Should().BeTrue($"app.css should exist at '{path}'");
++        return File.ReadAllText(path);
++    }
++
++    /// <summary>The declaration block of the <c>.w-9</c> rule (the ladder's fill step as a class),
++    /// with runs of whitespace collapsed so a reformat of the sheet does not matter.</summary>
++    private static string W9ClassRule()
++    {
++        var match = Regex.Match(ReadAppCss(), @"\.w-9\s*\{(?<decls>[^}]*)\}");
++        match.Success.Should().BeTrue("app.css must define the .w-9 fill step");
++        return Regex.Replace(match.Groups["decls"].Value, @"\s+", " ").Trim();
++    }
++
++    /// <summary>
++    /// W9 keeps an <c>auto</c> flex-basis. A zero basis resolves the width from the flex algorithm,
++    /// not from the 100%, and the field stops filling its cell.
++    /// </summary>
++    [TestMethod]
++    public void W9_EmitsAnAutoFlexBasis()
++    {
++        var style = FieldWidth.W9.ToCssStyle();
++
++        style.Should().NotContain("flex:1 1 0",
++            "a zero flex-basis resolves the width from the flex algorithm instead of the 100%, which is "
++            + "the #414 'W9 does not fill its cell' defect");
++        style.Should().Contain("flex:1 1 auto",
++            "the auto basis is what makes the 100% the starting size in a flex parent (#414)");
++        style.Should().Contain("width:100%",
++            "and the 100% alone must still fill a non-flex parent");
++    }
++
++    /// <summary>
++    /// The inline style and the <c>.w-9</c> class are the same ladder step and must not drift: the
++    /// class was already fixed, the C# helper was not — which is how #414 shipped.
++    /// </summary>
++    [TestMethod]
++    public void W9_AgreesWith_TheW9CssClass()
++    {
++        var style = FieldWidth.W9.ToCssStyle();
++        var rule = W9ClassRule();
++
++        style.Should().Contain("flex:1 1 auto");
++        rule.Should().Contain("flex: 1 1 auto",
++            "app.css's .w-9 carries the same fix and is the documented home of the reason");
++        style.Should().Contain("width:100%");
++        rule.Should().Contain("width: 100%");
++    }
++}
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/FriendlyErrorSeamTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/FriendlyErrorSeamTests.cs
+new file mode 100644
+index 00000000..71d9a143
+--- /dev/null
++++ b/tests/SchoolCollab.Admin.Tests.Unit/FriendlyErrorSeamTests.cs
+@@ -0,0 +1,125 @@
++using Bunit;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Admin.Shared.Components;
++using SchoolCollab.Admin.Shared.Services;
++
++namespace SchoolCollab.Admin.Tests.Unit;
++
++/// <summary>
++/// The friendly-error seam itself (#416): <see cref="FriendlyError.Describe"/> logs the exception with
++/// full detail and returns <b>only</b> the caller's sentence, and <see cref="FriendlyErrorBar"/> renders
++/// that sentence — or nothing at all when there is none.
++///
++/// <para>These are the two halves every converted surface relies on. The page-level proof that a failed
++/// load shows the sentence and not the exception text lives beside each harness that has one
++/// (<c>ActivityGroupPickerDialogTests</c>, <c>TeacherDetailPageBunitTests</c>); this suite pins the
++/// contract itself, so a page cannot regress through the seam.</para>
++/// </summary>
++[TestClass]
++public class FriendlyErrorSeamTests : BunitContext
++{
++    /// <summary>An <see cref="ILogger"/> that keeps what it was handed, so the test can inspect it.</summary>
++    private sealed class RecordingLogger : ILogger
++    {
++        public List<(LogLevel Level, Exception? Exception, string Message)> Entries { get; } = [];
++
++        public IDisposable BeginScope<TState>(TState state) where TState : notnull => new NoopScope();
++
++        public bool IsEnabled(LogLevel logLevel) => true;
++
++        public void Log<TState>(
++            LogLevel logLevel,
++            EventId eventId,
++            TState state,
++            Exception? exception,
++            Func<TState, Exception?, string> formatter) =>
++            Entries.Add((logLevel, exception, formatter(state, exception)));
++
++        private sealed class NoopScope : IDisposable
++        {
++            public void Dispose() { }
++        }
++    }
++
++    public FriendlyErrorSeamTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++    }
++
++    /// <summary>
++    /// The sentence, verbatim — and none of the exception's own text. This is the whole point: the two
++    /// strings are different, and only the caller's is displayable.
++    /// </summary>
++    [TestMethod]
++    public void Describe_ReturnsOnlyThePlainSentence()
++    {
++        const string Sentence = "Teachers could not be loaded. Try again.";
++        var logger = new RecordingLogger();
++
++        var shown = FriendlyError.Describe(
++            new InvalidOperationException("An error occurred while sending the request. Socket 1234 refused."),
++            Sentence,
++            logger);
++
++        shown.Should().Be(Sentence);
++        shown.Should().NotContain("Socket", "the exception's own text is never displayable");
++        shown.Should().NotContain("1234");
++    }
++
++    /// <summary>
++    /// The detail is not discarded, it is relocated: one Error entry carrying the exception object itself,
++    /// which is what gives the operator the type, message, stack and inner chain.
++    /// </summary>
++    [TestMethod]
++    public void Describe_LogsTheExceptionWithItsFullDetail()
++    {
++        var logger = new RecordingLogger();
++        var failure = new TimeoutException(
++            "The request timed out.",
++            new IOException("The socket was closed."));
++
++        var shown = FriendlyError.Describe(failure, "The teacher could not be loaded. Try again.", logger);
++
++        logger.Entries.Should().ContainSingle("one failure, one entry — the sentence is not a second log line");
++        logger.Entries[0].Level.Should().Be(LogLevel.Error);
++        logger.Entries[0].Exception.Should().BeSameAs(
++            failure, "the exception object travels to the log, so the stack and inner chain survive");
++        logger.Entries[0].Message.Should().Contain(shown, "the entry names the operation in the same words");
++    }
++
++    /// <summary>
++    /// A blank sentence is refused rather than rendered: a blank bar shows <i>nothing</i>, which would hide
++    /// the failure entirely — strictly worse than the raw text it replaced.
++    /// </summary>
++    [TestMethod]
++    public void Describe_RejectsABlankSentence()
++    {
++        var logger = new RecordingLogger();
++
++        var blank = () => FriendlyError.Describe(new InvalidOperationException("boom"), "   ", logger);
++
++        blank.Should().Throw<ArgumentException>("a blank sentence would hide the failure completely");
++        logger.Entries.Should().BeEmpty("nothing was shown, so nothing should be logged as surfaced");
++    }
++
++    /// <summary>The render half: the sentence becomes a red bar, and a blank message becomes no bar.</summary>
++    [TestMethod]
++    public void ErrorBar_RendersTheSentence_AndNothingWhenBlank()
++    {
++        var cut = Render<FriendlyErrorBar>(p => p.Add(x => x.Message, "Teachers could not be loaded. Try again."));
++
++        cut.Markup.Should().Contain("Teachers could not be loaded. Try again.");
++        cut.FindComponents<FluentMessageBar>().Should().ContainSingle(
++            "a failure is exactly one bar, and it is an error");
++
++        var blank = Render<FriendlyErrorBar>(p => p.Add(x => x.Message, "   "));
++        blank.FindAll("fluent-message-bar").Should().BeEmpty(
++            "a blank message is not an empty red bar — it is no bar at all, which keeps a failed state "
++            + "from reading as an empty one");
++    }
++}
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/LandingPageTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/LandingPageTests.cs
+index fac0c03f..4b90c8ac 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/LandingPageTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/LandingPageTests.cs
+@@ -146,6 +146,22 @@ public class LandingPageTests : BunitContext
+         cut.Markup.Should().Contain("kaboom");
+     }
+ 
++    [TestMethod]
++    public void EmptyItems_WithError_RendersErrorSentence_And_Not_EmptyMessage()
++    {
++        // A failed load arrives as an empty array AND an error: Teachers.razor assigns both in the
++        // same catch, so the empty branch used to tell the operator "No widgets yet." about a list
++        // it never managed to read, at the same time as the error bar. The defect is the
++        // coexistence, so the negative assertion is the point of this test — asserting only that
++        // the error appears would pass against the broken component.
++        var cut = RenderWrapper(items: [], error: "kaboom");
++
++        cut.Markup.Should().Contain("kaboom",
++            "the failed load's error sentence is still rendered");
++        cut.Markup.Should().NotContain("No widgets yet.",
++            "an empty Items array paired with an Error is a failed load, never a claim that nothing exists");
++    }
++
+     [TestMethod]
+     public void SearchEnabled_False_Hides_SearchBox()
+     {
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/NotificationTemplateCreateTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/NotificationTemplateCreateTests.cs
+index 2fc17849..14e7c836 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/NotificationTemplateCreateTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/NotificationTemplateCreateTests.cs
+@@ -32,6 +32,13 @@ public class NotificationTemplateCreateTests : BunitContext
+ 
+     private TemplateApiHandler Register() => TemplateTestServices.Register<Create>(this);
+ 
++    /// <summary>The editor's live-preview endpoint — a <b>POST</b> that is not a store write.</summary>
++    private const string PreviewPath = "/assignments/notification-templates/preview";
++
++    private static bool IsStorePost((string Method, string Url, string? Body) call) =>
++        call.Method == "POST"
++        && call.Url.StartsWith(TemplateApiHandler.BasePath, StringComparison.OrdinalIgnoreCase);
++
+     [TestMethod]
+     public async Task Save_PostsTheWholeDraft_IncludingTheTitleAndDescription_WithNoReason()
+     {
+@@ -74,12 +81,14 @@ public class NotificationTemplateCreateTests : BunitContext
+             // Filter to THIS endpoint, and report what else was posted if the expectation ever breaks.
+             // `Single(c => c.Method == "POST")` over every call was the shape that reddened two of three
+             // full-suite runs (issue #418): it couples this assertion — "the create posts the whole draft" —
+-            // to the absence of any other POST in the whole session, so an unrelated write turns a correct
+-            // page into a failure with the misleading message "more than one matching element".
++            // to the absence of any other POST in the whole session. The other POST is now KNOWN and is
++            // not unrelated: the editor's live preview is a POST to
++            // /assignments/notification-templates/preview, queued behind a 300 ms debounce on every draft
++            // edit and at editor init, so it lands whenever the run is slow enough to pass 300 ms between
++            // the last edit and Save — which the whole-solution leg is and this class alone usually is not.
++            // `DraftEdits_PostTheLivePreview_SoTheCreateCannotBeFoundByMethodAlone` pins that mechanism.
+             var posts = handler.Calls.Where(c => c.Method == "POST").ToArray();
+-            var createPosts = posts
+-                .Where(p => p.Url.StartsWith(TemplateApiHandler.BasePath, StringComparison.OrdinalIgnoreCase))
+-                .ToArray();
++            var createPosts = posts.Where(IsStorePost).ToArray();
+ 
+             createPosts.Should().ContainSingle(
+                 $"the create must post the draft exactly once. All POSTs this run: "
+@@ -118,12 +127,70 @@ public class NotificationTemplateCreateTests : BunitContext
+             cut.Find("#template-editor-error").TextContent.Should().Contain("A title is required",
+                 "no template can be created nameless (naming spec D1/D2)"));
+ 
+-        // Nothing was dispatched: the page refuses a draft it could not save before asking the operator
+-        // for anything or writing anything.
+-        handler.Calls.Should().NotContain(c => c.Method == "POST",
++        // Nothing was dispatched to the store: the page refuses a draft it could not save before asking the
++        // operator for anything or writing anything. Scoped to the store endpoint, because the editor's
++        // live preview POSTs on its own timer (#418) and is not a write.
++        handler.Calls.Should().NotContain(c => IsStorePost(c),
+             "the page refuses a blank title before the write is dispatched");
+     }
+ 
++    /// <summary>
++    /// <b>#418's cause, pinned.</b> The create page's Save is not the only POST in its session: the shared
++    /// editor renders a live preview through <c>POST {PreviewPath}</c>, queued behind a 300 ms debounce by
++    /// <c>QueuePreview</c> on every draft edit — and once at editor initialisation.
++    ///
++    /// <para>Therefore <c>handler.Calls.Single(c =&gt; c.Method == "POST")</c> never meant "the create": it
++    /// meant "the create, provided no preview has fired yet". Whether the preview lands before or after
++    /// Save is a function of wall-clock speed alone, which is exactly why the failure looked like a timing
++    /// flake, appeared only in the whole-solution leg, and never reproduced in isolation. The fix is the
++    /// one already in place — identify the create by its URL, not by its method — and this test is what
++    /// keeps anyone from "simplifying" it back.</para>
++    /// </summary>
++    [TestMethod]
++    public async Task DraftEdits_PostTheLivePreview_SoTheCreateCannotBeFoundByMethodAlone()
++    {
++        var handler = Register();
++        Services.GetRequiredService<NavigationManager>()
++            .NavigateTo($"/notification-templates/create?grade={TemplateApiHandler.GradeA}");
++
++        var cut = Render<Create>();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 2"));
++
++        // A complete draft, so the Save below is dispatched rather than refused by validation.
++        await TypeTitleAsync(cut, "Grade 8 Science reminder");
++        var channel = cut
++            .FindComponents<DropdownComponent<TemplateEditor.ChannelOption, NotificationChannel>>()
++            .Single();
++        await cut.InvokeAsync(() => channel.Instance.SelectedValueChanged.InvokeAsync(NotificationChannel.SMS));
++
++        // One draft edit is enough to queue a preview; the editor also queues one at initialisation, so a
++        // run slow enough to pass 300 ms between render and Save has already posted the preview.
++        var body = cut.FindComponents<FluentTextArea>().Single(a => a.Instance.Id == "template-body-text");
++        await cut.InvokeAsync(() => body.Instance.ValueChanged.InvokeAsync("Hello {{Title}}"));
++
++        cut.WaitForAssertion(
++            () => handler.Calls.Should().Contain(c => c.Method == "POST" && c.Url == PreviewPath,
++                "the debounced live preview is a POST, and it is not a write to the template store"),
++            TimeSpan.FromSeconds(5));
++
++        handler.Calls.Should().NotContain(c => IsStorePost(c), "nothing has been saved yet");
++
++        // Now save. Both POSTs exist, so a method-only filter is ambiguous by construction.
++        cut.Find("#template-save").Click();
++
++        cut.WaitForAssertion(
++            () => handler.Calls.Where(IsStorePost).Should()
++                .ContainSingle("one Save dispatches exactly one store write"),
++            TimeSpan.FromSeconds(5));
++
++        var posts = handler.Calls.Where(c => c.Method == "POST").ToArray();
++        posts.Should().HaveCountGreaterThanOrEqualTo(2,
++            "the run has already made a preview POST and the save POST — `Single(Method == \"POST\")` would "
++            + "throw \"more than one matching element\", which is the #418 failure verbatim");
++        posts.Where(p => !IsStorePost(p)).Should().OnlyContain(p => p.Url == PreviewPath,
++            "and the only non-store POST is the preview endpoint");
++    }
++
+     [TestMethod]
+     public void Create_StartsOnEmail_WithTheNamingRows_AndNoReasonFieldOnThePage()
+     {
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/TeacherDetailPageBunitTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/TeacherDetailPageBunitTests.cs
+index 60a62966..388ddcf2 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/TeacherDetailPageBunitTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/TeacherDetailPageBunitTests.cs
+@@ -222,6 +222,27 @@ public class TeacherDetailPageBunitTests : BunitContext
+         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Teacher not found."));
+     }
+ 
++    /// <summary>
++    /// A failed load shows the page's own plain sentence — and never the exception's text (#416). The
++    /// sentence comes from <c>FriendlyError.Describe</c>, which logs the detail instead of rendering it.
++    /// </summary>
++    [TestMethod]
++    public void Detail_LoadFailure_ShowsAPlainSentence_AndNeverTheExceptionText()
++    {
++        var teacherId = Guid.NewGuid();
++        Register(teacherId, teacherStatus: "InternalServerError");
++
++        var cut = Render<TeacherDetail>(p => p.Add(x => x.Id, teacherId));
++
++        cut.WaitForAssertion(() => cut.Markup.Should()
++            .Contain("This teacher could not be loaded. Try again, or go back to the teacher list.",
++                "a failed load states the failure in the page's own words"));
++
++        cut.Markup.Should().NotContain("Response status code",
++            "the exception's own text belongs in the log, never on screen (#416)");
++        cut.Markup.Should().NotContain("Internal Server Error");
++    }
++
+     [TestMethod]
+     public void Detail_NoSubjectsAndNoGradeLevels_ShowsEmptyState()
+     {
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/FriendlyErrorAllowList.cs b/tests/SchoolCollab.ArchitectureTests.Unit/FriendlyErrorAllowList.cs
+new file mode 100644
+index 00000000..3c1deaf8
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/FriendlyErrorAllowList.cs
+@@ -0,0 +1,418 @@
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// <b>The ratchet ledger for the friendly-error guard</b> — one entry per raw
++/// <c>Exception.Message</c> site that remains in a <c>.razor</c> file, in the shape
++/// <c>file:line</c> plus a one-line reason. Nothing is grandfathered by silence: every site the scan
++/// finds must appear here, and the count may never exceed <see cref="RecordedEntryCount"/>.
++///
++/// <para><b>Why a ledger instead of a big-bang sweep.</b> The defect (<c>_error = ex.Message</c> inside
++/// a <c>.razor</c>) is a pattern, not a handful of spots: the round that introduced the guard counted
++/// over three hundred of them, each of which compiles, renders and reviews cleanly because the leak only
++/// shows the day an internal error reaches a user's screen. Converting them all in one change would put
++/// untested pages at risk for a cosmetic gain, so the round converted the four surfaces the #416 report
++/// and its siblings name, and this file pins the rest: the guard fails immediately on a NEW site, and
++/// the count assertion fails if someone appends a line to admit one.</para>
++///
++/// <para><b>Shrinking is the only legal edit.</b> Convert a site and delete its line, then lower
++/// <see cref="RecordedEntryCount"/> to the new length in the same change — the two edits together are
++/// the visible act of paying debt down. Adding a line is not legal, and neither is raising the count
++/// without converting a site.</para>
++///
++/// <para><b>Matching is per (file, ordinal), not per line number.</b> The recorded line keeps each
++/// entry honest and locatable, but an unrelated edit elsewhere in one of these files must not redden a
++/// ratchet it did not break; what the guard enforces is that each file holds exactly the number of
++/// allow-listed sites it still holds. A conversion therefore shows up as a count mismatch and demands
++/// the line be deleted, which is the behaviour the ratchet wants.</para>
++///
++/// <para>Reasons are the site's shape, not a per-site essay: the migration target is the same
++/// everywhere — <c>FriendlyError.Describe</c> for the text,
++/// <c>FriendlyErrorBar</c> for the render.</para>
++/// </summary>
++internal static class FriendlyErrorAllowList
++{
++    /// <summary>
++    /// The number of raw sites recorded when the guard landed (debt-sweep round, 2026-10-27). A site
++    /// count above this fails: admitting one means converting one first.
++    /// </summary>
++    public const int RecordedEntryCount = 298;
++
++    /// <summary>Every remaining raw <c>Exception.Message</c> site, as <c>file:line</c>.</summary>
++    public static readonly string[] Sites =
++    [
++        "src/AI/SchoolCollab.AI.Chat/Components/AiChat.razor:165", // error field assigned the raw message
++        "src/AI/SchoolCollab.AI.Chat/Components/AiChat.razor:648", // error field assigned the raw message
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:765", // ErrorBoundary content interpolates the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:2278", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:3714", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:3837", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:3869", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:3901", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:3933", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:3964", // error field assigned the raw message
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:312", // ErrorBoundary content interpolates the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:401", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:494", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:531", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:570", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:611", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:641", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:665", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:697", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:726", // error field assigned the raw message
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:203", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:264", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:291", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:318", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:343", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:373", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:406", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:618", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:643", // error field assigned the raw message
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor:143", // error field assigned the raw message
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionGenerationSection.razor:437", // error field assigned the raw message
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionsDraftSection.razor:458", // error field assigned the raw message
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/RecorderPanel.razor:357", // recorder maps the raw capture error text
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/RecorderPanel.razor:392", // recorder maps the raw capture error text
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/RecorderPanel.razor:422", // recorder maps the raw capture error text
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/RecorderPanel.razor:473", // recorder maps the raw capture error text
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/ResourcesSection.razor:235", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/ResourcesSection.razor:368", // error field assigned the raw message
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOff.razor:138", // ErrorBoundary content interpolates the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOff.razor:172", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOff.razor:203", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOff.razor:232", // error field assigned the raw message
++
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOffSection.razor:151", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOffSection.razor:187", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOffSection.razor:209", // error field assigned the raw message
++        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOffSection.razor:233", // error field assigned the raw message
++
++        "src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor:85", // error field assigned the raw message
++        "src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor:131", // error field assigned the raw message
++        "src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor:135", // error field assigned the raw message
++        "src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor:143", // error field assigned the raw message
++
++        "src/Mobile/SchoolCollab.Mobile/Components/Pages/Assignments/Detail.razor:218", // ErrorBoundary content interpolates the raw message
++        "src/Mobile/SchoolCollab.Mobile/Components/Pages/Assignments/Detail.razor:302", // error field assigned the raw message
++        "src/Mobile/SchoolCollab.Mobile/Components/Pages/Assignments/Detail.razor:308", // error field assigned the raw message
++
++        "src/Mobile/SchoolCollab.Mobile/Components/Pages/Assignments/Index.razor:203", // error field assigned the raw message
++        "src/Mobile/SchoolCollab.Mobile/Components/Pages/Assignments/Index.razor:209", // error field assigned the raw message
++
++        "src/SchoolCollab.Admin/Components/Layout/DevTenantSwitcher.razor:155", // error field assigned the raw message
++
++        "src/SchoolCollab.Admin.Shared/Components/CodedValueDialog.razor:172", // dialog footer error set from the raw message
++
++        "src/SchoolCollab.Admin.Shared/Components/Landing/LandingPage.razor:80", // ErrorBoundary content interpolates the raw message
++
++        "src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor:187", // ErrorBoundary content interpolates the raw message
++        "src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor:297", // error field assigned the raw message
++        "src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor:391", // error field assigned the raw message
++        "src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor:414", // error field assigned the raw message
++        "src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor:441", // error field assigned the raw message
++
++        "src/SchoolCollab.Families/Components/Pages/Ward/Index.razor:80", // ErrorBoundary content interpolates the raw message
++        "src/SchoolCollab.Families/Components/Pages/Ward/Index.razor:135", // error field assigned the raw message
++
++        "src/SchoolCollab.Families/Components/Pages/Ward/SignOff.razor:137", // ErrorBoundary content interpolates the raw message
++        "src/SchoolCollab.Families/Components/Pages/Ward/SignOff.razor:293", // wording branch reads the raw message to pick text
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/AssignmentAiPrompt.razor:63", // ErrorBoundary content interpolates the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/AssignmentAiPrompt.razor:87", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/AssignmentAiPrompt.razor:113", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/ConfigFlagDetail.razor:118", // ErrorBoundary content interpolates the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/ConfigFlagDetail.razor:161", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/SignatureConsentText.razor:50", // ErrorBoundary content interpolates the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/SignatureConsentText.razor:77", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/SignatureConsentText.razor:101", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Approvals.razor:82", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Approvals.razor:109", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Approvals.razor:130", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Children.razor:174", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Children.razor:202", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Children.razor:241", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Children.razor:247", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Children.razor:300", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Create.razor:46", // ErrorBoundary content interpolates the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Create.razor:116", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Edit.razor:194", // ErrorBoundary content interpolates the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Edit.razor:275", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Edit.razor:295", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Edit.razor:352", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Edit.razor:383", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Edit.razor:431", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Edit.razor:460", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Edit.razor:478", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Index.razor:187", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Index.razor:204", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Index.razor:337", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Index.razor:370", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Index.razor:404", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Index.razor:411", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Index.razor:469", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/ConfigFlags/Create.razor:63", // ErrorBoundary content interpolates the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/ConfigFlags/Create.razor:103", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/ConfigFlags/Index.razor:124", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Create.razor:64", // ErrorBoundary content interpolates the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Create.razor:175", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Create.razor:180", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Create.razor:187", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Edit.razor:188", // ErrorBoundary content interpolates the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Edit.razor:270", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Edit.razor:290", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Edit.razor:359", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Edit.razor:364", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Edit.razor:371", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Edit.razor:500", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Edit.razor:506", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Index.razor:131", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Index.razor:160", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/Index.razor:192", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/OverrideEditor.razor:180", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/OverrideEditor.razor:236", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/EntityCodeRules/OverrideEditor.razor:249", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/NotificationTemplates/Index.razor:286", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/NotificationTemplates/Index.razor:496", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/NotificationTemplates/Index.razor:524", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/NotificationTemplates/TemplateEditor.razor:347", // ErrorBoundary content interpolates the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/NotificationTemplates/TemplateEditor.razor:621", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/NotificationTemplates/TemplateEditor.razor:768", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/NotificationTemplates/TemplateEditor.razor:880", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/NotificationTemplates/TemplateEditor.razor:1118", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/NotificationTemplates/TemplateEditor.razor:1161", // error field assigned the raw message
++
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/Tenants/Index.razor:163", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/Tenants/Index.razor:198", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/Tenants/Index.razor:237", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/Tenants/Index.razor:315", // error field assigned the raw message
++        "src/Settings/SchoolCollab.Settings.Application/Components/Pages/Tenants/Index.razor:337", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor:615", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor:715", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor:835", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor:933", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor:996", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor:1015", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor:1038", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroupDetails.razor:190", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroupDetails.razor:222", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroupDetails.razor:245", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroupDetails.razor:265", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroupDetails.razor:285", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroupDetails.razor:310", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroups.razor:290", // wording branch reads the raw message to pick text
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianDetail.razor:187", // ErrorBoundary content interpolates the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianDetail.razor:269", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianDetail.razor:319", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianDetail.razor:348", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianDetail.razor:373", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/Guardians.razor:190", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/Guardians.razor:220", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor:312", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor:442", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor:557", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor:609", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodUpsert.razor:191", // ErrorBoundary content interpolates the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodUpsert.razor:354", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodUpsert.razor:395", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodUpsert.razor:501", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodUpsert.razor:550", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodUpsert.razor:584", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodUpsert.razor:626", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/Periods.razor:137", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/Periods.razor:198", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/Periods.razor:225", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/Periods.razor:254", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/Periods.razor:284", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/Periods.razor:312", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/Periods.razor:336", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/SubPeriods.razor:66", // ErrorBoundary content interpolates the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/SubPeriods.razor:104", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/SubPeriods.razor:174", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/SubPeriods.razor:190", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/SubPeriods.razor:211", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/SubPeriodsListDialog.razor:148", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/SubPeriodsListDialog.razor:173", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/SubPeriodsListDialog.razor:202", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/SubPeriodsListDialog.razor:225", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Create.razor:142", // ErrorBoundary content interpolates the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Create.razor:229", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Create.razor:289", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Create.razor:308", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Create.razor:319", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:333", // ErrorBoundary content interpolates the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:539", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:643", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:737", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:784", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:803", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:886", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:919", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:962", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:994", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor:1016", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:242", // ErrorBoundary content interpolates the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:387", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:418", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:441", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:546", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:655", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:756", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:775", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:807", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor:844", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Index.razor:299", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Index.razor:369", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Index.razor:409", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Index.razor:455", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Index.razor:481", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Index.razor:506", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Create.razor:79", // ErrorBoundary content interpolates the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Create.razor:117", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Create.razor:136", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Create.razor:174", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Create.razor:198", // per-topic warning line built from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:258", // ErrorBoundary content interpolates the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:471", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:593", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:615", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:734", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:772", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:825", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:848", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:945", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:1051", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:1151", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:1165", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:1179", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:1197", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:1332", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor:1354", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Edit.razor:93", // ErrorBoundary content interpolates the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Edit.razor:153", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Edit.razor:193", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Edit.razor:217", // per-topic warning line built from the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Edit.razor:230", // per-topic warning line built from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Index.razor:244", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Index.razor:296", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Index.razor:329", // wording branch reads the raw message to pick text
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Index.razor:331", // wording branch reads the raw message to pick text
++
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Subjects/Subjects.razor:257", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Subjects/Subjects.razor:357", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Subjects/Subjects.razor:385", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Subjects/Subjects.razor:651", // wording branch reads the raw message to pick text
++        "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Subjects/Subjects.razor:653", // wording branch reads the raw message to pick text
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/AssignmentPolicyEditor.razor:106", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/AssignmentPolicyEditor.razor:145", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/AssignmentPolicyEditor.razor:169", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollStudentDialog.razor:645", // dialog footer error set from the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollStudentDialog.razor:695", // dialog footer error set from the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollStudentDialog.razor:742", // dialog footer error set from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor:439", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor:666", // dialog footer error set from the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor:702", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelCreateDialog.razor:162", // dialog footer error set from the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelCreateDialog.razor:262", // per-topic warning line built from the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelCreateDialog.razor:277", // per-topic warning line built from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelEditDialog.razor:204", // dialog footer error set from the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelEditDialog.razor:320", // per-topic warning line built from the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelEditDialog.razor:333", // per-topic warning line built from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeNotificationPolicyEditor.razor:108", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeNotificationPolicyEditor.razor:147", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeNotificationPolicyEditor.razor:171", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GradeTopicsDialog.razor:310", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor:1116", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor:1238", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor:1304", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor:1396", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor:1570", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor:1619", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor:1695", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor:1825", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardiansTab.razor:149", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardiansTab.razor:172", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/GuardiansTab.razor:194", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/JoinGroupsDialog.razor:208", // per-group failure line built from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/NotificationTemplatesCard.razor:99", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/SectionListDialog.razor:206", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StrandsEditor.razor:159", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StrandsEditor.razor:201", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StrandsEditor.razor:218", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StrandsEditor.razor:249", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StrandsEditor.razor:263", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StudentCreateDialog.razor:77", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StudentEditDialog.razor:230", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StudentEditDialog.razor:264", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StudentPickerDialog.razor:220", // error field assigned the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StudentTransferDialog.razor:202", // error field assigned the raw message
++        "src/Students/SchoolCollab.Students.Application/Components/Students/StudentTransferDialog.razor:251", // dialog footer error set from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/TeacherEditDialog.razor:334", // dialog footer error set from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/TopicCreateDialog.razor:393", // dialog footer error set from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/TopicEditDialog.razor:241", // dialog footer error set from the raw message
++
++        "src/Students/SchoolCollab.Students.Application/Components/Students/WithdrawEnrollmentDialog.razor:96", // dialog footer error set from the raw message
++    ];
++}
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/FriendlyErrorArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/FriendlyErrorArchitectureTests.cs
+new file mode 100644
+index 00000000..32a33e35
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/FriendlyErrorArchitectureTests.cs
+@@ -0,0 +1,305 @@
++using System;
++using System.Collections.Generic;
++using System.IO;
++using System.Linq;
++using System.Reflection;
++using System.Text.RegularExpressions;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// <b>A caught exception's <c>Message</c> never reaches the UI.</b> Raw provider text in a message bar
++/// leaks socket errors, stack frames, SQL details and internal type names to teachers, guardians and
++/// administrators (#416), and it does so invisibly: the code compiles, the page renders, the error looks
++/// like an error. The fix is one seam — log the exception with full detail, show the site's own plain
++/// sentence (<c>FriendlyError.Describe</c> + <c>FriendlyErrorBar</c>) — and this scan is what keeps a new
++/// <c>_error = ex.Message</c> from landing beside it.
++///
++/// <para><b>What it detects, and what it deliberately does not.</b> The defect is the SOURCE, not the
++/// sink: a <c>Message</c> read off a caught exception (<c>ex.Message</c>, <c>$"… {ex.Message}"</c>,
++/// <c>Error = ex.Message</c>). It does NOT flag <c>@_error</c> / <c>@_message</c> renders — that is the
++/// field the fix keeps, and flagging it would both redden corrected code and be defeated by renaming the
++/// field to <c>_msg</c>. Nor does it flag <c>HttpResponseMessage</c>/<c>ProblemDetails</c> text the UI is
++/// meant to show, or a model property that happens to be called <c>Message</c>: only identifiers bound by
++/// a <c>catch (T ident)</c> clause or an <c>&lt;ErrorContent Context="ident"&gt;</c> fragment count as
++/// caught exceptions.</para>
++///
++/// <para><b>Scope is the whole tree, not the swept pages.</b> The rule was ratified as a pattern
++/// (owner Q52/Q58a), and the precedent is <see cref="DropdownWidthFloorArchitectureTests"/>, which scans
++/// every <c>src/**/*.razor</c> precisely so a fix cannot be quietly re-broken two modules away. The
++/// remaining sites are enumerated in <see cref="FriendlyErrorAllowList"/>, whose length is ratcheted:
++/// the ledger may shrink, never grow.</para>
++///
++/// <para><b>There are no <c>*.razor.cs</c> code-behind files in this tree</b> (verified by the plan
++/// gate), so a <c>.razor</c>-only scan covers the entire UI idiom; the only <c>.cs</c> uses are API route
++/// responses (<c>new { ex.Message }</c>), a different concern.</para>
++/// </summary>
++[TestClass]
++public class FriendlyErrorArchitectureTests
++{
++    private static readonly string SrcRoot = FindSrcRoot();
++
++    /// <summary>A <c>catch</c> clause that binds the exception to a named local.</summary>
++    private static readonly Regex CatchBinding =
++        new(@"catch\s*\(\s*[\w\.<>\[\]]+\s+(?<id>\w+)\s*\)", RegexOptions.Compiled);
++
++    /// <summary>
++    /// An <c>ErrorBoundary</c>'s <c>ErrorContent</c> fragment, whose <c>Context</c> is also a caught
++    /// exception — <c>Something went wrong: @ex.Message</c> is the same leak in markup, and it is the
++    /// shape the sweep's two page surfaces carried.
++    /// </summary>
++    private static readonly Regex BoundaryBinding =
++        new("<ErrorContent\\s[^>]*Context\\s*=\\s*\"(?<id>\\w+)\"", RegexOptions.Compiled);
++
++    /// <summary>Razor comments are prose, not code — a commented-out site is not a violation.</summary>
++    private static readonly Regex RazorComment =
++        new("@\\*.*?\\*@", RegexOptions.Singleline | RegexOptions.Compiled);
++
++    /// <summary>One raw-message site: where it is, which exception local it reads, and the line.</summary>
++    internal sealed record RawMessageSite(string File, int Line, string Identifier, string Text);
++
++    private static string FindSrcRoot()
++    {
++        var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
++        return Path.GetFullPath(Path.Combine(asmDir, "..", "..", "..", "..", "..", "src"));
++    }
++
++    private static IEnumerable<string> RazorFiles() =>
++        Directory.EnumerateFiles(SrcRoot, "*.razor", SearchOption.AllDirectories)
++            .Where(p => !p.Contains("\\obj\\", StringComparison.OrdinalIgnoreCase)
++                        && !p.Contains("\\bin\\", StringComparison.OrdinalIgnoreCase));
++
++    private static string Relative(string path) => path.Replace(SrcRoot, "src").Replace('\\', '/');
++
++    /// <summary>
++    /// Every raw-message site in one <c>.razor</c> source. Pure (path + text in, sites out) so the
++    /// negative control below can prove the detector against fixtures instead of the live tree.
++    /// </summary>
++    internal static IReadOnlyList<RawMessageSite> Find(string relativePath, string source)
++    {
++        // Blank the comments in place, keeping their newlines, so reported line numbers stay true.
++        var text = RazorComment.Replace(source, m => new string('\n', m.Value.Count(c => c == '\n')));
++
++        var identifiers = CatchBinding.Matches(text).Select(m => m.Groups["id"].Value)
++            .Concat(BoundaryBinding.Matches(text).Select(m => m.Groups["id"].Value))
++            .Distinct(StringComparer.Ordinal)
++            .ToArray();
++
++        if (identifiers.Length == 0)
++        {
++            return [];
++        }
++
++        var sites = new List<RawMessageSite>();
++        var lines = text.Split('\n');
++
++        for (var i = 0; i < lines.Length; i++)
++        {
++            foreach (var identifier in identifiers)
++            {
++                // `(?<![\w.])` keeps `SomeException.Message` and `ChatHub.Messages` out: only the bare
++                // caught local counts, and `\bMessage\b` excludes `Messages`.
++                if (Regex.IsMatch(lines[i], $@"(?<![\w.]){Regex.Escape(identifier)}\s*\.\s*Message\b"))
++                {
++                    sites.Add(new RawMessageSite(relativePath, i + 1, identifier, lines[i].Trim()));
++                    break;
++                }
++            }
++        }
++
++        return sites;
++    }
++
++    /// <summary>
++    /// Every remaining site must be in the ledger, and each file must hold exactly the number of
++    /// allow-listed sites it still holds — so a new site fails, and a CONVERTED site fails until its
++    /// ledger line is deleted (debt can only be paid down, never silently re-borrowed).
++    /// </summary>
++    [TestMethod]
++    public void Razor_NeverRendersARawExceptionMessage()
++    {
++        var detected = new Dictionary<string, List<RawMessageSite>>(StringComparer.Ordinal);
++
++        foreach (var file in RazorFiles())
++        {
++            var relative = Relative(file);
++            var sites = Find(relative, File.ReadAllText(file));
++            if (sites.Count > 0)
++            {
++                detected[relative] = [.. sites];
++            }
++        }
++
++        var allowed = FriendlyErrorAllowList.Sites
++            .Select(entry => (Entry: entry, File: ParseFile(entry)))
++            .GroupBy(x => x.File, StringComparer.Ordinal)
++            .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
++
++        var problems = new List<string>();
++
++        foreach (var (file, sites) in detected)
++        {
++            if (!allowed.ContainsKey(file))
++            {
++                problems.Add(
++                    $"{file}: {sites.Count} raw-message site(s) and NO allow-list entry — "
++                    + string.Join(
++                        " | ",
++                        sites.Select(s => $"line {s.Line}: {s.Text}")));
++            }
++            else if (allowed[file].Length != sites.Count)
++            {
++                problems.Add(
++                    $"{file}: {sites.Count} detected vs {allowed[file].Length} allow-listed — "
++                    + string.Join(" | ", sites.Select(s => $"line {s.Line}: {s.Text}")));
++            }
++        }
++
++        foreach (var (file, entries) in allowed)
++        {
++            if (!detected.ContainsKey(file))
++            {
++                problems.Add(
++                    $"{file}: {entries.Length} allow-list entr{(entries.Length == 1 ? "y" : "ies")} but no "
++                    + "site remains — delete them, and lower RecordedEntryCount with them");
++            }
++        }
++
++        problems.Should().BeEmpty(
++            "a caught exception's Message must never reach the UI: log the exception and show a plain "
++            + "sentence (FriendlyError.Describe + FriendlyErrorBar), or add the site to the ledger if it "
++            + "is not this round's to convert. Problems: {0}",
++            problems.Count == 0 ? "(none)" : Environment.NewLine + string.Join(Environment.NewLine, problems));
++    }
++
++    /// <summary>
++    /// <b>The ratchet.</b> The ledger's length never exceeds the count recorded when the guard landed,
++    /// so a new violation cannot be admitted by appending a line — admitting one would mean editing this
++    /// constant too, which is a visible act in review rather than a quiet one.
++    /// </summary>
++    [TestMethod]
++    public void AllowList_NeverGrows()
++    {
++        FriendlyErrorAllowList.Sites.Should()
++            .HaveCountLessThanOrEqualTo(
++                FriendlyErrorAllowList.RecordedEntryCount,
++                "the allow-list may only shrink: converting a site deletes its line, and admitting a new "
++                + "one would mean converting a site first (owner Q58a ratchet)");
++
++        FriendlyErrorAllowList.Sites.Should()
++            .OnlyHaveUniqueItems("a duplicated entry would hide a second site in the same file");
++
++        foreach (var entry in FriendlyErrorAllowList.Sites)
++        {
++            ParseFile(entry).Should().StartWith("src/", $"'{entry}' must name a file under src/");
++            ParseLine(entry).Should().BePositive($"'{entry}' must carry a 1-based line number");
++        }
++    }
++
++    /// <summary>
++    /// <b>The negative control: a guard never seen failing is a guard that does not work.</b> Each of the
++    /// four shipped shapes of the defect must be detected in a fixture, so this test fails outright if the
++    /// detector is ever weakened into vacuity (which the live-tree test alone cannot show — an empty scan
++    /// passes it).
++    /// </summary>
++    [TestMethod]
++    public void Detector_FlagsEveryShippedShapeOfTheDefect()
++    {
++        const string Fixture = """
++            <ErrorContent Context="ex">
++                <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
++            </ErrorContent>
++
++            @code {
++                private async Task LoadAsync()
++                {
++                    try { _items = await Api.ListAsync(); }
++                    catch (Exception ex) { _error = ex.Message; }
++                }
++
++                private async Task SaveAsync()
++                {
++                    try { await Api.SaveAsync(); }
++                    catch (IOException io) { _error = $"Could not save: {io.Message}"; }
++                }
++
++                private async Task DeleteAsync()
++                {
++                    try { await Api.DeleteAsync(); }
++                    catch (Exception exception) when (exception is not OperationCanceledException)
++                    {
++                        Error = exception.Message;
++                    }
++                }
++            }
++            """;
++
++        var sites = Find("fixture/Forgotten.razor", Fixture);
++
++        sites.Should().HaveCount(4, "each of the four shapes must be detected");
++        sites.Should().OnlyContain(s => s.File == "fixture/Forgotten.razor");
++        sites.Select(s => s.Identifier).Should().BeEquivalentTo("ex", "ex", "io", "exception");
++        sites.Select(s => s.Line).Should().BeInAscendingOrder("sites are reported in source order");
++        sites.Select(s => s.Text).Should().Contain(t => t.Contains("@ex.Message"),
++            "the ErrorBoundary markup shape — the one a sink-shaped rule would miss");
++        sites.Select(s => s.Text).Should().Contain(t => t.Contains("$\"Could not save: {io.Message}\""),
++            "the interpolated shape, which no simple `@ex.Message` grep finds");
++    }
++
++    /// <summary>
++    /// The corrected shapes must be silent — otherwise the guard reddens the fix itself, which is how it
++    /// would get deleted instead of obeyed. Includes the renamed sink (<c>_msg</c>): the rule is about the
++    /// SOURCE, so renaming must not evade it, and rendering a field must never trip it.
++    /// </summary>
++    [TestMethod]
++    public void Detector_IgnoresTheSeamAndTheErrorFieldItRenders()
++    {
++        const string Corrected = """
++            <ErrorContent Context="ex">
++                <FriendlyErrorBar Message="@DescribeRenderError(ex)" />
++            </ErrorContent>
++
++            <FriendlyErrorBar Message="@_error" />
++            <FluentMessageBar Intent="MessageBarIntent.Error">@_msg</FluentMessageBar>
++            <FluentMessageBar Intent="MessageBarIntent.Error">@Content.Message</FluentMessageBar>
++
++            @code {
++                private string? _error;
++                private string? _msg;
++
++                private async Task LoadAsync()
++                {
++                    try { _items = await Api.ListAsync(); }
++                    catch (Exception ex)
++                    {
++                        _error = FriendlyError.Describe(ex, "Teachers could not be loaded. Try again.", Logger);
++                        _msg = _error;
++                    }
++                }
++            }
++            """;
++
++        Find("fixture/Corrected.razor", Corrected).Should().BeEmpty(
++            "the seam (FriendlyError.Describe), the error field it fills, a renamed field, and a model "
++            + "property called Message are all legal — flagging any of them would redden the fix or be "
++            + "defeated by a rename");
++    }
++
++    /// <summary>The file half of a <c>file:line</c> ledger entry.</summary>
++    private static string ParseFile(string entry)
++    {
++        var colon = entry.LastIndexOf(':');
++        colon.Should().BeGreaterThan(0, $"'{entry}' must be written as file:line");
++        return entry[..colon];
++    }
++
++    /// <summary>The line half of a <c>file:line</c> ledger entry.</summary>
++    private static int ParseLine(string entry)
++    {
++        var colon = entry.LastIndexOf(':');
++        int.TryParse(entry[(colon + 1)..], out var line).Should().BeTrue($"'{entry}' must end in a line number");
++        return line;
++    }
++}
