@@ -1,20 +1,38 @@
 @namespace SchoolCollab.Admin.Shared.Components
 
 @*
-    One chip inside a <see cref="RailBand"/>. Four shapes, each a state of the same thing:
+    One chip inside a <see cref="RailBand"/>. Five shapes, each a state of the same thing:
 
       * a FACT        — Grade 4, Term 2, Active            → no interaction
       * a REMOVABLE   — Chess Club ✕ (OnRemove supplied)    → the ✕ affordance
-      * a BLOCKED     — Choir · window closed               → struck through, Reason required
+      * a BLOCKED     — Choir · window closed               → struck through, Reason required, aria-disabled
+      * an ACTIONABLE — Mathematics · not chosen            → struck through AND a real button (OnActivate)
       * a BADGE       — "0 joined" style markers            → use RailBand.Hint instead where possible
 
     Blocked chips exist because an unavailable option must read as a RULE, not as a bug (Q18a): the
     reason is in the visible text AND in title/aria-description, so it survives keyboard and screen
     reader use. A blocked chip with no reason is the failure the Reason parameter exists to prevent.
+
+    An ACTIONABLE chip is the opposite case and must not be built out of the blocked one: it is struck
+    through because a record is MISSING (the student is not enrolled) and it is the way to fix that —
+    so it renders a real <button>, keeps its place in the keyboard tab order, and never carries
+    aria-disabled (which is exactly what would make it unreachable and unsolvable at once).
 *@
 
 <span class="@ChipClass" role="listitem" title="@Tooltip" aria-description="@Reason" aria-disabled="@(Blocked ? "true" : null)">
-    @if (ChildContent is not null)
+    @if (OnActivate.HasDelegate)
+    {
+        <button type="button"
+                class="rail-chip__activate"
+                aria-label="@ActivateName"
+                disabled="@Disabled"
+                @onclick="OnActivate">@Text</button>
+        @if (!string.IsNullOrWhiteSpace(StateLabel))
+        {
+            <span class="rail-chip__state">· @StateLabel</span>
+        }
+    }
+    else if (ChildContent is not null)
     {
         @ChildContent
     }
@@ -51,6 +69,18 @@
     [Parameter]
     public string? Reason { get; set; }
 
+    /// <summary>Supplying a delegate turns the chip into an ACTIONABLE one — struck through, but the name
+    /// is a real <c>&lt;button&gt;</c> that performs the action (e.g. enrol this student). The strike says
+    /// the record is missing; the button is how it stops being missing. Never combined with
+    /// <see cref="Blocked"/>: a chip is either unavailable (nothing to do) or a to-do (something to do).</summary>
+    [Parameter]
+    public EventCallback OnActivate { get; set; }
+
+    /// <summary>The actionable chip's state in words ("not chosen"), rendered as visible text after the
+    /// name so the strike-through is never the only signal, and folded into the button's accessible name.</summary>
+    [Parameter]
+    public string? StateLabel { get; set; }
+
     /// <summary>Tints the chip to match a <see cref="RailBandVariant.Groups"/> band.</summary>
     [Parameter]
     public bool GroupStyle { get; set; }
@@ -59,7 +89,8 @@
     [Parameter]
     public EventCallback OnRemove { get; set; }
 
-    /// <summary>Disables the ✕ while a write is in flight, so a slow server cannot be double-clicked.</summary>
+    /// <summary>Disables the chip's action (✕ or the actionable button) while a write is in flight, so a
+    /// slow server cannot be double-clicked. The chip's text stays readable.</summary>
     [Parameter]
     public bool Disabled { get; set; }
 
@@ -82,9 +113,18 @@
                 cls += " rail-chip--blocked";
             }
 
+            if (OnActivate.HasDelegate)
+            {
+                cls += " rail-chip--actionable";
+            }
+
             return cls;
         }
     }
+
+    /// <summary>The actionable button's accessible name: the subject PLUS its state, because the visible
+    /// text alone ("Mathematics") would not say why it is struck through.</summary>
+    private string ActivateName => string.IsNullOrWhiteSpace(StateLabel) ? Text : $"{Text} — {StateLabel}";
 
     private string? Tooltip => Blocked && !string.IsNullOrWhiteSpace(Reason)
         ? $"{Text} — {Reason}"

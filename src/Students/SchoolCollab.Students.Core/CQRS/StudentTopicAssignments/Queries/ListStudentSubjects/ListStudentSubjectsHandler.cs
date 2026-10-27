@@ -9,10 +9,16 @@ namespace SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Queries.ListSt
 
 /// <summary>
 /// Builds the §6 union (FR-ER-16): a student's grade subjects, keeping every
-/// <c>false</c> subject unconditionally (membership IS the enrolment, FR-ER-1) and a
-/// <c>true</c> subject only when the student holds a <c>StudentTopicAssignment</c> for the
-/// <b>active academic year</b> (FR-ER-3 — an exact period-id match, so last year's row does
-/// not carry).
+/// <c>false</c> subject unconditionally (membership IS the enrolment, FR-ER-1) and every
+/// <c>true</c> subject marked with whether the student holds a <c>StudentTopicAssignment</c>
+/// for the <b>active academic year</b> (FR-ER-3 — an exact period-id match, so last year's
+/// row does not carry).
+/// <para><b>A <c>true</c> subject with no row is still returned</b>, with
+/// <see cref="StudentSubjectEnrollmentDto.IsEnrolled"/> = <c>false</c>: the student page's
+/// "Needs explicit enrolment" band has nothing to render otherwise, and an absent row is
+/// exactly the state that band exists to make visible. The flag is additive — every row the
+/// pre-layer-2 contract returned is still returned with <c>IsEnrolled = true</c>, so a caller
+/// that filters on it sees the same set as before.</para>
 /// <para>The grade comes from the student's active enrolment in that year, resolved with
 /// <see cref="IStudentEnrollmentRepository.GetActiveEnrollmentByStudentAndPeriodAsync"/>.
 /// No active academic year or no active enrolment ⇒ an empty array (200, never 404): there
@@ -69,8 +75,11 @@ public sealed class ListStudentSubjectsHandler(
 
         var enrolled = enrolledTopicIds.ToHashSet();
 
+        // No WHERE: an un-enrolled `true` subject is a ROW the rail must draw (struck through,
+        // "not chosen"), not a row to hide. `false` subjects short-circuit to enrolled because
+        // membership is the enrolment, so a stale assignment row on one is never consulted
+        // (FR-ER-9: the rows are inert history and the subject reads as "everyone").
         return subjects
-            .Where(x => !x.RequiresEnrollment || enrolled.Contains(x.TopicId))
             .Select(x => new StudentSubjectEnrollmentDto(
                 x.TopicId,
                 x.Name,

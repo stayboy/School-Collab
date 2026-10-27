@@ -5,6 +5,7 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Students.Core.Domain
 @using StudentGuardianViewDto = SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto
+@using StudentSubjectEnrollmentDto = SchoolCollab.Students.Core.DTOs.StudentSubjectEnrollmentDto
 @using SchoolCollab.Students.Core.Contracts
 @using SchoolCollab.Students.Application.Components.Students
 @using SchoolCollab.Admin.Shared.Services
@@ -168,6 +169,70 @@
                                                             <FluentMessageBar Intent="MessageBarIntent.Error">@_groupError</FluentMessageBar>
                                                         }
                                                     </RailBand>
+
+                                                    @* The subject bands (subject-enrollment-requirement-flag.md round B,
+                                                       owner Q42/Q45): the two ENROLMENT KINDS side by side under one another,
+                                                       settled order Placement → Activity groups → Needs explicit enrolment
+                                                       → Assumed. Empty bands render NOTHING rather than an empty shell, and
+                                                       both are RailBand + RailChip call sites — no new variant, no new
+                                                       component (component-first-policy Q22a). *@
+                                                    @if (RequiredSubjects.Count > 0)
+                                                    {
+                                                        <RailBand Id="student-edit-subjects-required"
+                                                                  Label="Needs explicit enrolment"
+                                                                  Hint="@RequiredHint"
+                                                                  Variant="RailBandVariant.Required">
+                                                            <RailChips>
+                                                                @foreach (var subject in RequiredSubjects)
+                                                                {
+                                                                    @* One chip per subject, two states: an enrolled student
+                                                                       gets a FACT; an un-enrolled one gets the ACTIONABLE
+                                                                       state (struck through + the words "not chosen"), whose
+                                                                       name is a real button — the only way to fix the gap,
+                                                                       so it must be reachable by keyboard (Q45).
+                                                                       The KEY carries the state as well as the topic: Blazor
+                                                                       KEEPS a parameter a re-render omits, so a chip keyed on
+                                                                       the topic alone would keep the old OnActivate and stay
+                                                                       struck after the student is enrolled. *@
+                                                                    @if (subject.IsEnrolled)
+                                                                    {
+                                                                        <RailChip @key="(subject.TopicId, true)" Text="@subject.Name" />
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        <RailChip @key="(subject.TopicId, false)"
+                                                                                  Text="@subject.Name"
+                                                                                  StateLabel="not chosen"
+                                                                                  Disabled="@_enrollingSubject"
+                                                                                  OnActivate="() => EnrolSubjectAsync(subject)" />
+                                                                    }
+                                                                }
+                                                            </RailChips>
+                                                        </RailBand>
+                                                    }
+
+                                                    @if (AssumedSubjects.Count > 0)
+                                                    {
+                                                        <RailBand Id="student-edit-subjects-assumed"
+                                                                  Label="Assumed"
+                                                                  Hint="@AssumedHint"
+                                                                  Variant="RailBandVariant.Assumed">
+                                                            <RailChips>
+                                                                @foreach (var subject in AssumedSubjects)
+                                                                {
+                                                                    @* Implied enrolment (FR-ER-1): membership IS the
+                                                                       enrolment, there is no record to act on, so the chip is a
+                                                                       fact — never a struck one. *@
+                                                                    <RailChip @key="subject.TopicId" Text="@subject.Name" />
+                                                                }
+                                                            </RailChips>
+                                                        </RailBand>
+                                                    }
+
+                                                    @* The enrol action's failure is a SENTENCE below the bands, not
+                                                       inside one: a failed write must stay visible even when the band
+                                                       that carried the chip has nothing left to draw. *@
+                                                    <FriendlyErrorBar Message="@_subjectError" />
                                                 }
                                                 else
                                                 {
@@ -369,6 +434,34 @@
     private bool _savingGroup;
     private string? _groupError;
 
+    /// <summary>The student's subjects for their current grade — the §6 union, read from the server
+    /// (<c>GET /students/{id}/subjects</c>) because the grade and the enrolment rows are the server's
+    /// to resolve. Null while loading: the two subject bands then render nothing, so "not loaded yet"
+    /// never reads as "no subjects". A <c>true</c> subject with no enrolment row is the state the
+    /// "Needs explicit enrolment" band exists to make visible.</summary>
+    private List<StudentSubjectEnrollmentDto>? _subjects;
+
+    private bool _enrollingSubject;
+    private string? _subjectError;
+
+    /// <summary>The band's two sets: what needs an explicit enrolment action, and what the student gets
+    /// without choosing. Split once here so the markup states the rule in one place.</summary>
+    private List<StudentSubjectEnrollmentDto> RequiredSubjects =>
+        _subjects?.Where(s => s.RequiresEnrollment).ToList() ?? [];
+
+    private List<StudentSubjectEnrollmentDto> AssumedSubjects =>
+        _subjects?.Where(s => !s.RequiresEnrollment).ToList() ?? [];
+
+    /// <summary>"3 of 8 chosen" — the amber band's own total, so the gap is countable without reading
+    /// every chip.</summary>
+    private string RequiredHint =>
+        RequiredSubjects is { Count: > 0 } required
+            ? $"{required.Count(s => s.IsEnrolled)} of {required.Count} chosen"
+            : string.Empty;
+
+    private string AssumedHint =>
+        AssumedSubjects is { Count: > 0 } assumed ? $"{assumed.Count} included" : string.Empty;
+
     /// <summary>How many groups the student is in — the band's own total, which is what a count means here
     /// (owner Q19: the panel itself carries no count chip). Renders as e.g. "3 joined".</summary>
     private string GroupCountHint => _activityGroups is null ? string.Empty : $"{_activityGroups.Count} joined";
@@ -449,6 +542,87 @@
     private Dictionary<Guid, string> _relNames = new();
     private string? _guardianError;
 
+    // ── Subject bands (subject-enrollment-requirement-flag.md round B) ──
+    //
+    // The union is read from the server: the student's grade comes from their active
+    // enrolment and the enrolment rows are year-keyed, so a page-local derivation would be
+    // a second, divergent answer. "Needs explicit enrolment" draws every `true` subject
+    // (enrolled → a fact, un-enrolled → the actionable "not chosen" chip); "Assumed"
+    // draws the `false` ones, which the student gets without choosing (FR-ER-1).
+
+    /// <summary>Loads the student's grade subjects. Best-effort: a failed read leaves both bands out
+    /// rather than taking the page down — the enrol action is the surface that owes the user a
+    /// sentence, and it has its own.</summary>
+    private async Task LoadSubjectsAsync(CancellationToken ct)
+    {
+        try
+        {
+            _subjects = (await Api.ListStudentSubjectsAsync(Id, ct))?.ToList() ?? [];
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Loading subjects for student {StudentId} failed", Id);
+            _subjects = [];
+        }
+    }
+
+    /// <summary>
+    /// The actionable chip's click: enrols the student in that subject, then replaces the chip in
+    /// place (no reload — the row is the page's projection of the answer it just wrote).
+    /// <para><b>The period is the active academic YEAR, never the student's own enrolment period:</b>
+    /// enrolment rows are year-keyed (FR-ER-3) and <c>AssignStudentTopicHandler</c> rejects any other
+    /// period (422) even though the server stamps the row itself. A student's enrolment may carry a
+    /// SUB-period, which is not the contract the handler validates against.</para>
+    /// <para>A failure leaves the chip exactly as it was and shows the site's own plain sentence —
+    /// the exception is logged with its detail and never rendered (#416's seam).</para>
+    /// </summary>
+    private async Task EnrolSubjectAsync(StudentSubjectEnrollmentDto subject)
+    {
+        if (_disposed || _enrollingSubject) return;
+        _subjectError = null;
+        _enrollingSubject = true;
+        try
+        {
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            if ((await Api.GetActiveAcademicYearAsync(ct))?.Id is not { } activeYearId)
+            {
+                _subjectError = $"'{subject.Name}' could not be added because the school has no active academic year.";
+                return;
+            }
+
+            await Api.AssignStudentTopicAsync(
+                new AssignStudentTopicRequest(
+                    Id, subject.TopicId, activeYearId,
+                    IsOverride: false, SourceType: "IndividualAssignment"),
+                ct);
+
+            if (_disposed) return;
+            _subjects = _subjects?
+                .Select(s => s.TopicId == subject.TopicId ? s with { IsEnrolled = true } : s)
+                .ToList();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _subjectError = FriendlyError.Describe(
+                ex,
+                $"'{subject.Name}' could not be added to this student. Try again.",
+                Logger);
+        }
+        finally
+        {
+            _enrollingSubject = false;
+            if (!_disposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private StudentEnrollmentDto? PrimaryActiveEnrollment
     {
         get
@@ -527,6 +701,10 @@
 
             // The Enrollment rail band projects the student's activity-group memberships.
             await LoadActivityGroupsAsync(ct);
+
+            // …and its two subject bands project the student's grade subjects and their enrolment
+            // state (the §6 union). Both reads are independent of each other.
+            await LoadSubjectsAsync(ct);
 
             // Page-owned link list (the form is in Linked mode and is
             // a thin presenter — the page must hand the projected

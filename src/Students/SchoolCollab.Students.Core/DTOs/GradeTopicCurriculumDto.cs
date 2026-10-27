@@ -9,10 +9,15 @@ namespace SchoolCollab.Students.Core.DTOs;
 /// reorder endpoint targets the ASSIGNMENT, not the topic: one topic may be
 /// assigned to several grades, so only the bridge row identifies this grade's
 /// entry.</param>
+/// <param name="RequiresEnrollment">The bridge row's explicit-enrolment flag
+/// (subject-enrollment-requirement-flag.md FR-ER-2). Carried on the row so the
+/// Subjects dialog can label its enrolment switch for the state it will produce
+/// and reflect the new state after a write, without a second read.</param>
 public sealed record GradeTopicCurriculumDto(
     Guid AssignmentId,
     Guid TopicId,
     string Name,
     string? Code,
     int StrandCount,
-    int LessonCount);
+    int LessonCount,
+    bool RequiresEnrollment);

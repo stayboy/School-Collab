@@ -381,6 +381,46 @@ h1:focus {
     color: var(--neutral-foreground-hint, #616161);
 }
 
+/* The ACTIONABLE chip (subject-enrolment round B): struck through like a blocked one, because a record
+   is missing — but the name is a real button, so the strike is a to-do rather than a refusal. The state
+   words beside it mean the strike is never the only signal (colour and line are not accessible signals),
+   and the button re-states them as its accessible name. The strike lives on the BUTTON, not on the chip:
+   text-decoration does not propagate into an atomic inline box, so an ancestor's line-through would not
+   cross the button's own text. */
+.rail-chip--actionable {
+    border-color: var(--band-required-accent, #eccf9b);
+    background: var(--band-required-bg, #fdf3e2);
+}
+
+.rail-chip__activate {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    text-decoration: line-through;
+    cursor: pointer;
+}
+
+.rail-chip__activate:hover {
+    text-decoration-thickness: 2px;
+}
+
+/* A keyboard user must SEE where they are: the chip's own container has no visible focus of its own. */
+.rail-chip__activate:focus-visible {
+    outline: 2px solid var(--accent-foreground-rest, #0f6cbd);
+    outline-offset: 1px;
+    border-radius: 2px;
+}
+
+.rail-chip__state {
+    margin-left: 2px;
+    font-size: 0.625rem;
+    color: var(--band-required-fg, #7a5314);
+    text-decoration: none;
+}
+
 /* Round-B variants (documents/specs/subject-enrollment-requirement-flag.md). Declared with the band
    vocabulary so the flag's round lands as a call-site change, not a CSS change. */
 .rail-band--required {

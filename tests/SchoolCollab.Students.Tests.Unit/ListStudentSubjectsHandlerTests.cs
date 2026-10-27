@@ -105,8 +105,56 @@ public class ListStudentSubjectsHandlerTests
         math.RequiresEnrollment.Should().BeFalse();
         enrolled.Single(x => x.TopicId == subjects.ArtTopicId).IsEnrolled.Should().BeTrue();
 
-        unenrolled.Select(x => x.TopicId).Should().BeEquivalentTo([subjects.MathTopicId],
-            "without a row the explicit-enrolment subject is not in the union at all");
+        unenrolled.Should().Contain(x => x.TopicId == subjects.ArtTopicId && !x.IsEnrolled,
+            "layer 2 draws the un-enrolled explicit subject as the actionable 'not chosen' chip, so it "
+            + "is returned with IsEnrolled = false rather than omitted");
+        unenrolled.Single(x => x.TopicId == subjects.ArtTopicId).RequiresEnrollment.Should().BeTrue();
+        unenrolled.Single(x => x.TopicId == subjects.MathTopicId).IsEnrolled.Should().BeTrue(
+            "the implied subject is still returned as enrolled");
+    }
+
+    /// <summary>
+    /// The flag is ADDITIVE for every caller that predates layer 2: filtering the union on
+    /// <c>IsEnrolled</c> must yield exactly the rows the old contract returned (every <c>false</c>
+    /// subject, plus the <c>true</c> ones the student holds a row for).
+    /// </summary>
+    [TestMethod]
+    public async Task Union_StillCarriesEveryRowThePreLayer2ContractReturned_AsIsEnrolledTrue()
+    {
+        using var s = new StudentsTestScope("list-student-subjects-additive");
+        var subjects = await SeedGradeSubjectsAsync(s);
+        var studentId = SeedStudentInGrade(s, "S1", "Ada");
+        await SeedEnrollmentRowAsync(s, studentId, subjects.ArtTopicId, ActiveYearId);
+
+        var result = await NewHandler(s, ActiveYear()).HandleAsync(new ListStudentSubjects(studentId));
+
+        result.Where(x => x.IsEnrolled).Select(x => x.TopicId)
+            .Should().BeEquivalentTo([subjects.MathTopicId, subjects.ArtTopicId],
+                "a caller that only reads IsEnrolled == true sees the pre-layer-2 union unchanged");
+    }
+
+    /// <summary>
+    /// FR-ER-9: rows left behind by a <c>SetRequiresEnrollment(false)</c> flip are inert history, so a
+    /// <c>false</c> subject is never presented as an explicit-enrolment row — the stale row neither
+    /// makes it un-enrolled nor duplicates it.
+    /// </summary>
+    [TestMethod]
+    public async Task Union_IgnoresAStaleRowOnAnImpliedSubject()
+    {
+        using var s = new StudentsTestScope("list-student-subjects-stale-row");
+        var subjects = await SeedGradeSubjectsAsync(s);
+        var studentId = SeedStudentInGrade(s, "S1", "Ada");
+        // A row that survives a flip back to false: the subject reads as "everyone" and the row is
+        // never consulted.
+        await SeedEnrollmentRowAsync(s, studentId, subjects.MathTopicId, ActiveYearId);
+
+        var result = await NewHandler(s, ActiveYear()).HandleAsync(new ListStudentSubjects(studentId));
+
+        var math = result.Should().ContainSingle(x => x.TopicId == subjects.MathTopicId).Subject;
+        math.RequiresEnrollment.Should().BeFalse();
+        math.IsEnrolled.Should().BeTrue(
+            "implied enrolment is membership, not the row — a stale row must not make the subject look "
+            + "like it needs an explicit enrolment");
     }
 
     [TestMethod]
@@ -136,7 +184,8 @@ public class ListStudentSubjectsHandlerTests
 
         var result = await NewHandler(s, ActiveYear()).HandleAsync(new ListStudentSubjects(studentId));
 
-        result.Select(x => x.TopicId).Should().BeEquivalentTo([subjects.MathTopicId]);
+        result.Single(x => x.TopicId == subjects.ArtTopicId).IsEnrolled.Should().BeFalse(
+            "the row is a prior year's, so the student is not enrolled THIS year");
     }
 
     [TestMethod]

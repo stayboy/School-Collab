@@ -37,6 +37,11 @@ public class GradeDialogsBunitTests : BunitContext
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
+        // GradeTopicsDialog injects a logger (FriendlyError.Describe) and the students client (its
+        // enrolment switch reads the subject's audience size for the confirm). These fixtures never
+        // set a GradeLevelId, so no call is made — the registrations only have to resolve.
+        Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        RegisterCodedValuesApi();
     }
 
     /// <summary>
@@ -85,8 +90,9 @@ public class GradeDialogsBunitTests : BunitContext
     /// reproducible and never hands the move buttons an empty guid.</summary>
     private static readonly Guid BridgeAssignmentId = Guid.Parse("bbbbbbbb-0000-0000-0000-0000000000b1");
 
-    private static GradeTopicCurriculumDto Topic(Guid id, string name, string code, int strands, int lessons) =>
-        new(BridgeAssignmentId, id, name, code, strands, lessons);
+    private static GradeTopicCurriculumDto Topic(
+        Guid id, string name, string code, int strands, int lessons, bool requiresEnrollment = false) =>
+        new(BridgeAssignmentId, id, name, code, strands, lessons, requiresEnrollment);
 
     private static TopicDto CatalogTopic(Guid id, string name, string code) =>
         new(id, null, code, name, null, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);

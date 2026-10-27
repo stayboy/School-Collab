@@ -187,4 +187,64 @@ public class RailBandComponentTests : BunitContext
         cut.Find(".rail-chip").ClassName.Should().Contain("rail-chip--blocked",
             "the chip is still struck through, so the missing reason is a review defect, never a silent pass");
     }
+
+    // ── The third state: struck through AND actionable (subject-enrolment round B, plan-gate F4) ──
+    // A blocked chip says "you cannot"; an actionable one says "you have not — do it". They must never be the
+    // same rendering, because aria-disabled on a chip whose whole point is the button is the defect this state
+    // exists to prevent.
+
+    [TestMethod]
+    public void RailChip_Actionable_RendersARealButton_NamedWithTheSubjectAndItsState()
+    {
+        var cut = Render<RailChip>(p => p
+            .Add(c => c.Text, "Mathematics")
+            .Add(c => c.StateLabel, "not chosen")
+            .Add(c => c.OnActivate, () => { }));
+
+        var chip = cut.Find(".rail-chip");
+        chip.ClassName.Should().Contain("rail-chip--actionable",
+            "the missing record is visible as a strike-through…");
+        chip.HasAttribute("aria-disabled").Should().BeFalse(
+            "…but aria-disabled is for the picker's blocked rows: on an actionable chip it would announce the "
+            + "one control that fixes the gap as unavailable");
+
+        var button = cut.Find("button.rail-chip__activate");
+        button.GetAttribute("type").Should().Be("button",
+            "a real button inside the chip, typed so it can never submit a surrounding form");
+        button.TextContent.Trim().Should().Be("Mathematics", "the subject's name is the button's visible text");
+        button.GetAttribute("aria-label").Should().Be("Mathematics — not chosen",
+            "the accessible name carries the SUBJECT plus its state — the visible name alone would not say why "
+            + "it is struck through");
+        button.HasAttribute("disabled").Should().BeFalse("an idle chip's button is operable");
+        button.HasAttribute("tabindex").Should().BeFalse(
+            "no negative tabindex: a native button is in the tab order, and that is what makes the gap "
+            + "fixable from the keyboard (acceptance criterion 3)");
+
+        cut.Find(".rail-chip__state").TextContent.Should().Contain("not chosen",
+            "the state is WORDS as well as a line — a strike-through and a colour are not accessible signals");
+    }
+
+    [TestMethod]
+    public void RailChip_Actionable_InvokesItsHandler_AndDisabledOnlyGatesTheButton()
+    {
+        var activations = 0;
+        var cut = Render<RailChip>(p => p
+            .Add(c => c.Text, "Mathematics")
+            .Add(c => c.StateLabel, "not chosen")
+            .Add(c => c.OnActivate, () => activations++));
+
+        cut.Find("button.rail-chip__activate").Click();
+        activations.Should().Be(1, "the chip performs exactly the click it was given");
+
+        var gated = Render<RailChip>(p => p
+            .Add(c => c.Text, "Mathematics")
+            .Add(c => c.StateLabel, "not chosen")
+            .Add(c => c.Disabled, true)
+            .Add(c => c.OnActivate, () => activations++));
+
+        gated.Find("button.rail-chip__activate").HasAttribute("disabled").Should().BeTrue(
+            "a slow server must not be double-clicked into a second write");
+        gated.Find(".rail-chip").ClassName.Should().Contain("rail-chip--actionable",
+            "the chip keeps its state while the write is in flight — only the action is unavailable");
+    }
 }

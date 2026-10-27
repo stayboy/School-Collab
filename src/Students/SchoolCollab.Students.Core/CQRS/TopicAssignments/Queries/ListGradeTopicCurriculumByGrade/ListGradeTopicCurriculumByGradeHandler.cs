@@ -65,7 +65,7 @@ public sealed class ListGradeTopicCurriculumByGradeHandler(
                           && a.StartDate <= effectiveDate
                           && (a.EndDate == null || a.EndDate >= effectiveDate)
                     orderby a.DisplayOrder, t.DisplayOrder, t.Name
-                    select new { AssignmentId = a.Id, TopicId = t.Id, t.Name, t.Code }).ToArrayAsync(ct);
+                    select new { AssignmentId = a.Id, TopicId = t.Id, t.Name, t.Code, a.RequiresEnrollment }).ToArrayAsync(ct);
 
                 if (topics.Length == 0) return Array.Empty<GradeTopicCurriculumDto>();
 
@@ -94,7 +94,8 @@ public sealed class ListGradeTopicCurriculumByGradeHandler(
                     x.Name,
                     x.Code,
                     strandMap.TryGetValue(x.TopicId, out var sc) ? sc : 0,
-                    lessonMap.TryGetValue(x.TopicId, out var lc) ? lc : 0)).ToArray();
+                    lessonMap.TryGetValue(x.TopicId, out var lc) ? lc : 0,
+                    x.RequiresEnrollment)).ToArray();
             },
             CacheOptions,
             tags: ["students"],
