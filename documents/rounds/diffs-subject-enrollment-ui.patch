@@ -1,0 +1,1794 @@
+diff --git a/src/SchoolCollab.Admin.Shared/Components/RailChip.razor b/src/SchoolCollab.Admin.Shared/Components/RailChip.razor
+index 30234797..986a6f8e 100644
+--- a/src/SchoolCollab.Admin.Shared/Components/RailChip.razor
++++ b/src/SchoolCollab.Admin.Shared/Components/RailChip.razor
+@@ -1,20 +1,38 @@
+ @namespace SchoolCollab.Admin.Shared.Components
+ 
+ @*
+-    One chip inside a <see cref="RailBand"/>. Four shapes, each a state of the same thing:
++    One chip inside a <see cref="RailBand"/>. Five shapes, each a state of the same thing:
+ 
+       * a FACT        — Grade 4, Term 2, Active            → no interaction
+       * a REMOVABLE   — Chess Club ✕ (OnRemove supplied)    → the ✕ affordance
+-      * a BLOCKED     — Choir · window closed               → struck through, Reason required
++      * a BLOCKED     — Choir · window closed               → struck through, Reason required, aria-disabled
++      * an ACTIONABLE — Mathematics · not chosen            → struck through AND a real button (OnActivate)
+       * a BADGE       — "0 joined" style markers            → use RailBand.Hint instead where possible
+ 
+     Blocked chips exist because an unavailable option must read as a RULE, not as a bug (Q18a): the
+     reason is in the visible text AND in title/aria-description, so it survives keyboard and screen
+     reader use. A blocked chip with no reason is the failure the Reason parameter exists to prevent.
++
++    An ACTIONABLE chip is the opposite case and must not be built out of the blocked one: it is struck
++    through because a record is MISSING (the student is not enrolled) and it is the way to fix that —
++    so it renders a real <button>, keeps its place in the keyboard tab order, and never carries
++    aria-disabled (which is exactly what would make it unreachable and unsolvable at once).
+ *@
+ 
+ <span class="@ChipClass" role="listitem" title="@Tooltip" aria-description="@Reason" aria-disabled="@(Blocked ? "true" : null)">
+-    @if (ChildContent is not null)
++    @if (OnActivate.HasDelegate)
++    {
++        <button type="button"
++                class="rail-chip__activate"
++                aria-label="@ActivateName"
++                disabled="@Disabled"
++                @onclick="OnActivate">@Text</button>
++        @if (!string.IsNullOrWhiteSpace(StateLabel))
++        {
++            <span class="rail-chip__state">· @StateLabel</span>
++        }
++    }
++    else if (ChildContent is not null)
+     {
+         @ChildContent
+     }
+@@ -51,6 +69,18 @@
+     [Parameter]
+     public string? Reason { get; set; }
+ 
++    /// <summary>Supplying a delegate turns the chip into an ACTIONABLE one — struck through, but the name
++    /// is a real <c>&lt;button&gt;</c> that performs the action (e.g. enrol this student). The strike says
++    /// the record is missing; the button is how it stops being missing. Never combined with
++    /// <see cref="Blocked"/>: a chip is either unavailable (nothing to do) or a to-do (something to do).</summary>
++    [Parameter]
++    public EventCallback OnActivate { get; set; }
++
++    /// <summary>The actionable chip's state in words ("not chosen"), rendered as visible text after the
++    /// name so the strike-through is never the only signal, and folded into the button's accessible name.</summary>
++    [Parameter]
++    public string? StateLabel { get; set; }
++
+     /// <summary>Tints the chip to match a <see cref="RailBandVariant.Groups"/> band.</summary>
+     [Parameter]
+     public bool GroupStyle { get; set; }
+@@ -59,7 +89,8 @@
+     [Parameter]
+     public EventCallback OnRemove { get; set; }
+ 
+-    /// <summary>Disables the ✕ while a write is in flight, so a slow server cannot be double-clicked.</summary>
++    /// <summary>Disables the chip's action (✕ or the actionable button) while a write is in flight, so a
++    /// slow server cannot be double-clicked. The chip's text stays readable.</summary>
+     [Parameter]
+     public bool Disabled { get; set; }
+ 
+@@ -82,10 +113,19 @@
+                 cls += " rail-chip--blocked";
+             }
+ 
++            if (OnActivate.HasDelegate)
++            {
++                cls += " rail-chip--actionable";
++            }
++
+             return cls;
+         }
+     }
+ 
++    /// <summary>The actionable button's accessible name: the subject PLUS its state, because the visible
++    /// text alone ("Mathematics") would not say why it is struck through.</summary>
++    private string ActivateName => string.IsNullOrWhiteSpace(StateLabel) ? Text : $"{Text} — {StateLabel}";
++
+     private string? Tooltip => Blocked && !string.IsNullOrWhiteSpace(Reason)
+         ? $"{Text} — {Reason}"
+         : null;
+diff --git a/src/SchoolCollab.Admin.Shared/wwwroot/app.css b/src/SchoolCollab.Admin.Shared/wwwroot/app.css
+index d719b996..df194032 100644
+--- a/src/SchoolCollab.Admin.Shared/wwwroot/app.css
++++ b/src/SchoolCollab.Admin.Shared/wwwroot/app.css
+@@ -381,6 +381,46 @@ h1:focus {
+     color: var(--neutral-foreground-hint, #616161);
+ }
+ 
++/* The ACTIONABLE chip (subject-enrolment round B): struck through like a blocked one, because a record
++   is missing — but the name is a real button, so the strike is a to-do rather than a refusal. The state
++   words beside it mean the strike is never the only signal (colour and line are not accessible signals),
++   and the button re-states them as its accessible name. The strike lives on the BUTTON, not on the chip:
++   text-decoration does not propagate into an atomic inline box, so an ancestor's line-through would not
++   cross the button's own text. */
++.rail-chip--actionable {
++    border-color: var(--band-required-accent, #eccf9b);
++    background: var(--band-required-bg, #fdf3e2);
++}
++
++.rail-chip__activate {
++    padding: 0;
++    border: 0;
++    background: transparent;
++    color: inherit;
++    font: inherit;
++    text-align: left;
++    text-decoration: line-through;
++    cursor: pointer;
++}
++
++.rail-chip__activate:hover {
++    text-decoration-thickness: 2px;
++}
++
++/* A keyboard user must SEE where they are: the chip's own container has no visible focus of its own. */
++.rail-chip__activate:focus-visible {
++    outline: 2px solid var(--accent-foreground-rest, #0f6cbd);
++    outline-offset: 1px;
++    border-radius: 2px;
++}
++
++.rail-chip__state {
++    margin-left: 2px;
++    font-size: 0.625rem;
++    color: var(--band-required-fg, #7a5314);
++    text-decoration: none;
++}
++
+ /* Round-B variants (documents/specs/subject-enrollment-requirement-flag.md). Declared with the band
+    vocabulary so the flag's round lands as a call-site change, not a CSS change. */
+ .rail-band--required {
+diff --git a/src/Students/SchoolCollab.Students.Api/Endpoints/StudentTopicAssignmentRoutes.cs b/src/Students/SchoolCollab.Students.Api/Endpoints/StudentTopicAssignmentRoutes.cs
+index dc0d3182..77d1bf73 100644
+--- a/src/Students/SchoolCollab.Students.Api/Endpoints/StudentTopicAssignmentRoutes.cs
++++ b/src/Students/SchoolCollab.Students.Api/Endpoints/StudentTopicAssignmentRoutes.cs
+@@ -17,8 +17,10 @@ public static class StudentTopicAssignmentRoutes
+     public static RouteGroupBuilder MapStudentTopicAssignmentRoutes(this RouteGroupBuilder group)
+     {
+         // ── A student's subjects (subject-enrollment-requirement-flag.md §6 / FR-ER-16) ──
+-        // The union: every false subject on the student's grade plus every true subject the
+-        // student holds a row for in the active academic year. The grade is derived
++        // The union: every subject on the student's grade, with IsEnrolled telling the caller
++        // whether the student holds an enrolment row for it (a false subject is enrolled by
++        // implication). An un-enrolled TRUE subject is returned with IsEnrolled = false: the
++        // student page draws it as the actionable "not chosen" chip. The grade is derived
+         // server-side from the student's active enrolment — a caller-supplied grade could
+         // disagree with the actual placement and silently return an empty or wrong union.
+         // No active academic year or no active enrolment ⇒ 200 with an empty array, never 404.
+diff --git a/src/Students/SchoolCollab.Students.Api/Program.cs b/src/Students/SchoolCollab.Students.Api/Program.cs
+index f234b8c0..59e34cc6 100644
+--- a/src/Students/SchoolCollab.Students.Api/Program.cs
++++ b/src/Students/SchoolCollab.Students.Api/Program.cs
+@@ -1,3 +1,5 @@
++using System.Text.Json.Serialization;
++using SchoolCollab.Students.Core.Domain;
+ using Microsoft.Extensions.DependencyInjection.Extensions;
+ using Serilog;
+ using SchoolCollab.Students.Core;
+@@ -15,6 +17,18 @@ var builder = WebApplication.CreateBuilder(args);
+ builder.AddServiceDefaults();
+ builder.AddRabbitMQClient("rabbitmq");
+ 
++// The wire contract for SubjectAssignmentSource is its NAME, not its ordinal. The admin client has
++// always posted "IndividualAssignment"; without this converter the Students API failed to bind the
++// payload and answered 400 ("The JSON value could not be converted to ...AssignStudentTopic. Path:
++// $.sourceType"), which surfaced in the UI as "could not be added to this student. Try again." - the
++// enrol action of the subject-enrolment feature, broken end-to-end while every stub-HTTP unit test
++// stayed green. Registered per enum type, matching the Assignments API precedent rather than a
++// blanket converter, so no other endpoint's JSON changes.
++builder.Services.ConfigureHttpJsonOptions(options =>
++{
++    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SubjectAssignmentSource>());
++});
++
+ var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
+     ?? builder.Configuration["Aspire:StackExchange:Redis:ConnectionString"];
+ 
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor
+index 5a53714b..18feda1c 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor
+@@ -5,6 +5,7 @@
+ @using SchoolCollab.Admin.Shared.Components.Dialogs
+ @using SchoolCollab.Students.Core.Domain
+ @using StudentGuardianViewDto = SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto
++@using StudentSubjectEnrollmentDto = SchoolCollab.Students.Core.DTOs.StudentSubjectEnrollmentDto
+ @using SchoolCollab.Students.Core.Contracts
+ @using SchoolCollab.Students.Application.Components.Students
+ @using SchoolCollab.Admin.Shared.Services
+@@ -168,6 +169,70 @@
+                                                             <FluentMessageBar Intent="MessageBarIntent.Error">@_groupError</FluentMessageBar>
+                                                         }
+                                                     </RailBand>
++
++                                                    @* The subject bands (subject-enrollment-requirement-flag.md round B,
++                                                       owner Q42/Q45): the two ENROLMENT KINDS side by side under one another,
++                                                       settled order Placement → Activity groups → Needs explicit enrolment
++                                                       → Assumed. Empty bands render NOTHING rather than an empty shell, and
++                                                       both are RailBand + RailChip call sites — no new variant, no new
++                                                       component (component-first-policy Q22a). *@
++                                                    @if (RequiredSubjects.Count > 0)
++                                                    {
++                                                        <RailBand Id="student-edit-subjects-required"
++                                                                  Label="Needs explicit enrolment"
++                                                                  Hint="@RequiredHint"
++                                                                  Variant="RailBandVariant.Required">
++                                                            <RailChips>
++                                                                @foreach (var subject in RequiredSubjects)
++                                                                {
++                                                                    @* One chip per subject, two states: an enrolled student
++                                                                       gets a FACT; an un-enrolled one gets the ACTIONABLE
++                                                                       state (struck through + the words "not chosen"), whose
++                                                                       name is a real button — the only way to fix the gap,
++                                                                       so it must be reachable by keyboard (Q45).
++                                                                       The KEY carries the state as well as the topic: Blazor
++                                                                       KEEPS a parameter a re-render omits, so a chip keyed on
++                                                                       the topic alone would keep the old OnActivate and stay
++                                                                       struck after the student is enrolled. *@
++                                                                    @if (subject.IsEnrolled)
++                                                                    {
++                                                                        <RailChip @key="(subject.TopicId, true)" Text="@subject.Name" />
++                                                                    }
++                                                                    else
++                                                                    {
++                                                                        <RailChip @key="(subject.TopicId, false)"
++                                                                                  Text="@subject.Name"
++                                                                                  StateLabel="not chosen"
++                                                                                  Disabled="@_enrollingSubject"
++                                                                                  OnActivate="() => EnrolSubjectAsync(subject)" />
++                                                                    }
++                                                                }
++                                                            </RailChips>
++                                                        </RailBand>
++                                                    }
++
++                                                    @if (AssumedSubjects.Count > 0)
++                                                    {
++                                                        <RailBand Id="student-edit-subjects-assumed"
++                                                                  Label="Assumed"
++                                                                  Hint="@AssumedHint"
++                                                                  Variant="RailBandVariant.Assumed">
++                                                            <RailChips>
++                                                                @foreach (var subject in AssumedSubjects)
++                                                                {
++                                                                    @* Implied enrolment (FR-ER-1): membership IS the
++                                                                       enrolment, there is no record to act on, so the chip is a
++                                                                       fact — never a struck one. *@
++                                                                    <RailChip @key="subject.TopicId" Text="@subject.Name" />
++                                                                }
++                                                            </RailChips>
++                                                        </RailBand>
++                                                    }
++
++                                                    @* The enrol action's failure is a SENTENCE below the bands, not
++                                                       inside one: a failed write must stay visible even when the band
++                                                       that carried the chip has nothing left to draw. *@
++                                                    <FriendlyErrorBar Message="@_subjectError" />
+                                                 }
+                                                 else
+                                                 {
+@@ -369,6 +434,34 @@
+     private bool _savingGroup;
+     private string? _groupError;
+ 
++    /// <summary>The student's subjects for their current grade — the §6 union, read from the server
++    /// (<c>GET /students/{id}/subjects</c>) because the grade and the enrolment rows are the server's
++    /// to resolve. Null while loading: the two subject bands then render nothing, so "not loaded yet"
++    /// never reads as "no subjects". A <c>true</c> subject with no enrolment row is the state the
++    /// "Needs explicit enrolment" band exists to make visible.</summary>
++    private List<StudentSubjectEnrollmentDto>? _subjects;
++
++    private bool _enrollingSubject;
++    private string? _subjectError;
++
++    /// <summary>The band's two sets: what needs an explicit enrolment action, and what the student gets
++    /// without choosing. Split once here so the markup states the rule in one place.</summary>
++    private List<StudentSubjectEnrollmentDto> RequiredSubjects =>
++        _subjects?.Where(s => s.RequiresEnrollment).ToList() ?? [];
++
++    private List<StudentSubjectEnrollmentDto> AssumedSubjects =>
++        _subjects?.Where(s => !s.RequiresEnrollment).ToList() ?? [];
++
++    /// <summary>"3 of 8 chosen" — the amber band's own total, so the gap is countable without reading
++    /// every chip.</summary>
++    private string RequiredHint =>
++        RequiredSubjects is { Count: > 0 } required
++            ? $"{required.Count(s => s.IsEnrolled)} of {required.Count} chosen"
++            : string.Empty;
++
++    private string AssumedHint =>
++        AssumedSubjects is { Count: > 0 } assumed ? $"{assumed.Count} included" : string.Empty;
++
+     /// <summary>How many groups the student is in — the band's own total, which is what a count means here
+     /// (owner Q19: the panel itself carries no count chip). Renders as e.g. "3 joined".</summary>
+     private string GroupCountHint => _activityGroups is null ? string.Empty : $"{_activityGroups.Count} joined";
+@@ -449,6 +542,87 @@
+     private Dictionary<Guid, string> _relNames = new();
+     private string? _guardianError;
+ 
++    // ── Subject bands (subject-enrollment-requirement-flag.md round B) ──
++    //
++    // The union is read from the server: the student's grade comes from their active
++    // enrolment and the enrolment rows are year-keyed, so a page-local derivation would be
++    // a second, divergent answer. "Needs explicit enrolment" draws every `true` subject
++    // (enrolled → a fact, un-enrolled → the actionable "not chosen" chip); "Assumed"
++    // draws the `false` ones, which the student gets without choosing (FR-ER-1).
++
++    /// <summary>Loads the student's grade subjects. Best-effort: a failed read leaves both bands out
++    /// rather than taking the page down — the enrol action is the surface that owes the user a
++    /// sentence, and it has its own.</summary>
++    private async Task LoadSubjectsAsync(CancellationToken ct)
++    {
++        try
++        {
++            _subjects = (await Api.ListStudentSubjectsAsync(Id, ct))?.ToList() ?? [];
++        }
++        catch (OperationCanceledException)
++        {
++        }
++        catch (Exception ex)
++        {
++            if (_disposed) return;
++            Logger.LogWarning(ex, "Loading subjects for student {StudentId} failed", Id);
++            _subjects = [];
++        }
++    }
++
++    /// <summary>
++    /// The actionable chip's click: enrols the student in that subject, then replaces the chip in
++    /// place (no reload — the row is the page's projection of the answer it just wrote).
++    /// <para><b>The period is the active academic YEAR, never the student's own enrolment period:</b>
++    /// enrolment rows are year-keyed (FR-ER-3) and <c>AssignStudentTopicHandler</c> rejects any other
++    /// period (422) even though the server stamps the row itself. A student's enrolment may carry a
++    /// SUB-period, which is not the contract the handler validates against.</para>
++    /// <para>A failure leaves the chip exactly as it was and shows the site's own plain sentence —
++    /// the exception is logged with its detail and never rendered (#416's seam).</para>
++    /// </summary>
++    private async Task EnrolSubjectAsync(StudentSubjectEnrollmentDto subject)
++    {
++        if (_disposed || _enrollingSubject) return;
++        _subjectError = null;
++        _enrollingSubject = true;
++        try
++        {
++            var ct = _loadCts?.Token ?? CancellationToken.None;
++            if ((await Api.GetActiveAcademicYearAsync(ct))?.Id is not { } activeYearId)
++            {
++                _subjectError = $"'{subject.Name}' could not be added because the school has no active academic year.";
++                return;
++            }
++
++            await Api.AssignStudentTopicAsync(
++                new AssignStudentTopicRequest(
++                    Id, subject.TopicId, activeYearId,
++                    IsOverride: false, SourceType: "IndividualAssignment"),
++                ct);
++
++            if (_disposed) return;
++            _subjects = _subjects?
++                .Select(s => s.TopicId == subject.TopicId ? s with { IsEnrolled = true } : s)
++                .ToList();
++        }
++        catch (OperationCanceledException)
++        {
++        }
++        catch (Exception ex)
++        {
++            if (_disposed) return;
++            _subjectError = FriendlyError.Describe(
++                ex,
++                $"'{subject.Name}' could not be added to this student. Try again.",
++                Logger);
++        }
++        finally
++        {
++            _enrollingSubject = false;
++            if (!_disposed) await InvokeAsync(StateHasChanged);
++        }
++    }
++
+     private StudentEnrollmentDto? PrimaryActiveEnrollment
+     {
+         get
+@@ -528,6 +702,10 @@
+             // The Enrollment rail band projects the student's activity-group memberships.
+             await LoadActivityGroupsAsync(ct);
+ 
++            // …and its two subject bands project the student's grade subjects and their enrolment
++            // state (the §6 union). Both reads are independent of each other.
++            await LoadSubjectsAsync(ct);
++
+             // Page-owned link list (the form is in Linked mode and is
+             // a thin presenter — the page must hand the projected
+             // StudentGuardianViewDto[] down via the LinkedItems
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor
+index c03e1649..ed512b3c 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor
+@@ -373,7 +373,10 @@
+             _catalog.TryGetValue(topicId, out var topic) ? topic.Name : "Subject",
+             _catalog.TryGetValue(topicId, out var withCode) ? withCode.Code : null,
+             0,
+-            0);
++            0,
++            // Title-only fallback: a subject the curriculum read has not returned this row for
++            // is not the one the enrolment switch would act on, so it claims no explicit flag.
++            RequiresEnrollment: false);
+ 
+     private TopicDto[] _unassignedTopics =>
+         _catalog.Values
+@@ -860,6 +863,21 @@
+ 
+     private Task MoveTopicDownAsync(GradeTopicCurriculumDto topic) => MoveTopicAsync(topic, +1);
+ 
++    /// <summary>
++    /// The Subjects dialog's explicit-enrolment switch: PUT the new flag against the row's bridge
++    /// ASSIGNMENT (the topic may be assigned to several grades with different flags, so the bridge
++    /// row — not the topic — is what the endpoint targets).
++    /// <para>Deliberately a THIN pass-through with no catch: the failure must reach the dialog, which
++    /// is where the user is, and the dialog renders the seam's plain sentence. Swallowing it here
++    /// (the <see cref="AssignTopicAsync"/> shape, which has to return an id either way) would leave
++    /// the switch with no way to tell the admin it did not happen.</para>
++    /// </summary>
++    private async Task SetTopicRequiresEnrollmentAsync(GradeTopicCurriculumDto topic, bool value)
++    {
++        if (_disposed) return;
++        await Api.SetRequiresEnrollmentAsync(topic.AssignmentId, value);
++    }
++
+     private async Task MoveTopicAsync(GradeTopicCurriculumDto topic, int delta)
+     {
+         if (_disposed) return;
+@@ -878,6 +896,7 @@
+             new Dictionary<string, object?>
+             {
+                 { GradeTopicsDialog.TopicsKey, _curriculum ?? [] },
++                { GradeTopicsDialog.GradeLevelIdKey, Id },
+                 { GradeTopicsDialog.UnassignedTopicsKey, _unassignedTopics },
+                 { GradeTopicsDialog.OpenStrandsKey, new Func<GradeTopicCurriculumDto, Task>(OpenStrandsAsync) },
+                 { GradeTopicsDialog.RemoveKey, new Func<Guid, Task>(RemoveTopicAsync) },
+@@ -887,6 +906,8 @@
+                 { GradeTopicsDialog.EditKey, new Func<GradeTopicCurriculumDto, Task>(OpenTopicEditAsync) },
+                 { GradeTopicsDialog.MoveUpKey, new Func<GradeTopicCurriculumDto, Task>(MoveTopicUpAsync) },
+                 { GradeTopicsDialog.MoveDownKey, new Func<GradeTopicCurriculumDto, Task>(MoveTopicDownAsync) },
++                { GradeTopicsDialog.SetRequiresEnrollmentKey,
++                    new Func<GradeTopicCurriculumDto, bool, Task>(SetTopicRequiresEnrollmentAsync) },
+                 // Per-topic exception COUNTS, not lists: the dialog renders a count
+                 // badge only, and a count map cannot collide on a repeated topic key.
+                 { GradeTopicsDialog.ExceptionCountsByTopicKey, _exceptions
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/GradeTopicsDialog.razor b/src/Students/SchoolCollab.Students.Application/Components/Students/GradeTopicsDialog.razor
+index 85d901ef..88bd82ea 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/GradeTopicsDialog.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/GradeTopicsDialog.razor
+@@ -25,11 +25,29 @@
+    destructive: true with a confirmMessage so the SHARED RowActionsMenu enforces
+    the prompt — this dialog holds no confirmation logic of its own
+    (.github/copilot/rules/blazor-components.md §"Destructive actions require a
+-   confirmation prompt"). MANUAL REORDER is the Order column — the row's FIRST
++   confirmation prompt"). The kebab ALSO carries the explicit-enrolment switch
++   (subject-enrollment-requirement-flag.md round B, owner Q39/Q44): it belongs to
++   the bridge ROW, because one topic can be assigned to several grades with
++   different flags, so the topic edit dialog is the wrong home for it. Its label
++   states the state it will produce (never a bare "Toggle") and its confirm names
++   the grandfather consequence before the write — a false → true flip enrols the
++   whole current roster server-side (FR-ER-7/10), so the admin is told that nobody
++   loses the subject rather than finding out afterwards.
++
++   WHY THIS DIALOG READS THE AUDIENCE ITSELF while every WRITE is the page's
++   callback: RowActionsMenu shows the confirmation it was HANDED, and the action
++   list is built during render — so the count must be known before the click, not
++   fetched between the click and the prompt. The switch's write stays the page's,
++   like every other action here.
++
++   MANUAL REORDER is the Order column — the row's FIRST
+    column, icon-only (move-up/move-down buttons, no position text; the repo's
+    reorder affordance — there is no drag-and-drop) — which invokes the page's
+    MoveUp/MoveDown callbacks with the row, then swaps the two neighbours locally
+    so the grid reflects the move at once. *@
++@inject StudentsApiClient Api
++@inject ILogger<GradeTopicsDialog> Logger
++
+ <DialogShellBody>
+ <ReadOnlyDialogShell Class="topic-dialog">
+     @* The picker and the move error are FIXED above the scroll region, so assigning
+@@ -52,6 +70,9 @@
+         {
+             <FluentMessageBar Intent="MessageBarIntent.Error">@moveError</FluentMessageBar>
+         }
++
++        @* The switch's own failure — a plain sentence from the seam, never the exception's text. *@
++        <FriendlyErrorBar Message="@_switchError" />
+     </Toolbar>
+ 
+     <ChildContent>
+@@ -146,6 +167,15 @@
+     public const string MoveUpKey = nameof(MoveUp);
+     public const string MoveDownKey = nameof(MoveDown);
+ 
++    /// <summary>The grade whose subject list this is, from its host page. The enrolment
++    /// switch needs it to ask <c>GET /students/topic-enrollment</c> how many students a
++    /// <c>false → true</c> flip would grandfather (FR-ER-8).</summary>
++    public const string GradeLevelIdKey = nameof(GradeLevelId);
++
++    /// <summary>Receives the enrolment switch's write: (row, newValue). The PAGE performs it —
++    /// one callback per action, like every other write here.</summary>
++    public const string SetRequiresEnrollmentKey = nameof(SetRequiresEnrollment);
++
+     /// <summary>Receives the callback that OPENS the EnrollmentExceptionsDialog for a
+     /// topic id, scoped to this dialog's grade owner. Provided by the page (which owns
+     /// the dialog service), like the other callbacks here.</summary>
+@@ -174,6 +204,19 @@
+     [Parameter] public Func<GradeTopicCurriculumDto, Task>? Edit { get; set; }
+     [Parameter] public Func<GradeTopicCurriculumDto, Task>? MoveUp { get; set; }
+     [Parameter] public Func<GradeTopicCurriculumDto, Task>? MoveDown { get; set; }
++
++    /// <summary>The grade whose subjects these are. Supplied by the host page so the enrolment
++    /// switch can read the subject's audience size for its confirm. Absent (empty) only in a unit
++    /// test that does not exercise the switch — the switch's confirm then states the consequence
++    /// without a number rather than failing.</summary>
++    [Parameter] public Guid GradeLevelId { get; set; }
++
++    /// <summary>Performs the explicit-enrolment switch: <c>(row, newValue)</c>. The page writes it
++    /// (the row's bridge <c>AssignmentId</c> identifies the grade's entry). A THROWN exception means
++    /// the write failed and is what this dialog turns into the user's plain sentence — the callback
++    /// must not swallow it, or the failure would have no surface (unlike <see cref="Assign"/>, which
++    /// has to return an id either way).</summary>
++    [Parameter] public Func<GradeTopicCurriculumDto, bool, Task>? SetRequiresEnrollment { get; set; }
+     [Parameter] public Func<Guid, Task>? Remove { get; set; }
+ 
+     /// <summary>Assigns the picked topic and RETURNS the created bridge assignment id,
+@@ -195,6 +238,43 @@
+     private TopicDto? _topicToAdd;
+     private bool _adding;
+     private string? _moveError;
++    private string? _switchError;
++
++    /// <summary>Topic id → how many students the subject's grade holds today (the enrolment
++    /// audience). Read once when the dialog opens, so the switch's confirm can name the number
++    /// it would grandfather — see the file's comment on why this is not a page callback.</summary>
++    private readonly Dictionary<Guid, int> _audienceSizeByTopic = new();
++
++    protected override async Task OnInitializedAsync()
++    {
++        if (GradeLevelId == Guid.Empty) return;
++
++        var readings = await Task.WhenAll(_topics.Select(async topic =>
++            (topic.TopicId, Audience: await ReadAudienceSizeAsync(topic.TopicId))));
++
++        foreach (var (topicId, audience) in readings)
++        {
++            if (audience is { } size) _audienceSizeByTopic[topicId] = size;
++        }
++    }
++
++    /// <summary>The subject's audience size, or null when the read failed. A count is not worth
++    /// failing a dialog open over: the confirm then states the consequence without a number.</summary>
++    private async Task<int?> ReadAudienceSizeAsync(Guid topicId)
++    {
++        try
++        {
++            var enrollment = await Api.GetTopicEnrollmentAsync(GradeLevelId, topicId);
++            return enrollment?.Audience.Length;
++        }
++        catch (Exception ex)
++        {
++            Logger.LogWarning(ex,
++                "Could not read the enrolment audience for topic {TopicId} in grade {GradeLevelId}",
++                topicId, GradeLevelId);
++            return null;
++        }
++    }
+ 
+     /// <summary>The row's 0-based position in the grid's own list — the order the
+     /// curriculum read returned, i.e. the bridge <c>DisplayOrder</c>.</summary>
+@@ -240,6 +320,23 @@
+             actions.Add(RowAction.Callback("Enrollment exceptions", () => openExceptions(topic.TopicId), FluentIcons.Calendar));
+         }
+ 
++        // The explicit-enrolment switch (round B, owner Q39/Q44). The LABEL states what the click
++        // will DO — "Require…" when it is off, "Stop requiring…" when it is on — so the row's
++        // current state is readable from the menu and no bare "Toggle" is offered.
++        // `destructive: true` is the shared menu's ONLY confirmation switch; the write is not
++        // destructive (a false → true flip grandfathers instead of removing), but it changes who
++        // receives the subject, so it must be confirmed — see the round doc P4.
++        if (SetRequiresEnrollment is not null)
++        {
++            actions.Add(RowAction.Callback(
++                topic.RequiresEnrollment ? "Stop requiring explicit enrolment" : "Require explicit enrolment",
++                () => SwitchRequiresEnrollmentAsync(topic),
++                topic.RequiresEnrollment ? FluentIcons.People : FluentIcons.PersonAdd,
++                disabled: _adding,
++                destructive: true,
++                confirmMessage: RequiresEnrollmentConfirmation(topic)));
++        }
++
+         actions.Add(RowAction.Separator());
+         actions.Add(RowAction.Callback(
+             "Remove",
+@@ -254,6 +351,67 @@
+     private static string RemoveConfirmation(GradeTopicCurriculumDto topic) =>
+         $"Remove subject '{topic.Name}' from this grade? The subject stays in the catalog; only this grade's assignment is removed.";
+ 
++    /// <summary>
++    /// The switch's confirm, naming the GRANDFATHER consequence before the write (FR-ER-8/10):
++    /// flipping to <c>true</c> enrols every current grade member, so nobody loses the subject;
++    /// flipping back to <c>false</c> keeps the rows as history and enrols the grade by implication
++    /// (FR-ER-9). The audience number is the pre-write count read when the dialog opened; without it
++    /// (a failed read) the sentence states the same consequence without a number.
++    /// </summary>
++    private string RequiresEnrollmentConfirmation(GradeTopicCurriculumDto topic) =>
++        topic.RequiresEnrollment
++            ? $"Stop requiring explicit enrolment for '{topic.Name}'? Every student in this grade gets the "
++              + "subject again. The enrolment records already made are kept as history, so nothing is lost."
++            : $"Require explicit enrolment for '{topic.Name}'? {GrandfatherSentence(topic)} Then only the "
++              + "students you enrol will get it.";
++
++    private string GrandfatherSentence(GradeTopicCurriculumDto topic) =>
++        _audienceSizeByTopic.TryGetValue(topic.TopicId, out var size)
++            ? $"This enrols all {size} student{(size == 1 ? string.Empty : "s")} in this grade now, so nobody "
++              + "loses the subject."
++            : "This enrols every student in this grade now, so nobody loses the subject.";
++
++    /// <summary>
++    /// Flips the row's flag through the page's callback, then reflects the change in the dialog's own
++    /// list so the row reads its new state without reopening anything. A failure leaves the row
++    /// untouched and renders the site's plain sentence — the exception itself is logged, never shown.
++    /// </summary>
++    private async Task SwitchRequiresEnrollmentAsync(GradeTopicCurriculumDto topic)
++    {
++        if (_adding || SetRequiresEnrollment is null) return;
++
++        var next = !topic.RequiresEnrollment;
++        _adding = true;
++        _switchError = null;
++        try
++        {
++            await SetRequiresEnrollment(topic, next);
++
++            Topics = Topics
++                .Select(t => t.AssignmentId == topic.AssignmentId ? t with { RequiresEnrollment = next } : t)
++                .ToArray();
++            // The kebab is a CHILD component, so its click re-renders RowActionsMenu only — without
++            // this the row would keep offering the action it has just performed
++            // (section-card.md §"Reload after child-triggered mutations").
++            StateHasChanged();
++            if (OnChanged is not null) await OnChanged();
++        }
++        catch (Exception ex)
++        {
++            _switchError = FriendlyError.Describe(
++                ex,
++                $"The enrolment setting for '{topic.Name}' could not be changed. Try again.",
++                Logger);
++            // The click came from the kebab (a CHILD component), so nothing re-renders this dialog on
++            // failure — without this the sentence would be set and never shown.
++            StateHasChanged();
++        }
++        finally
++        {
++            _adding = false;
++        }
++    }
++
+     /// <summary>
+     /// How many exceptions the subject carries — zero renders no badge, because the
+     /// absence of an exception is the normal state.
+@@ -334,7 +492,10 @@
+             // Reflect the assignment in the dialog's own lists so the topic moves
+             // from the picker into the assigned list without reopening the dialog.
+             Topics = Topics.Append(new GradeTopicCurriculumDto(
+-                assignmentId, topic.Id, topic.Name, topic.Code, 0, 0)).ToArray();
++                assignmentId, topic.Id, topic.Name, topic.Code, 0, 0,
++                // A grade assignment is created with the flag OFF (FR-ER-2: implied enrolment is
++                // the default, so the appended row claims the state the server just created).
++                RequiresEnrollment: false)).ToArray();
+             UnassignedTopics = UnassignedTopics.Where(t => t.Id != topic.Id).ToArray();
+             _topicToAdd = null;
+             if (OnChanged is not null) await OnChanged();
+diff --git a/src/Students/SchoolCollab.Students.Application/Services/StudentsApiClient.cs b/src/Students/SchoolCollab.Students.Application/Services/StudentsApiClient.cs
+index 2d0c9dbe..dbd9bf1e 100644
+--- a/src/Students/SchoolCollab.Students.Application/Services/StudentsApiClient.cs
++++ b/src/Students/SchoolCollab.Students.Application/Services/StudentsApiClient.cs
+@@ -173,7 +173,8 @@ public sealed record TopicAssignmentDto(
+     Guid? TopicStrandId,
+     Guid? PeriodId,
+     DateTimeOffset CreatedAt,
+-    DateTimeOffset UpdatedAt);
++    DateTimeOffset UpdatedAt,
++    bool RequiresEnrollment);
+ 
+ public sealed record GradeTopicCurriculumDto(
+     Guid AssignmentId,
+@@ -181,7 +182,8 @@ public sealed record GradeTopicCurriculumDto(
+     string Name,
+     string? Code,
+     int StrandCount,
+-    int LessonCount);
++    int LessonCount,
++    bool RequiresEnrollment);
+ 
+ public sealed record StudentTopicAssignmentDto(
+     Guid Id,
+@@ -428,6 +430,10 @@ public record AssignActivityGroupTopicRequest(
+ 
+ public record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);
+ 
++/// <summary>Body of <c>PUT /students/topic-assignments/{id}/requires-enrollment</c> — the subject's
++/// explicit-enrolment flag (mirrors the API's own request record).</summary>
++public sealed record SetRequiresEnrollmentRequest(bool Value);
++
+ /// <summary>Body of the two per-grade list reorder endpoints (streams and subjects).</summary>
+ public sealed record SetOrderRequest(int Order);
+ 
+@@ -1755,6 +1761,36 @@ public sealed class StudentsApiClient : IContactsClient
+         (await _http.PutAsJsonAsync($"/students/topic-assignments/{id}/period",
+             new UpdateTopicAssignmentPeriodRequest(periodId), ct)).EnsureSuccessStatusCode();
+ 
++    /// <summary>
++    /// One (grade, subject) pair's enrolment answer — <c>GET /students/topic-enrollment</c>
++    /// (subject-enrollment-requirement-flag.md FR-ER-14). <see cref="TopicEnrollmentDto.Audience"/>
++    /// is the grade's roster and <see cref="TopicEnrollmentDto.Eligible"/> its enrolled subset, so
++    /// the switch surface can state how many students a flip would grandfather BEFORE writing.
++    /// No period argument: the academic year is resolved server-side.
++    /// </summary>
++    public async Task<TopicEnrollmentDto?> GetTopicEnrollmentAsync(
++        Guid gradeLevelId, Guid topicId, CancellationToken ct = default) =>
++        await _http.GetFromJsonAsync<TopicEnrollmentDto>(
++            $"/students/topic-enrollment?gradeLevelId={gradeLevelId:D}&topicId={topicId:D}", ct);
++
++    /// <summary>
++    /// Switches a subject between implied enrolment (<c>false</c>) and explicit per-student
++    /// enrolment (<c>true</c>) — <c>PUT /students/topic-assignments/{id}/requires-enrollment</c>
++    /// (FR-ER-7/9). The route targets the bridge ASSIGNMENT (one topic may be assigned to several
++    /// grades with different flags). A <c>false → true</c> flip grandfathers the current grade roster
++    /// server-side in one transaction (FR-ER-10); the response carries the FR-ER-8 counts.
++    /// </summary>
++    public async Task<TopicEnrollmentCountsDto> SetRequiresEnrollmentAsync(
++        Guid assignmentId, bool value, CancellationToken ct = default)
++    {
++        var response = await _http.PutAsJsonAsync(
++            $"/students/topic-assignments/{assignmentId:D}/requires-enrollment",
++            new SetRequiresEnrollmentRequest(value), ct);
++        response.EnsureSuccessStatusCode();
++        var result = await response.Content.ReadFromJsonAsync<TopicEnrollmentCountsDto>(ct);
++        return result!;
++    }
++
+     // ── Subject enrollment exceptions ─────────────────────────────────────────
+     // subject-period-exception-model.md v3 §6: the bridge row means the subject is
+     // offered; an exception is the explicit declaration ("teacher on leave in Term 3",
+diff --git a/src/Students/SchoolCollab.Students.Core/CQRS/StudentTopicAssignments/Queries/ListStudentSubjects/ListStudentSubjects.cs b/src/Students/SchoolCollab.Students.Core/CQRS/StudentTopicAssignments/Queries/ListStudentSubjects/ListStudentSubjects.cs
+index 566e2098..177e88ad 100644
+--- a/src/Students/SchoolCollab.Students.Core/CQRS/StudentTopicAssignments/Queries/ListStudentSubjects/ListStudentSubjects.cs
++++ b/src/Students/SchoolCollab.Students.Core/CQRS/StudentTopicAssignments/Queries/ListStudentSubjects/ListStudentSubjects.cs
+@@ -4,9 +4,10 @@ using SchoolCollab.Students.Core.DTOs;
+ namespace SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Queries.ListStudentSubjects;
+ 
+ /// <summary>
+-/// The §6 "my subjects" union for one student: every <c>false</c> subject on the student's
+-/// grade plus every <c>true</c> subject they hold an enrolment row for in the active
+-/// academic year. The grade is derived server-side from the student's active enrolment —
++/// The §6 "my subjects" union for one student: every subject on the student's grade, with
++/// <see cref="StudentSubjectEnrollmentDto.IsEnrolled"/> telling the caller whether the student
++/// holds an enrolment row for it (a <c>false</c> subject is enrolled by implication, FR-ER-1).
++/// The grade is derived server-side from the student's active enrolment —
+ /// there is no caller-supplied grade, because a mismatched grade would silently produce an
+ /// empty or wrong union (subject-enrollment-requirement-flag.md FR-ER-16, round 13 P3).
+ /// </summary>
+diff --git a/src/Students/SchoolCollab.Students.Core/CQRS/StudentTopicAssignments/Queries/ListStudentSubjects/ListStudentSubjectsHandler.cs b/src/Students/SchoolCollab.Students.Core/CQRS/StudentTopicAssignments/Queries/ListStudentSubjects/ListStudentSubjectsHandler.cs
+index e0fe19be..fa57a8d7 100644
+--- a/src/Students/SchoolCollab.Students.Core/CQRS/StudentTopicAssignments/Queries/ListStudentSubjects/ListStudentSubjectsHandler.cs
++++ b/src/Students/SchoolCollab.Students.Core/CQRS/StudentTopicAssignments/Queries/ListStudentSubjects/ListStudentSubjectsHandler.cs
+@@ -9,10 +9,16 @@ namespace SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Queries.ListSt
+ 
+ /// <summary>
+ /// Builds the §6 union (FR-ER-16): a student's grade subjects, keeping every
+-/// <c>false</c> subject unconditionally (membership IS the enrolment, FR-ER-1) and a
+-/// <c>true</c> subject only when the student holds a <c>StudentTopicAssignment</c> for the
+-/// <b>active academic year</b> (FR-ER-3 — an exact period-id match, so last year's row does
+-/// not carry).
++/// <c>false</c> subject unconditionally (membership IS the enrolment, FR-ER-1) and every
++/// <c>true</c> subject marked with whether the student holds a <c>StudentTopicAssignment</c>
++/// for the <b>active academic year</b> (FR-ER-3 — an exact period-id match, so last year's
++/// row does not carry).
++/// <para><b>A <c>true</c> subject with no row is still returned</b>, with
++/// <see cref="StudentSubjectEnrollmentDto.IsEnrolled"/> = <c>false</c>: the student page's
++/// "Needs explicit enrolment" band has nothing to render otherwise, and an absent row is
++/// exactly the state that band exists to make visible. The flag is additive — every row the
++/// pre-layer-2 contract returned is still returned with <c>IsEnrolled = true</c>, so a caller
++/// that filters on it sees the same set as before.</para>
+ /// <para>The grade comes from the student's active enrolment in that year, resolved with
+ /// <see cref="IStudentEnrollmentRepository.GetActiveEnrollmentByStudentAndPeriodAsync"/>.
+ /// No active academic year or no active enrolment ⇒ an empty array (200, never 404): there
+@@ -69,8 +75,11 @@ public sealed class ListStudentSubjectsHandler(
+ 
+         var enrolled = enrolledTopicIds.ToHashSet();
+ 
++        // No WHERE: an un-enrolled `true` subject is a ROW the rail must draw (struck through,
++        // "not chosen"), not a row to hide. `false` subjects short-circuit to enrolled because
++        // membership is the enrolment, so a stale assignment row on one is never consulted
++        // (FR-ER-9: the rows are inert history and the subject reads as "everyone").
+         return subjects
+-            .Where(x => !x.RequiresEnrollment || enrolled.Contains(x.TopicId))
+             .Select(x => new StudentSubjectEnrollmentDto(
+                 x.TopicId,
+                 x.Name,
+diff --git a/src/Students/SchoolCollab.Students.Core/CQRS/TopicAssignments/Queries/ListGradeTopicCurriculumByGrade/ListGradeTopicCurriculumByGradeHandler.cs b/src/Students/SchoolCollab.Students.Core/CQRS/TopicAssignments/Queries/ListGradeTopicCurriculumByGrade/ListGradeTopicCurriculumByGradeHandler.cs
+index 6545ae2d..ced88f8f 100644
+--- a/src/Students/SchoolCollab.Students.Core/CQRS/TopicAssignments/Queries/ListGradeTopicCurriculumByGrade/ListGradeTopicCurriculumByGradeHandler.cs
++++ b/src/Students/SchoolCollab.Students.Core/CQRS/TopicAssignments/Queries/ListGradeTopicCurriculumByGrade/ListGradeTopicCurriculumByGradeHandler.cs
+@@ -65,7 +65,7 @@ public sealed class ListGradeTopicCurriculumByGradeHandler(
+                           && a.StartDate <= effectiveDate
+                           && (a.EndDate == null || a.EndDate >= effectiveDate)
+                     orderby a.DisplayOrder, t.DisplayOrder, t.Name
+-                    select new { AssignmentId = a.Id, TopicId = t.Id, t.Name, t.Code }).ToArrayAsync(ct);
++                    select new { AssignmentId = a.Id, TopicId = t.Id, t.Name, t.Code, a.RequiresEnrollment }).ToArrayAsync(ct);
+ 
+                 if (topics.Length == 0) return Array.Empty<GradeTopicCurriculumDto>();
+ 
+@@ -94,7 +94,8 @@ public sealed class ListGradeTopicCurriculumByGradeHandler(
+                     x.Name,
+                     x.Code,
+                     strandMap.TryGetValue(x.TopicId, out var sc) ? sc : 0,
+-                    lessonMap.TryGetValue(x.TopicId, out var lc) ? lc : 0)).ToArray();
++                    lessonMap.TryGetValue(x.TopicId, out var lc) ? lc : 0,
++                    x.RequiresEnrollment)).ToArray();
+             },
+             CacheOptions,
+             tags: ["students"],
+diff --git a/src/Students/SchoolCollab.Students.Core/DTOs/GradeTopicCurriculumDto.cs b/src/Students/SchoolCollab.Students.Core/DTOs/GradeTopicCurriculumDto.cs
+index 3830f713..41631236 100644
+--- a/src/Students/SchoolCollab.Students.Core/DTOs/GradeTopicCurriculumDto.cs
++++ b/src/Students/SchoolCollab.Students.Core/DTOs/GradeTopicCurriculumDto.cs
+@@ -9,10 +9,15 @@ namespace SchoolCollab.Students.Core.DTOs;
+ /// reorder endpoint targets the ASSIGNMENT, not the topic: one topic may be
+ /// assigned to several grades, so only the bridge row identifies this grade's
+ /// entry.</param>
++/// <param name="RequiresEnrollment">The bridge row's explicit-enrolment flag
++/// (subject-enrollment-requirement-flag.md FR-ER-2). Carried on the row so the
++/// Subjects dialog can label its enrolment switch for the state it will produce
++/// and reflect the new state after a write, without a second read.</param>
+ public sealed record GradeTopicCurriculumDto(
+     Guid AssignmentId,
+     Guid TopicId,
+     string Name,
+     string? Code,
+     int StrandCount,
+-    int LessonCount);
++    int LessonCount,
++    bool RequiresEnrollment);
+diff --git a/src/Students/SchoolCollab.Students.Core/DTOs/StudentSubjectEnrollmentDto.cs b/src/Students/SchoolCollab.Students.Core/DTOs/StudentSubjectEnrollmentDto.cs
+index ff98ed65..c0268ad2 100644
+--- a/src/Students/SchoolCollab.Students.Core/DTOs/StudentSubjectEnrollmentDto.cs
++++ b/src/Students/SchoolCollab.Students.Core/DTOs/StudentSubjectEnrollmentDto.cs
+@@ -12,7 +12,10 @@ namespace SchoolCollab.Students.Core.DTOs;
+ /// (enrol/disenrol/enrol-remaining) without a second read.</para>
+ /// <para><see cref="IsEnrolled"/> is implied <c>true</c> for a <c>false</c> subject (FR-ER-1:
+ /// audience membership is the enrolment), and row-backed for a <c>true</c> subject
+-/// (FR-ER-3: a <c>StudentTopicAssignment</c> for the active academic year).</para>
++/// (FR-ER-3: a <c>StudentTopicAssignment</c> for the active academic year). A <c>true</c>
++/// subject with no row is returned with <c>false</c> — that row is what the student page's
++/// "Needs explicit enrolment" band draws, struck through, so the gap is visible rather
++/// than absent.</para>
+ /// </summary>
+ public sealed record StudentSubjectEnrollmentDto(
+     Guid TopicId,
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/GradeDialogsBunitTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/GradeDialogsBunitTests.cs
+index b3e486f0..747a6f45 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/GradeDialogsBunitTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/GradeDialogsBunitTests.cs
+@@ -37,6 +37,11 @@ public class GradeDialogsBunitTests : BunitContext
+     {
+         JSInterop.Mode = JSRuntimeMode.Loose;
+         Services.AddFluentUIComponents();
++        // GradeTopicsDialog injects a logger (FriendlyError.Describe) and the students client (its
++        // enrolment switch reads the subject's audience size for the confirm). These fixtures never
++        // set a GradeLevelId, so no call is made — the registrations only have to resolve.
++        Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
++        RegisterCodedValuesApi();
+     }
+ 
+     /// <summary>
+@@ -85,8 +90,9 @@ public class GradeDialogsBunitTests : BunitContext
+     /// reproducible and never hands the move buttons an empty guid.</summary>
+     private static readonly Guid BridgeAssignmentId = Guid.Parse("bbbbbbbb-0000-0000-0000-0000000000b1");
+ 
+-    private static GradeTopicCurriculumDto Topic(Guid id, string name, string code, int strands, int lessons) =>
+-        new(BridgeAssignmentId, id, name, code, strands, lessons);
++    private static GradeTopicCurriculumDto Topic(
++        Guid id, string name, string code, int strands, int lessons, bool requiresEnrollment = false) =>
++        new(BridgeAssignmentId, id, name, code, strands, lessons, requiresEnrollment);
+ 
+     private static TopicDto CatalogTopic(Guid id, string name, string code) =>
+         new(id, null, code, name, null, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/RailBandComponentTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/RailBandComponentTests.cs
+index 7ca8fcf8..4f006548 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/RailBandComponentTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/RailBandComponentTests.cs
+@@ -187,4 +187,64 @@ public class RailBandComponentTests : BunitContext
+         cut.Find(".rail-chip").ClassName.Should().Contain("rail-chip--blocked",
+             "the chip is still struck through, so the missing reason is a review defect, never a silent pass");
+     }
++
++    // ── The third state: struck through AND actionable (subject-enrolment round B, plan-gate F4) ──
++    // A blocked chip says "you cannot"; an actionable one says "you have not — do it". They must never be the
++    // same rendering, because aria-disabled on a chip whose whole point is the button is the defect this state
++    // exists to prevent.
++
++    [TestMethod]
++    public void RailChip_Actionable_RendersARealButton_NamedWithTheSubjectAndItsState()
++    {
++        var cut = Render<RailChip>(p => p
++            .Add(c => c.Text, "Mathematics")
++            .Add(c => c.StateLabel, "not chosen")
++            .Add(c => c.OnActivate, () => { }));
++
++        var chip = cut.Find(".rail-chip");
++        chip.ClassName.Should().Contain("rail-chip--actionable",
++            "the missing record is visible as a strike-through…");
++        chip.HasAttribute("aria-disabled").Should().BeFalse(
++            "…but aria-disabled is for the picker's blocked rows: on an actionable chip it would announce the "
++            + "one control that fixes the gap as unavailable");
++
++        var button = cut.Find("button.rail-chip__activate");
++        button.GetAttribute("type").Should().Be("button",
++            "a real button inside the chip, typed so it can never submit a surrounding form");
++        button.TextContent.Trim().Should().Be("Mathematics", "the subject's name is the button's visible text");
++        button.GetAttribute("aria-label").Should().Be("Mathematics — not chosen",
++            "the accessible name carries the SUBJECT plus its state — the visible name alone would not say why "
++            + "it is struck through");
++        button.HasAttribute("disabled").Should().BeFalse("an idle chip's button is operable");
++        button.HasAttribute("tabindex").Should().BeFalse(
++            "no negative tabindex: a native button is in the tab order, and that is what makes the gap "
++            + "fixable from the keyboard (acceptance criterion 3)");
++
++        cut.Find(".rail-chip__state").TextContent.Should().Contain("not chosen",
++            "the state is WORDS as well as a line — a strike-through and a colour are not accessible signals");
++    }
++
++    [TestMethod]
++    public void RailChip_Actionable_InvokesItsHandler_AndDisabledOnlyGatesTheButton()
++    {
++        var activations = 0;
++        var cut = Render<RailChip>(p => p
++            .Add(c => c.Text, "Mathematics")
++            .Add(c => c.StateLabel, "not chosen")
++            .Add(c => c.OnActivate, () => activations++));
++
++        cut.Find("button.rail-chip__activate").Click();
++        activations.Should().Be(1, "the chip performs exactly the click it was given");
++
++        var gated = Render<RailChip>(p => p
++            .Add(c => c.Text, "Mathematics")
++            .Add(c => c.StateLabel, "not chosen")
++            .Add(c => c.Disabled, true)
++            .Add(c => c.OnActivate, () => activations++));
++
++        gated.Find("button.rail-chip__activate").HasAttribute("disabled").Should().BeTrue(
++            "a slow server must not be double-clicked into a second write");
++        gated.Find(".rail-chip").ClassName.Should().Contain("rail-chip--actionable",
++            "the chip keeps its state while the write is in flight — only the action is unavailable");
++    }
+ }
+diff --git a/tests/SchoolCollab.Students.Api.Tests.Unit/SubjectAssignmentSourceJsonTests.cs b/tests/SchoolCollab.Students.Api.Tests.Unit/SubjectAssignmentSourceJsonTests.cs
+new file mode 100644
+index 00000000..8d3398a6
+--- /dev/null
++++ b/tests/SchoolCollab.Students.Api.Tests.Unit/SubjectAssignmentSourceJsonTests.cs
+@@ -0,0 +1,87 @@
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Mvc.Testing;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.DependencyInjection.Extensions;
++using Microsoft.Extensions.Hosting;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Commands.AssignStudentTopic;
++using SchoolCollab.Students.Core.Domain;
++
++namespace SchoolCollab.Students.Api.Tests.Unit;
++
++/// <summary>
++/// <b>The wire shape of <c>AssignStudentTopic.SourceType</c> is its NAME.</b>
++///
++/// <para>The admin client has always posted <c>"sourceType": "IndividualAssignment"</c>. The Students API
++/// registered no enum converter, so every enrol POST was rejected with
++/// <c>400 — The JSON value could not be converted to …AssignStudentTopic. Path: $.sourceType</c>, and the
++/// UI surfaced it as "'{subject}' could not be added to this student. Try again." The enrol action — the
++/// whole point of the subject-enrolment feature — did not work end-to-end.</para>
++///
++/// <para><b>Why every existing test stayed green:</b> the bUnit band test asserts the client's serialized
++/// body against a stub HTTP handler, so it can prove the client sends the name but can never exercise the
++/// <i>server's</i> deserialization. The bug lived precisely in the seam between the two, and only a live
++/// probe caught it. This test closes that seam by round-tripping through the host's own configured
++/// serializer rather than a hand-built <see cref="JsonSerializerOptions"/> — a locally constructed options
++/// object would have masked the defect by supplying the converter the app was missing.</para>
++/// </summary>
++[TestClass]
++public class SubjectAssignmentSourceJsonTests
++{
++    private static WebApplicationFactory<Program> NewFactory() =>
++        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
++        {
++            builder.UseSetting("ConnectionStrings:students-db",
++                "Host=localhost;Database=students_placeholder;Username=test;Password=test");
++            builder.UseSetting("ConnectionStrings:settings-db",
++                "Host=localhost;Database=settings_placeholder;Username=test;Password=test");
++            builder.UseSetting("ConnectionStrings:rabbitmq", "amqp://guest:guest@localhost:5672");
++            builder.UseSetting("Outbox:ExchangeName", "students");
++            builder.UseEnvironment("Testing");
++
++            builder.ConfigureServices(services => services.RemoveAll<IHostedService>());
++        });
++
++    [TestMethod]
++    public void TheHostSerializer_DeserializesTheClientsStringSourceType()
++    {
++        using var factory = NewFactory();
++        var json = factory.Services
++            .GetRequiredService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
++            .Value.SerializerOptions;
++
++        const string body = """
++            { "studentId": "11111111-1111-1111-1111-111111111111",
++              "topicId":   "22222222-2222-2222-2222-222222222222",
++              "periodId":  "33333333-3333-3333-3333-333333333333",
++              "isOverride": false,
++              "sourceType": "IndividualAssignment" }
++            """;
++
++        var command = JsonSerializer.Deserialize<AssignStudentTopic>(body, json);
++
++        command.Should().NotBeNull(
++            "the client's payload shape must bind — this threw a JsonException before the converter was registered");
++        command!.SourceType.Should().Be(SubjectAssignmentSource.IndividualAssignment,
++            "the string the admin client sends must map to the enum member of the same name");
++    }
++
++    [TestMethod]
++    public void TheHostSerializer_WritesTheNameNotTheOrdinal()
++    {
++        using var factory = NewFactory();
++        var json = factory.Services
++            .GetRequiredService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
++            .Value.SerializerOptions;
++
++        var command = new AssignStudentTopic(
++            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), IsOverride: false,
++            SubjectAssignmentSource.IndividualAssignment);
++
++        JsonSerializer.Serialize(command, json).Should().Contain("\"IndividualAssignment\"",
++            "a numeric ordinal would round-trip with no converter at all, so the name is the discriminating assertion");
++    }
++}
+diff --git a/tests/SchoolCollab.Students.Tests.Unit/GradeTopicsDialogGridTests.cs b/tests/SchoolCollab.Students.Tests.Unit/GradeTopicsDialogGridTests.cs
+index 05e850ee..8fad8c6f 100644
+--- a/tests/SchoolCollab.Students.Tests.Unit/GradeTopicsDialogGridTests.cs
++++ b/tests/SchoolCollab.Students.Tests.Unit/GradeTopicsDialogGridTests.cs
+@@ -2,12 +2,18 @@
+ using Bunit;
+ using FluentAssertions;
+ using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
+ using Microsoft.FluentUI.AspNetCore.Components;
+ using Microsoft.VisualStudio.TestTools.UnitTesting;
+ using Moq;
+ using SchoolCollab.Admin.Shared.Components.Dialogs;
++using SchoolCollab.Admin.Shared.Services;
+ using SchoolCollab.Students.Application.Components.Students;
++using SchoolCollab.Students.Application.Services;
++using System.Net;
+ using System.Reflection;
++using System.Text;
+ using System.Text.RegularExpressions;
+ using GradeTopicCurriculumDto = SchoolCollab.Students.Application.Services.GradeTopicCurriculumDto;
+ using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto;
+@@ -34,17 +40,85 @@ public class GradeTopicsDialogGridTests : BunitContext
+     private static readonly Guid EngTopicId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+     private static readonly Guid MathAssignmentId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+     private static readonly Guid EngAssignmentId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000002");
++    private static readonly Guid GradeLevelId = Guid.Parse("bbbbbbbb-0000-0000-0000-00000000000b");
+ 
+     public GradeTopicsDialogGridTests()
+     {
+         JSInterop.Mode = JSRuntimeMode.Loose;
+         Services.AddFluentUIComponents();
++        // The dialog injects a logger for FriendlyError.Describe and the students client for the
++        // enrolment switch's pre-write audience count.
++        Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
++        RegisterStudentsApi(new ScriptedHandler());
++    }
++
++    /// <summary>A scripted students API: exact (method, url) answers, and every unmapped route 404s.</summary>
++    private sealed class ScriptedHandler : HttpMessageHandler
++    {
++        public readonly List<(string Method, string Url, string? Body)> Calls = new();
++        private readonly Dictionary<(string Method, string Url), (HttpStatusCode Status, string Body)> _responses = new();
++
++        public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
++        {
++            _responses[(method.ToUpperInvariant(), url)] = (status, body);
++            return this;
++        }
++
++        protected override async Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request, CancellationToken cancellationToken)
++        {
++            var url = request.RequestUri!.PathAndQuery;
++            var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
++            Calls.Add((request.Method.Method.ToUpperInvariant(), url, body));
++
++            if (_responses.TryGetValue((request.Method.Method.ToUpperInvariant(), url), out var hit))
++            {
++                return new HttpResponseMessage(hit.Status)
++                {
++                    Content = new StringContent(hit.Body, Encoding.UTF8, "application/json"),
++                };
++            }
++
++            return new HttpResponseMessage(HttpStatusCode.NotFound)
++            {
++                Content = new StringContent(
++                    $"Unexpected {request.Method.Method} {url}", Encoding.UTF8, "application/json"),
++            };
++        }
++    }
++
++    private void RegisterStudentsApi(ScriptedHandler handler)
++    {
++        var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
++        var codedValues = new CodedValuesApiClient(http);
++        Services.AddSingleton(codedValues);
++        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValues));
++    }
++
++    /// <summary>The audience answer for one topic: <paramref name="audienceSize"/> students, none of them
++    /// enrolled yet — the state a subject is in before a <c>false → true</c> flip.</summary>
++    private static string AudienceJson(int audienceSize) =>
++        $"{{\"audience\":[{string.Join(',', Enumerable.Range(0, audienceSize).Select(_ => $"\"{Guid.NewGuid():D}\""))}],\"eligible\":[]}}";
++
++    /// <summary>Scripts <c>GET /students/topic-enrollment</c> for both fixture subjects.</summary>
++    private static ScriptedHandler EnrolmentApi(int audienceSize)
++    {
++        var handler = new ScriptedHandler();
++        foreach (var topicId in new[] { MathTopicId, EngTopicId })
++        {
++            handler.Map("GET",
++                $"/students/topic-enrollment?gradeLevelId={GradeLevelId:D}&topicId={topicId:D}",
++                HttpStatusCode.OK, AudienceJson(audienceSize));
++        }
++        return handler;
+     }
+ 
+     private static GradeTopicCurriculumDto[] TwoSubjects() =>
+     [
+-        new(MathAssignmentId, MathTopicId, "Mathematics", "MATH", 2, 3),
+-        new(EngAssignmentId, EngTopicId, "English", "ENG", 1, 0),
++        // Mathematics is implied (false) and English needs an explicit enrolment (true) — the two
++        // states the switch's kebab label reads its wording from (subject-enrollment round B).
++        new(MathAssignmentId, MathTopicId, "Mathematics", "MATH", 2, 3, RequiresEnrollment: false),
++        new(EngAssignmentId, EngTopicId, "English", "ENG", 1, 0, RequiresEnrollment: true),
+     ];
+ 
+     /// <summary>The dialog's inputs, as a bUnit parameter-seeding action. FluentUI 5.x
+@@ -55,7 +129,9 @@ public class GradeTopicsDialogGridTests : BunitContext
+         Func<GradeTopicCurriculumDto, Task>? moveUp = null,
+         Func<GradeTopicCurriculumDto, Task>? moveDown = null,
+         Func<GradeTopicCurriculumDto, Task>? edit = null,
+-        Func<Guid, Task>? remove = null) => parameters =>
++        Func<Guid, Task>? remove = null,
++        Guid? gradeLevelId = null,
++        Func<GradeTopicCurriculumDto, bool, Task>? setRequiresEnrollment = null) => parameters =>
+     {
+         parameters.Add(p => p.Topics, TwoSubjects());
+         parameters.Add(p => p.UnassignedTopics, Array.Empty<TopicDto>());
+@@ -64,6 +140,9 @@ public class GradeTopicsDialogGridTests : BunitContext
+         if (moveDown is not null) parameters.Add(p => p.MoveDown, moveDown);
+         if (edit is not null) parameters.Add(p => p.Edit, edit);
+         if (remove is not null) parameters.Add(p => p.Remove, remove);
++        if (gradeLevelId is { } grade) parameters.Add(p => p.GradeLevelId, grade);
++        if (setRequiresEnrollment is not null)
++            parameters.Add(p => p.SetRequiresEnrollment, setRequiresEnrollment);
+     };
+ 
+     private IRenderedComponent<GradeTopicsDialog> RenderDialog(
+@@ -375,4 +454,160 @@ public class GradeTopicsDialogGridTests : BunitContext
+         scroll.QuerySelector(".fluent-data-grid").Should().NotBeNull(
+             "the grid lives inside the shell's region — the shell owns the scrolling, not the grid");
+     }
++
++    // ── The explicit-enrolment switch (subject-enrollment-requirement-flag.md round B) ──
++    //
++    // One kebab action per row whose LABEL states the state it will produce (owner Q39/Q44: the switch
++    // belongs to the bridge row, not the shared Topic), whose CONFIRM names the grandfather consequence
++    // before the write (FR-ER-8/10), and which reflects the new state without reopening anything.
++
++    [TestMethod]
++    public void KebabOnAnImpliedSubject_NamesTheActionItWillPerform_AndNeverSaysToggle()
++    {
++        var cut = RenderDialog(Content(
++            gradeLevelId: GradeLevelId,
++            setRequiresEnrollment: (_, _) => Task.CompletedTask));
++
++        var labels = KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).ToArray();
++
++        labels.Should().Contain("Require explicit enrolment",
++            "row 0 is implied (RequiresEnrollment = false), so the action that will RUN is 'require'");
++        labels.Should().NotContain("Stop requiring explicit enrolment",
++            "the label states what the click DOES, so it cannot offer both directions at once");
++        labels.Should().NotContain(l => l.Contains("Toggle", StringComparison.OrdinalIgnoreCase),
++            "a bare 'Toggle' makes the admin guess which way it goes (round doc P4)");
++    }
++
++    [TestMethod]
++    public void KebabOnARequiredSubject_NamesTheStopAction_SoTheRowStateIsReadableFromTheMenu()
++    {
++        var cut = RenderDialog(Content(
++            gradeLevelId: GradeLevelId,
++            setRequiresEnrollment: (_, _) => Task.CompletedTask));
++
++        KebabItems(OpenKebab(cut, row: 1)).Select(LabelOf).Should().Contain(
++            "Stop requiring explicit enrolment",
++            "row 1 is explicit (RequiresEnrollment = true), so the action that will run is 'stop requiring'");
++    }
++
++    [TestMethod]
++    public void KebabSwitch_ConfirmsTheGrandfatherConsequence_ThenInvokesThePageWithTheBridgeId()
++    {
++        RegisterStudentsApi(EnrolmentApi(audienceSize: 3));
++        var confirm = RegisterConfirmation(confirmed: true);
++        GradeTopicCurriculumDto? written = null;
++        bool? writtenValue = null;
++        var cut = RenderDialog(Content(
++            gradeLevelId: GradeLevelId,
++            setRequiresEnrollment: (topic, value) =>
++            {
++                written = topic;
++                writtenValue = value;
++                return Task.CompletedTask;
++            }));
++
++        KebabItem(cut, row: 0, "Require explicit enrolment").MenuItemClick();
++
++        confirm.Verify(d => d.ShowDialogAsync(
++                typeof(ConfirmDialog),
++                It.Is<DialogOptions>(o =>
++                    ConfirmContent(o).Message.Contains("all 3 students in this grade now")
++                    && ConfirmContent(o).Message.Contains("nobody loses the subject")
++                    && ConfirmContent(o).PrimaryText == "Require explicit enrolment")),
++            Times.Once,
++            "the confirm must name the grandfather consequence with the PRE-WRITE count, before anything is written");
++
++        written.Should().NotBeNull("the write happens only after the confirmation");
++        written!.AssignmentId.Should().Be(MathAssignmentId,
++            "the endpoint targets the bridge ASSIGNMENT — one topic may be assigned to several grades");
++        writtenValue.Should().BeTrue("the direction is the one the label promised");
++    }
++
++    [TestMethod]
++    public async Task KebabSwitch_WhenTheConfirmIsCancelled_WritesNothing()
++    {
++        RegisterStudentsApi(EnrolmentApi(audienceSize: 3));
++        RegisterConfirmation(confirmed: false);
++        var writes = 0;
++        var cut = RenderDialog(Content(
++            gradeLevelId: GradeLevelId,
++            setRequiresEnrollment: (_, _) => { writes++; return Task.CompletedTask; }));
++
++        KebabItem(cut, row: 0, "Require explicit enrolment").MenuItemClick();
++        await Task.Yield();
++
++        writes.Should().Be(0, "a cancelled confirmation must not write");
++        KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).Should().Contain(
++            "Require explicit enrolment", "the row is still implied, so the action is still 'require'");
++    }
++
++    [TestMethod]
++    public async Task KebabSwitch_AfterSuccess_TheRowStatesTheNewState_WithoutAReopen()
++    {
++        RegisterStudentsApi(EnrolmentApi(audienceSize: 2));
++        RegisterConfirmation(confirmed: true);
++        var writes = 0;
++        var cut = RenderDialog(Content(
++            gradeLevelId: GradeLevelId,
++            setRequiresEnrollment: (_, _) => { writes++; return Task.CompletedTask; }));
++
++        KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).Should().Contain("Require explicit enrolment");
++        KebabItem(cut, row: 0, "Require explicit enrolment").MenuItemClick();
++
++        cut.WaitForAssertion(() =>
++        {
++            writes.Should().Be(1, "one click, one write");
++            KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).Should().Contain(
++                "Stop requiring explicit enrolment",
++                "the row reflects the state the write produced — the dialog does not need a reload");
++        });
++    }
++
++    [TestMethod]
++    public void TheGradePage_WiresTheSwitchAndTheGradeId_AndPutsAgainstTheBridgeAssignment()
++    {
++        var source = ReadSource(
++            "Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor");
++
++        source.Should().Contain("{ GradeTopicsDialog.GradeLevelIdKey, Id }",
++            "the dialog needs the grade to read the pre-write audience count for its confirm");
++        source.Should().Contain("GradeTopicsDialog.SetRequiresEnrollmentKey",
++            "the switch's write is the page's, like every other row action here");
++
++        const string signature = "private async Task SetTopicRequiresEnrollmentAsync(";
++        var start = source.IndexOf(signature, StringComparison.Ordinal);
++        start.Should().BeGreaterThanOrEqualTo(0, "the page owns the switch's write");
++        var body = source[start..source.IndexOf("\n    }", start, StringComparison.Ordinal)];
++
++        body.Should().Contain("Api.SetRequiresEnrollmentAsync(topic.AssignmentId, value)",
++            "the PUT targets the row's BRIDGE assignment id — one topic may be assigned to several "
++            + "grades with different flags (owner Q39/Q44)");
++        body.Should().NotContain("catch",
++            "a thin pass-through: the dialog is where the user is, so the failure must reach it and be "
++            + "rendered as the seam's plain sentence");
++    }
++
++    [TestMethod]
++    public void KebabSwitch_WhenTheWriteFails_LeavesTheRowAndShowsAPlainSentence()
++    {
++        RegisterStudentsApi(EnrolmentApi(audienceSize: 2));
++        RegisterConfirmation(confirmed: true);
++        var cut = RenderDialog(Content(
++            gradeLevelId: GradeLevelId,
++            setRequiresEnrollment: (_, _) =>
++                throw new HttpRequestException("Response status code 500 (InternalServerError): boom")));
++
++        KebabItem(cut, row: 0, "Require explicit enrolment").MenuItemClick();
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("The enrolment setting for 'Mathematics' could not be changed. Try again.",
++                "a failure is the site's plain sentence (FriendlyError.Describe), not provider text");
++            cut.Markup.Should().NotContain("InternalServerError",
++                "the status code and the exception's own message never reach the message bar");
++            cut.Markup.Should().NotContain("boom");
++            KebabItems(OpenKebab(cut, row: 0)).Select(LabelOf).Should().Contain(
++                "Require explicit enrolment", "a failed write leaves the row exactly as it was");
++        });
++    }
+ }
+diff --git a/tests/SchoolCollab.Students.Tests.Unit/ListStudentSubjectsHandlerTests.cs b/tests/SchoolCollab.Students.Tests.Unit/ListStudentSubjectsHandlerTests.cs
+index 85de448b..4d0170af 100644
+--- a/tests/SchoolCollab.Students.Tests.Unit/ListStudentSubjectsHandlerTests.cs
++++ b/tests/SchoolCollab.Students.Tests.Unit/ListStudentSubjectsHandlerTests.cs
+@@ -105,8 +105,56 @@ public class ListStudentSubjectsHandlerTests
+         math.RequiresEnrollment.Should().BeFalse();
+         enrolled.Single(x => x.TopicId == subjects.ArtTopicId).IsEnrolled.Should().BeTrue();
+ 
+-        unenrolled.Select(x => x.TopicId).Should().BeEquivalentTo([subjects.MathTopicId],
+-            "without a row the explicit-enrolment subject is not in the union at all");
++        unenrolled.Should().Contain(x => x.TopicId == subjects.ArtTopicId && !x.IsEnrolled,
++            "layer 2 draws the un-enrolled explicit subject as the actionable 'not chosen' chip, so it "
++            + "is returned with IsEnrolled = false rather than omitted");
++        unenrolled.Single(x => x.TopicId == subjects.ArtTopicId).RequiresEnrollment.Should().BeTrue();
++        unenrolled.Single(x => x.TopicId == subjects.MathTopicId).IsEnrolled.Should().BeTrue(
++            "the implied subject is still returned as enrolled");
++    }
++
++    /// <summary>
++    /// The flag is ADDITIVE for every caller that predates layer 2: filtering the union on
++    /// <c>IsEnrolled</c> must yield exactly the rows the old contract returned (every <c>false</c>
++    /// subject, plus the <c>true</c> ones the student holds a row for).
++    /// </summary>
++    [TestMethod]
++    public async Task Union_StillCarriesEveryRowThePreLayer2ContractReturned_AsIsEnrolledTrue()
++    {
++        using var s = new StudentsTestScope("list-student-subjects-additive");
++        var subjects = await SeedGradeSubjectsAsync(s);
++        var studentId = SeedStudentInGrade(s, "S1", "Ada");
++        await SeedEnrollmentRowAsync(s, studentId, subjects.ArtTopicId, ActiveYearId);
++
++        var result = await NewHandler(s, ActiveYear()).HandleAsync(new ListStudentSubjects(studentId));
++
++        result.Where(x => x.IsEnrolled).Select(x => x.TopicId)
++            .Should().BeEquivalentTo([subjects.MathTopicId, subjects.ArtTopicId],
++                "a caller that only reads IsEnrolled == true sees the pre-layer-2 union unchanged");
++    }
++
++    /// <summary>
++    /// FR-ER-9: rows left behind by a <c>SetRequiresEnrollment(false)</c> flip are inert history, so a
++    /// <c>false</c> subject is never presented as an explicit-enrolment row — the stale row neither
++    /// makes it un-enrolled nor duplicates it.
++    /// </summary>
++    [TestMethod]
++    public async Task Union_IgnoresAStaleRowOnAnImpliedSubject()
++    {
++        using var s = new StudentsTestScope("list-student-subjects-stale-row");
++        var subjects = await SeedGradeSubjectsAsync(s);
++        var studentId = SeedStudentInGrade(s, "S1", "Ada");
++        // A row that survives a flip back to false: the subject reads as "everyone" and the row is
++        // never consulted.
++        await SeedEnrollmentRowAsync(s, studentId, subjects.MathTopicId, ActiveYearId);
++
++        var result = await NewHandler(s, ActiveYear()).HandleAsync(new ListStudentSubjects(studentId));
++
++        var math = result.Should().ContainSingle(x => x.TopicId == subjects.MathTopicId).Subject;
++        math.RequiresEnrollment.Should().BeFalse();
++        math.IsEnrolled.Should().BeTrue(
++            "implied enrolment is membership, not the row — a stale row must not make the subject look "
++            + "like it needs an explicit enrolment");
+     }
+ 
+     [TestMethod]
+@@ -136,7 +184,8 @@ public class ListStudentSubjectsHandlerTests
+ 
+         var result = await NewHandler(s, ActiveYear()).HandleAsync(new ListStudentSubjects(studentId));
+ 
+-        result.Select(x => x.TopicId).Should().BeEquivalentTo([subjects.MathTopicId]);
++        result.Single(x => x.TopicId == subjects.ArtTopicId).IsEnrolled.Should().BeFalse(
++            "the row is a prior year's, so the student is not enrolled THIS year");
+     }
+ 
+     [TestMethod]
+diff --git a/tests/SchoolCollab.Students.Tests.Unit/StudentSubjectEnrollmentBandTests.cs b/tests/SchoolCollab.Students.Tests.Unit/StudentSubjectEnrollmentBandTests.cs
+new file mode 100644
+index 00000000..1e384606
+--- /dev/null
++++ b/tests/SchoolCollab.Students.Tests.Unit/StudentSubjectEnrollmentBandTests.cs
+@@ -0,0 +1,351 @@
++using System.Net;
++using System.Security.Claims;
++using System.Text;
++using System.Text.Json;
++using AngleSharp.Dom;
++using Bunit;
++using FluentAssertions;
++using Microsoft.AspNetCore.Components.Authorization;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Admin.Shared.Services;
++using SchoolCollab.Students.Application.Components.Pages.Students;
++using SchoolCollab.Students.Application.Services;
++using SchoolCollab.Students.Core.Contracts;
++using StudentDto = SchoolCollab.Students.Application.Services.StudentDto;
++
++namespace SchoolCollab.Students.Tests.Unit;
++
++/// <summary>
++/// The two subject bands on the student edit rail (subject-enrollment-requirement-flag.md round B,
++/// owner Q42/Q45): "Needs explicit enrolment" (<c>RailBandVariant.Required</c>, every <c>true</c>
++/// subject) and "Assumed" (<c>RailBandVariant.Assumed</c>, the implied set).
++///
++/// <para>What is pinned here is the behaviour the round claims, not the markup that happens to
++/// implement it:</para>
++/// <list type="bullet">
++///   <item>both chip states exist in one band — an enrolled subject is a FACT, an un-enrolled one is
++///         STRUCK THROUGH and says so in words, so the strike is never the only signal;</item>
++///   <item>the struck chip's name is a real <c>&lt;button type="button"&gt;</c> that is not
++///         <c>aria-disabled</c> — the one control that fixes the gap must be reachable by keyboard;</item>
++///   <item>clicking it writes exactly ONE enrolment, against the active academic YEAR (not the
++///         student's own enrolment period, which may be a sub-period), and the chip becomes enrolled
++///         in place;</item>
++///   <item>a failed write leaves the chip exactly as it was and renders a plain sentence — never the
++///         exception's own text (the #416 seam).</item>
++/// </list>
++/// </summary>
++[TestClass]
++public class StudentSubjectEnrollmentBandTests : BunitContext
++{
++    private static readonly Guid StudentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++    private static readonly Guid GradeLevelId = Guid.Parse("44444444-4444-4444-4444-444444444444");
++    private static readonly Guid EnrollmentPeriodId = Guid.Parse("55555555-5555-5555-5555-555555555555");
++    private static readonly Guid ActiveYearId = Guid.Parse("66666666-6666-6666-6666-666666666666");
++    private static readonly Guid MathTopicId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid ArtTopicId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid MusicTopicId = Guid.Parse("77777777-7777-7777-7777-777777777777");
++    private static readonly Guid MathAssignmentId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
++    private static readonly Guid ArtAssignmentId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000002");
++    private static readonly Guid MusicAssignmentId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000003");
++
++    private static readonly JsonSerializerOptions ApiJson = new(JsonSerializerDefaults.Web);
++
++    public StudentSubjectEnrollmentBandTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++    }
++
++    /// <summary>
++    /// Scripted students API: url-PREFIX answers, longest prefix first — so
++    /// <c>/students/{id}/subjects</c> can never be swallowed by the shorter <c>/students/{id}</c>
++    /// entry. Every unmapped route 404s, and every call is logged.
++    /// </summary>
++    private sealed class ScriptedHandler : HttpMessageHandler
++    {
++        public readonly List<(string Method, string Url, string? Body)> Calls = [];
++        private readonly List<(string Method, string Url, HttpStatusCode Status, string Body)> _responses = [];
++
++        public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
++        {
++            _responses.Add((method.ToUpperInvariant(), url, status, body));
++            return this;
++        }
++
++        protected override async Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request, CancellationToken cancellationToken)
++        {
++            var url = request.RequestUri!.PathAndQuery;
++            var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
++            Calls.Add((request.Method.Method.ToUpperInvariant(), url, body));
++
++            var hit = _responses
++                .Where(r => string.Equals(r.Method, request.Method.Method, StringComparison.OrdinalIgnoreCase)
++                            && url.StartsWith(r.Url, StringComparison.OrdinalIgnoreCase))
++                .OrderByDescending(r => r.Url.Length)
++                .Cast<(string Method, string Url, HttpStatusCode Status, string Body)?>()
++                .FirstOrDefault();
++
++            if (hit is { } found)
++            {
++                return new HttpResponseMessage(found.Status)
++                {
++                    Content = new StringContent(found.Body, Encoding.UTF8, "application/json"),
++                };
++            }
++
++            return new HttpResponseMessage(HttpStatusCode.NotFound)
++            {
++                Content = new StringContent(
++                    $"Unexpected URL: {request.Method.Method} {url}", Encoding.UTF8, "application/json"),
++            };
++        }
++    }
++
++    private sealed class MutableAuth : AuthenticationStateProvider
++    {
++        private readonly ClaimsPrincipal _user = new(new ClaimsIdentity(
++            [new Claim("tenant_id", Guid.NewGuid().ToString()), new Claim("tenant_name", "Hydeson")],
++            "TestScheme"));
++
++        public override Task<AuthenticationState> GetAuthenticationStateAsync()
++            => Task.FromResult(new AuthenticationState(_user));
++    }
++
++    /// <summary>The page's backend, scripted for a grade with three subjects: Mathematics (needs an
++    /// explicit enrolment and the student does NOT hold it), Art (needs one and the student holds it),
++    /// Music (implied — the student gets it without choosing).</summary>
++    private ScriptedHandler RegisterBackend(bool enrolWriteFails = false)
++    {
++        var auth = new MutableAuth();
++        var handler = new ScriptedHandler();
++        var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
++
++        Services.AddSingleton<AuthenticationStateProvider>(auth);
++        var codedValues = new CodedValuesApiClient(http);
++        var students = new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValues);
++        Services.AddSingleton(codedValues);
++        Services.AddSingleton(students);
++        Services.AddSingleton<IContactsClient>(students);
++        Services.AddSingleton(new VisibleTenantService(auth, NullLogger<VisibleTenantService>.Instance));
++        Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
++
++        handler.Map("GET", $"/students/{StudentId}/subjects", HttpStatusCode.OK,
++            JsonSerializer.Serialize(Subjects(), ApiJson));
++        handler.Map("GET", $"/students/{StudentId}/guardians", HttpStatusCode.OK, "[]");
++        handler.Map("GET", $"/students/enrollments/by-student/{StudentId}", HttpStatusCode.OK,
++            JsonSerializer.Serialize(new[] { ActiveEnrollment() }, ApiJson));
++        handler.Map("GET", "/students/periods/active-academic-year", HttpStatusCode.OK,
++            JsonSerializer.Serialize(ActiveYear(), ApiJson));
++        handler.Map("GET", $"/students/{StudentId}", HttpStatusCode.OK,
++            JsonSerializer.Serialize(Student(), ApiJson));
++
++        // The one write the subject band performs. A prefix match, because the request carries its
++        // ids in the body rather than the url.
++        handler.Map("POST", "/students/student-topics",
++            enrolWriteFails ? HttpStatusCode.InternalServerError : HttpStatusCode.OK,
++            $"{{\"id\":\"{Guid.NewGuid()}\"}}");
++
++        // Every other block's lookup (coded values, contacts) reads an empty list.
++        handler.Map("GET", "/", HttpStatusCode.OK, "[]");
++        return handler;
++    }
++
++    private static StudentDto Student() => new(
++        Id: StudentId,
++        StudentNumber: "STU-0001",
++        FirstName: "Ada",
++        LastName: "Lovelace",
++        DateOfBirth: null,
++        GenderCodedValueId: null,
++        IsDeleted: false,
++        CreatedAt: DateTimeOffset.UnixEpoch,
++        UpdatedAt: DateTimeOffset.UnixEpoch);
++
++    /// <summary>One ACTIVE enrolment — without it the Enrollment panel renders its empty state and no
++    /// band exists at all. Its period is deliberately NOT the active academic year: the enrol write
++    /// must use the year, never this.</summary>
++    private static StudentEnrollmentDto ActiveEnrollment() => new(
++        Id: Guid.Parse("88888888-8888-8888-8888-888888888888"),
++        StudentId: StudentId,
++        PeriodId: EnrollmentPeriodId,
++        GradeLevelId: GradeLevelId,
++        StreamCodedValueId: null,
++        EnrolledOn: new DateOnly(2025, 9, 1),
++        ExitDate: null,
++        Status: "Active",
++        CreatedAt: DateTimeOffset.UnixEpoch,
++        UpdatedAt: DateTimeOffset.UnixEpoch);
++
++    private static PeriodDto ActiveYear() => new(
++        Id: ActiveYearId,
++        Name: "2026/2027",
++        StartDate: new DateOnly(2026, 9, 1),
++        EndDate: new DateOnly(2027, 8, 31),
++        Status: "Active",
++        ParentPeriodId: null,
++        NextPeriodId: null,
++        Division: "None",
++        ActivationToleranceDays: null,
++        CreatedAt: DateTimeOffset.UnixEpoch,
++        UpdatedAt: DateTimeOffset.UnixEpoch);
++
++    /// <summary>The §6 union as the API serves it: two explicit-enrolment subjects (one enrolled, one
++    /// not) and one implied subject.</summary>
++    private static object[] Subjects() =>
++    [
++        new { topicId = MathTopicId, name = "Mathematics", code = "MATH", assignmentId = MathAssignmentId,
++              requiresEnrollment = true, isEnrolled = false },
++        new { topicId = ArtTopicId, name = "Art", code = "ART", assignmentId = ArtAssignmentId,
++              requiresEnrollment = true, isEnrolled = true },
++        new { topicId = MusicTopicId, name = "Music", code = "MUS", assignmentId = MusicAssignmentId,
++              requiresEnrollment = false, isEnrolled = true },
++    ];
++
++    private (IRenderedComponent<Edit> Cut, ScriptedHandler Handler) RenderEdit(bool enrolWriteFails = false)
++    {
++        var handler = RegisterBackend(enrolWriteFails);
++        var cut = Render<Edit>(parameters => parameters.Add(p => p.Id, StudentId));
++        // The bands render only after the page's async loads complete — waiting on one of them is
++        // waiting for the page, so the assertions never read a spinner.
++        cut.WaitForAssertion(
++            () => cut.FindAll("#student-edit-subjects-required").Should().ContainSingle(
++                "the 'Needs explicit enrolment' band renders once the union has loaded"),
++            timeout: TimeSpan.FromSeconds(5));
++        return (cut, handler);
++    }
++
++    private static string[] BandLabels(IRenderedComponent<Edit> cut) =>
++        [.. cut.Find("#student-edit-enrollment").QuerySelectorAll(".rail-band__label")
++            .Select(l => l.TextContent.Trim())];
++
++    private static IElement[] RequiredChips(IRenderedComponent<Edit> cut) =>
++        [.. cut.Find("#student-edit-subjects-required").QuerySelectorAll(".rail-chip")];
++
++    private static bool IsStruck(IElement chip) => chip.ClassList.Contains("rail-chip--actionable");
++
++    // ── Both chip states in the band (acceptance criteria 1 and 2) ──────────────────────────
++
++    [TestMethod]
++    public void TheRailRendersTheFourBandsInTheSettledOrder()
++    {
++        var (cut, _) = RenderEdit();
++
++        var labels = BandLabels(cut);
++        labels.Should().HaveCount(4, "four bands, one kind of fact each (owner Q42)");
++        labels[0].Should().StartWith("Placement");
++        labels[1].Should().StartWith("Activity groups");
++        labels[2].Should().StartWith("Needs explicit enrolment",
++            "the enrolment kinds read after what the enrolment IS");
++        labels[3].Should().StartWith("Assumed");
++
++        cut.Find("#student-edit-subjects-required").ClassName.Should().Contain("rail-band--required",
++            "the band uses the EXISTING Required variant — round B adds no member to the enum");
++        cut.Find("#student-edit-subjects-assumed").ClassName.Should().Contain("rail-band--assumed");
++    }
++
++    [TestMethod]
++    public void TheStruckChipAndTheEnrolledChip_AreTheTwoStatesOfOneBand()
++    {
++        var (cut, _) = RenderEdit();
++
++        var chips = RequiredChips(cut);
++        chips.Should().HaveCount(2, "the band draws every `true` subject, enrolled or not");
++
++        var struck = chips.Where(IsStruck).ToArray();
++        struck.Should().HaveCount(1, "exactly one of the two subjects needs an explicit enrolment action");
++        struck[0].TextContent.Should().Contain("Mathematics");
++        struck[0].TextContent.Should().Contain("not chosen",
++            "the state is WORDS as well as a line — a strike-through and a colour are not accessible signals");
++
++        var fact = chips.Where(c => !IsStruck(c)).ToArray();
++        fact.Should().HaveCount(1, "the enrolled subject is a fact, not a to-do");
++        fact[0].TextContent.Should().Contain("Art");
++        fact[0].QuerySelectorAll("button").Should().BeEmpty("a fact does nothing");
++
++        var assumed = cut.Find("#student-edit-subjects-assumed").QuerySelectorAll(".rail-chip").ToArray();
++        assumed.Should().HaveCount(1);
++        assumed[0].TextContent.Should().Contain("Music");
++        IsStruck(assumed[0]).Should().BeFalse(
++            "an implied subject is the student's without choosing (FR-ER-1) — there is nothing to act on");
++    }
++
++    [TestMethod]
++    public void TheStruckChip_IsARealButton_ThatIsNotAriaDisabled()
++    {
++        var (cut, _) = RenderEdit();
++
++        var struck = RequiredChips(cut).Single(IsStruck);
++        struck.GetAttribute("aria-disabled").Should().BeNull(
++            "aria-disabled belongs to the picker's BLOCKED rows; on the one control that fixes the gap it "
++            + "would announce the fix as unavailable");
++
++        var button = struck.QuerySelector("button");
++        button.Should().NotBeNull("the chip's name is a real button, not a span");
++        button!.GetAttribute("type").Should().Be("button",
++            "typed so it can never submit a surrounding form");
++        button.GetAttribute("aria-label").Should().Be("Mathematics — not chosen",
++            "the accessible name carries the subject AND its state");
++        button.HasAttribute("disabled").Should().BeFalse();
++        button.HasAttribute("tabindex").Should().BeFalse(
++            "no negative tabindex — a native button is in the tab order, which is what makes the gap "
++            + "fixable from the keyboard (acceptance criterion 3)");
++    }
++
++    // ── The enrol action (acceptance criteria 4 and 5) ──────────────────────────────────────
++
++    [TestMethod]
++    public void ClickingTheStruckChip_EnrolsInTheActiveAcademicYear_AndReplacesTheChip()
++    {
++        var (cut, handler) = RenderEdit();
++
++        cut.Find("#student-edit-subjects-required button.rail-chip__activate").Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            var writes = handler.Calls
++                .Where(c => c.Method == "POST" && c.Url == "/students/student-topics").ToArray();
++            writes.Should().HaveCount(1, "one click, exactly one enrolment write");
++
++            using var request = JsonDocument.Parse(writes[0].Body!);
++            var root = request.RootElement;
++            root.GetProperty("studentId").GetGuid().Should().Be(StudentId);
++            root.GetProperty("topicId").GetGuid().Should().Be(MathTopicId);
++            root.GetProperty("periodId").GetGuid().Should().Be(
++                ActiveYearId,
++                "the row is year-keyed (FR-ER-3), so the write carries the ACTIVE ACADEMIC YEAR — the "
++                + "student's own enrolment period may be a sub-period, which the handler rejects");
++            root.GetProperty("isOverride").GetBoolean().Should().BeFalse();
++            root.GetProperty("sourceType").GetString().Should().Be("IndividualAssignment");
++
++            RequiredChips(cut).Where(IsStruck).Should().BeEmpty(
++                "the chip becomes the enrolled state IN PLACE — no reload, no second read");
++        }, timeout: TimeSpan.FromSeconds(5));
++    }
++
++    [TestMethod]
++    public void ClickingTheStruckChip_WhenTheWriteFails_LeavesTheChipAndRendersAPlainSentence()
++    {
++        var (cut, _) = RenderEdit(enrolWriteFails: true);
++
++        cut.Find("#student-edit-subjects-required button.rail-chip__activate").Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            var panel = cut.Find("#student-edit-enrollment").TextContent;
++            panel.Should().Contain("'Mathematics' could not be added to this student. Try again.",
++                "a failure is the site's own sentence (FriendlyError.Describe)");
++            panel.Should().NotContain("500", "no status code reaches the message bar");
++            panel.Should().NotContain("InternalServerError");
++
++            RequiredChips(cut).Where(IsStruck).Should().HaveCount(
++                1, "the failed write changes nothing about the chip");
++            RequiredChips(cut).Single(IsStruck).QuerySelector("button").Should().NotBeNull(
++                "the action is still available — a failure must not remove the only way to fix the gap");
++        }, timeout: TimeSpan.FromSeconds(5));
++    }
++}
