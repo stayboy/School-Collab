@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using SchoolCollab.Students.Core.Domain;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Serilog;
 using SchoolCollab.Students.Core;
@@ -14,6 +16,18 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 builder.AddRabbitMQClient("rabbitmq");
+
+// The wire contract for SubjectAssignmentSource is its NAME, not its ordinal. The admin client has
+// always posted "IndividualAssignment"; without this converter the Students API failed to bind the
+// payload and answered 400 ("The JSON value could not be converted to ...AssignStudentTopic. Path:
+// $.sourceType"), which surfaced in the UI as "could not be added to this student. Try again." - the
+// enrol action of the subject-enrolment feature, broken end-to-end while every stub-HTTP unit test
+// stayed green. Registered per enum type, matching the Assignments API precedent rather than a
+// blanket converter, so no other endpoint's JSON changes.
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SubjectAssignmentSource>());
+});
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
     ?? builder.Configuration["Aspire:StackExchange:Redis:ConnectionString"];
