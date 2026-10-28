@@ -51,7 +51,7 @@
             </div>
         }
         <FluentCheckbox @bind-Value="@_showDeleted" @bind-Value:after="OnShowDeletedChanged"
-                        Label="Show deleted" />
+                        Label="Show archived" />
     </ToolbarFilters>
     <Columns>
         <TemplateColumn TGridItem="StudentDto" Title="#" SortBy="@_sortByStudentNumber" Sortable="true">
@@ -76,7 +76,7 @@
         <TemplateColumn TGridItem="StudentDto" Title="Status">
             @if (context.IsDeleted)
             {
-                <FluentBadge Appearance="BadgeAppearance.Filled">Deleted</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Archived</FluentBadge>
             }
             else
             {

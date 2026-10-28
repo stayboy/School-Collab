@@ -1,38 +1,342 @@
-/* ── Layout (preserved from prior version) ─────────────────────────── */
-.page-container { height: 100%; gap: 0; }
-.title-row { flex-shrink: 0; display: flex; align-items: flex-start; gap: 0.75rem; padding-top: 0.25rem; }
-.title-block { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
-.page-title { margin: 0; }
-.page-subtitle { margin: 0; color: var(--neutral-foreground-hint); font-size: 0.9rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
-.title-sep { opacity: 0.6; }
-.action-bar { flex-shrink: 0; display: flex; align-items: center; gap: 0.75rem; padding-bottom: 0.75rem; }
-.spinner-container { flex: 1; display: flex; align-items: center; justify-content: center; }
+/* Student view (/students/{id}) — main + rail, identity header in AuthoringShell.
+   Layout regions are `app.css`'s `.region-grid*`; the shared pill, tokens and monogram
+   lightness variables live there too. This file owns only what is specific to this page. */
 
-/* ── Section header (h3 + inline action bar) ───────────────────────── */
-.section-header {
+.spinner-container {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin: 1.5rem 0 0.5rem;
+    justify-content: center;
+    padding: 16px 0;
 }
-.section-header h3 { margin: 0; flex: 1; min-width: 0; }
 
-/* ── Profile grid — stacked stat-card layout
-   The label/value pairs are rendered via the shared <FieldDisplay>
-   component (vertical orientation). The grid container stays here so
-   cells reflow on narrow viewports.
+/* ── Identity header ───────────────────────────────────────────────────────────────────────
+   The monogram is decorative (aria-hidden) and its colour derives from a hue carried on the
+   element as --monogram-hue; the LIGHTNESS steps are tokens so dark mode is not a separate rule.
+   A hue-only tint stayed a pale lavender disc on a dark page in the mock — that is why the
+   lightness comes from the theme and not from a literal. */
+.student-monogram {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    background: hsl(var(--monogram-hue, 258) var(--monogram-saturation) var(--monogram-bg-lightness));
+    color: hsl(var(--monogram-hue, 258) var(--monogram-saturation) var(--monogram-fg-lightness));
+    border: 1px solid hsl(var(--monogram-hue, 258) 40% var(--monogram-border-lightness));
+}
 
-   FieldDisplay typography mirrors the prior .profile-label/.profile-value
-   style: small muted uppercase label above a 1rem value. */
-.profile-grid {
+.student-monogram--sm {
+    width: 30px;
+    height: 30px;
+    font-size: 0.72rem;
+}
+
+.student-title {
+    font-size: 1.1rem;
+    /* `min-width: 0` is load-bearing, not tidying: a flex item defaults to min-width:auto, which refuses
+       to shrink below its content — so without this the ellipsis below never engages and a long name
+       pushes the status pills off the bar instead of truncating. */
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.student-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: -4px 0 0;
+    font-size: 0.8rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.student-meta code {
+    font-size: 0.78rem;
+}
+
+.student-meta__sep {
+    opacity: 0.55;
+}
+
+/* ── Details: fact grid ─────────────────────────────────────────────────────────────────── */
+.fact-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px 24px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px 24px;
 }
-/* ── Contact history ─────────────────────────────────────────────────
-   Compact timeline of contact edit/delete audit rows below the guardians
-   section. Each entry shows actor, timestamp, change kind badge, value
-   before/after, and reason. */
+
+/* ── Enrollment: current placement + history timeline ───────────────────────────────────── */
+
+/* An inline zone, not a box (§3): tinted, full width, and it never nests a panel. */
+.placement {
+    display: flex;
+    align-items: stretch;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--status-success-bg);
+    border: 1px solid var(--status-success-border);
+}
+
+.placement__cell {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 9px 16px;
+}
+
+.placement__cell + .placement__cell {
+    border-left: 1px solid var(--status-success-border);
+}
+
+.placement__label {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--status-success-fg);
+    opacity: 0.85;
+}
+
+.placement__value {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--status-success-fg);
+}
+
+.placement__gap {
+    flex: 1;
+}
+
+.placement__aside {
+    display: flex;
+    align-items: center;
+    padding: 9px 16px;
+    font-size: 0.75rem;
+    color: var(--status-success-fg);
+    white-space: nowrap;
+}
+
+/* A labelled sub-section INSIDE a panel — never a nested box (§3). */
+.subrule {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.subrule::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--neutral-stroke-divider-rest, #e1e1e1);
+}
+
+.tl {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 22px;
+    position: relative;
+}
+
+.tl::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 8px;
+    bottom: 12px;
+    width: 2px;
+    background: var(--neutral-stroke-divider-rest, #e1e1e1);
+}
+
+.tl__item {
+    position: relative;
+    padding-bottom: 16px;
+}
+
+.tl__item:last-child {
+    padding-bottom: 0;
+}
+
+.tl__node {
+    position: absolute;
+    left: -22px;
+    top: 4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--neutral-layer-1, #ffffff);
+    border: 2px solid var(--neutral-stroke-rest, #d1d1d1);
+}
+
+.tl__item--current .tl__node {
+    border-color: var(--status-success-dot);
+    background: var(--status-success-dot);
+    box-shadow: 0 0 0 3px var(--status-success-bg);
+}
+
+.tl__row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.tl__grade {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.tl__actions {
+    margin-left: auto;
+}
+
+.tl__meta {
+    font-size: 0.75rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* ── Contacts ───────────────────────────────────────────────────────────────────────────── */
+.contact-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.contact-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    background: var(--neutral-layer-2, #faf9f8);
+    border: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+    color: var(--neutral-foreground-1, #242424);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contact-chip__channel {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.contact-chip__note {
+    font-size: 0.68rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.contact-chip__more {
+    padding: 2px 4px;
+    border: none;
+    background: transparent;
+    color: var(--accent-fill-rest, #006bb7);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.contact-chip__more:hover {
+    text-decoration: underline;
+}
+
+/* ── Guardians: cards, never a contact-column grid ──────────────────────────────────────── */
+.guardian-cards {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.guardian-card {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+    background: var(--neutral-layer-1, #ffffff);
+}
+
+.guardian-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+    flex: 1;
+}
+
+.guardian-card__top {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.guardian-card__name {
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
+.guardian-card__primary {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.guardian-card__actions {
+    margin-left: auto;
+}
+
+/* ── Activity group chips: an optional free-text category rides beside the name ─────────── */
+.group-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+}
+
+.group-chip__category {
+    font-size: 0.68rem;
+    font-weight: 400;
+    opacity: 0.75;
+    max-width: 12ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Notes and muted text ───────────────────────────────────────────────────────────────── */
+.muted-note {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.muted {
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* ── Contact history (audit trail) ──────────────────────────────────────────────────────── */
 .student-contact-history {
     list-style: none;
     margin: 0;
@@ -44,16 +348,16 @@
 
 .student-contact-history__entry {
     padding: 10px 12px;
-    border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    border: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
     border-radius: 6px;
-    background: var(--neutral-layer-1, #fafafa);
+    background: var(--neutral-layer-2, #faf9f8);
 }
 
 .student-contact-history__meta {
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
-    font-size: 0.85rem;
+    font-size: 0.78rem;
     margin-bottom: 6px;
 }
 
@@ -70,75 +374,11 @@
 }
 
 .student-contact-history__value-line {
-    font-family: var(--font-monospace, monospace);
-    font-size: 0.95rem;
+    font-family: monospace;
+    font-size: 0.8rem;
 }
 
 .student-contact-history__reason {
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     font-style: italic;
-}
-
-.muted { color: var(--neutral-foreground-hint); }
-
-/* ── Enrollments table ─────────────────────────────────────────────── */
-.enrollments-grid { width: 100%; }
-
-/* ── Equal-length grids on the student view page ───────────────────────
-   Enrollments and Guardians sit in the same detail-card, one above the
-   other. Give both grids the same min-height (header + ~3 rows) so the
-   two sections present a balanced footprint regardless of how many rows
-   each currently has. The enrollments grid carries the .enrollments-grid
-   class directly; the guardians grid is the <fluent-data-grid> inside
-   StudentGuardiansList -> EntityGrid, reached via ::deep. Keep the two
-   min-heights in sync. */
-.enrollments-grid { min-height: 220px; }
-::deep .student-guardians-list fluent-data-grid { min-height: 220px; }
-
-/* Right-align the row-level Actions column and keep the buttons compact
-   so they don't push the other columns wider than needed. The
-   [appearance="lightweight"] selector reaches the underlying
-   fluent-button web component to shrink its label font. */
-::deep .enrollment-actions-col {
-    text-align: right;
-    white-space: nowrap;
-}
-
-    ::deep .enrollment-actions-col fluent-button[appearance="lightweight"] {
-        font-size: 0.8rem;
-    }
-
-/* ── FluentCard popup / dropdown clipping fix ─────────────────────────
-   This component hosts FluentSelect and CodedValueDropdown controls
-   inside several FluentCard panels. The <fluent-card> host style is
-   `:host{ display:block; contain:content }`. `contain:paint` clips
-   descendants to the card's padding box independent of `overflow`, and
-   `contain:layout` makes the card a containing block for `position:fixed`
-   descendants. That clips the popup lists used by the dropdowns.
-
-   Fixing the card alone is not enough because the layout's `.page-scroll`
-   (`MainLayout.razor.css`, overflow:auto) is the sole scroll region and
-   also clips a `position:absolute` popup that extends past its bottom
-   edge. The pragmatic fix is:
-     1. `contain: none !important` on the card — removes paint clipping and
-        removes the card as a fixed containing block.
-     2. `position: fixed !important` on the popup elements — the anchored
-        region inside FluentSelect / CodedValueDropdown uses delta-based
-        viewport positioning, so fixed placement still positions correctly
-        under the trigger, and it escapes .page-scroll overflow.
-
-   Reference: microsoft/fluentui-blazor#2791 (closed with only a CSS
-   workaround; no library fix as of FluentUI v4.14.2).
-
-   The same workaround is used in GuardianDetail.razor.css,
-   GuardiansTab.razor.css, and GradeLevelWizard.razor.css; keep them in
-   sync. */
-.detail-card {
-    overflow: visible;
-    contain: none !important;
-}
-
-::deep .detail-card .fluent-popup-body,
-::deep .detail-card .fluent-listbox {
-    position: fixed !important;
 }

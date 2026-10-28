@@ -1,333 +1,570 @@
 @page "/students/{id:guid}"
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Authoring
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Core.Features
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Students.Application.Components.Students
-@using SchoolCollab.Students.Application.Components.Students
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Students.Core.Contracts
 @using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.JSInterop
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
 @inject VisibleTenantService VisibleTenant
+@inject IJSRuntime JS
 @implements IDisposable
 
 <PageTitle>Student — @(_student?.FirstName ?? "Loading…") @_student?.LastName</PageTitle>
 
 <ErrorBoundary>
     <ChildContent>
-        <FluentStack Orientation="Orientation.Vertical" class="page-container">
-            <TenantGate>
-                <ChildContent>
-                    @if (_student is null)
-                    {
-                        <div class="spinner-container">
-                            <FluentSpinner />
-                        </div>
-                    }
-                    else
-                    {
-                        @* ── Title row ─────────────────────────────────────────── *@
-                        <div class="title-row">
-                            <div class="title-block">
-                                <h1 class="page-title">@TitleLine</h1>
-                                <p class="page-subtitle">
-                                    <code>@_student.StudentNumber</code>
-                                    <span class="title-sep">·</span>
-                                    @StatusBadge
-                                    <span class="title-sep">·</span>
-                                    Current: <strong>@(CurrentGradeName ?? "—")</strong>
-                                </p>
-                            </div>
-                            <FluentButton Appearance="ButtonAppearance.Outline"
-                                          OnClick='() => Nav.NavigateTo($"/students/{Id}/edit")'>
-                                Edit
-                            </FluentButton>
-                        </div>
+        @* TenantGate wraps the whole page: student records are tenant-scoped, so there is nothing to draw
+           an identity header from without a tenant. *@
+        <TenantGate>
+            <ChildContent>
+                @if (_student is null)
+                {
+                    <div class="spinner-container">
+                        <FluentSpinner />
+                    </div>
+                }
+                else
+                {
+                    @* The page action header owns the identity and the page kebab (§4 of
+                       documents/solution/panel-layout-pattern.md). This surface has no primary action —
+                       the view page commits nothing, so PrimaryLabel stays null and the kebab carries the
+                       page-level actions (owner Q120: back-navigation moves up here, out of a footer). *@
+                    <AuthoringShell Crumbs="@ShellCrumbs">
+                        <TitleContent>
+                            <span class="student-monogram" style="@MonogramStyle" aria-hidden="true">@MonogramInitials</span>
+                            <span class="student-title">@FullName</span>
+                        </TitleContent>
 
-                        @* ── Profile (FluentCard, single-page section) ─────────── *@
-                        <FluentCard class="detail-card">
-                            <div class="profile-grid">
-                                <FieldDisplay Label="Student #">@_student.StudentNumber</FieldDisplay>
-                                <FieldDisplay Label="Full name">@_student.FirstName @_student.LastName</FieldDisplay>
-                                <FieldDisplay Label="Date of birth">@(_student.DateOfBirth?.ToString("d") ?? "—")</FieldDisplay>
-                                <FieldDisplay Label="Gender">@(string.IsNullOrWhiteSpace(_student.GenderName) ? "—" : _student.GenderName)</FieldDisplay>
-                                <FieldDisplay Label="Status">@StatusBadge</FieldDisplay>
-                                <FieldDisplay Label="Created">@_student.CreatedAt.ToLocalTime().ToString("g")</FieldDisplay>
-                                <FieldDisplay Label="Updated">@_student.UpdatedAt.ToLocalTime().ToString("g")</FieldDisplay>
-                            </div>
-                        </FluentCard>
-
-                        @* ── Enrollments section ──────────────────────────────────
-                           Enroll lives in the section header (always available,
-                           the only action that creates a new row). Transfer and
-                           Withdraw are row-level actions on the active
-                           enrollment (the Actions column) — they only make
-                           sense for the row they affect, and the "no active
-                           enrollment" case is naturally expressed by the row
-                           not having the Actions cell. *@
-                        <div class="section-header">
-                            <h3>Enrollments</h3>
-                            <FluentButton Appearance="ButtonAppearance.Primary"
-                                          OnClick="OnEnrollAsync"
-                                          Disabled="@(_enrollments is null || _savingEnrollment)"
-                                          Title="@(_enrollments is null ? "Loading enrollments…" : "Enroll this student in a grade level for the active period")">
-                                <FluentIcon Icon="@(Icons.Regular.Size16.Add)" Slot="start" />
-                                Enroll
-                            </FluentButton>
-                        </div>
-                        @if (_enrollments is null)
-                        {
-                            <div class="spinner-container">
-                                <FluentSpinner />
-                            </div>
-                        }
-                        else if (_enrollments.Length == 0)
-                        {
-                            <FluentMessageBar Intent="MessageBarIntent.Info">
-                                No enrollments yet — use Enroll to add the first one.
-                            </FluentMessageBar>
-                        }
-                        else
-                        {
-                            <FluentDataGrid Items="@_enrollments.AsQueryable()"
-                                            TGridItem="StudentEnrollmentDto"
-                                            MultiLine="true"
-                                            Class="enrollments-grid">
-                                <TemplateColumn Title="Period">
-                                    @(_periodNames.TryGetValue(context.PeriodId, out var pn)
-                                        ? pn
-                                        : context.PeriodId.ToString()[..8])
-                                </TemplateColumn>
-                                @* Single "Grade (Stream)" column — the grade is
-                                   ALWAYS shown; the stream (when the enrollment has
-                                   one) is appended in parentheses. The separate
-                                   Grade column was folded in here since most rows
-                                   read as "Year 7" or "Year 7 (7A)". *@
-                                <TemplateColumn Title="Grade (Stream)">
-                                    @{
-                                        var gradeText = _gradeLevelNames.TryGetValue(context.GradeLevelId, out var g)
-                                            ? g
-                                            : context.GradeLevelId.ToString()[..8];
-                                        var streamText = context.StreamCodedValueId is { } sid
-                                            && _streamNames.TryGetValue(sid, out var s)
-                                            ? s
-                                            : null;
-                                    }
-                                    @if (streamText is not null)
-                                    {
-                                        <text>@gradeText (@streamText)</text>
-                                    }
-                                    else
-                                    {
-                                        <text>@gradeText</text>
-                                    }
-                                </TemplateColumn>
-                                <TemplateColumn Title="Enrolled on">@context.EnrolledOn.ToString("d")</TemplateColumn>
-                                <TemplateColumn Title="Exit date">@(context.ExitDate?.ToString("d") ?? "—")</TemplateColumn>
-                                <TemplateColumn Title="Status">
-                                    @{ var isActive = IsActiveEnrollment(context); }
-                                    @if (isActive)
-                                    {
-                                        <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
-                                    }
-                                    else
-                                    {
-                                        <FluentBadge Appearance="BadgeAppearance.Filled">@context.Status</FluentBadge>
-                                    }
-                                </TemplateColumn>
-                                <TemplateColumn Title="Actions" Class="enrollment-actions-col">
-                                    @{ var rowActive = IsActiveEnrollment(context); }
-                                    @if (rowActive)
-                                    {
-                                        <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
-                                            <FluentButton Appearance="ButtonAppearance.Transparent"
-                                                          Size="ButtonSize.Small"
-                                                          OnClick="OnTransferAsync"
-                                                          Title="Transfer to a different grade level"
-                                                          Disabled="@_savingEnrollment">
-                                                <FluentIcon Icon="@(Icons.Regular.Size16.ArrowSwap)" />
-                                                Transfer
-                                            </FluentButton>
-                                            <FluentButton Appearance="ButtonAppearance.Transparent"
-                                                          Size="ButtonSize.Small"
-                                                          OnClick="OnWithdrawAsync"
-                                                          Title="Set an exit date on this enrollment"
-                                                          Disabled="@_savingEnrollment">
-                                                <FluentIcon Icon="@(Icons.Regular.Size16.ArrowExit)" />
-                                                Withdraw
-                                            </FluentButton>
-                                        </FluentStack>
-                                    }
-                                </TemplateColumn>
-                            </FluentDataGrid>
-                        }
-
-                        @* ── Activity Groups (spec §3.6 FR-28..32) ───────────────
-                           Lists the groups the student is an active member of,
-                           below the Enrollments section. The "Join Group"
-                           accent button opens the JoinGroupsDialog (multi-select
-                           of available groups); each active row has a "Leave"
-                           lightweight button. Always shown: the
-                           FEATURE:EnableActivityGroups flag was retired on 2026-10-26, so
-                           activity groups are part of the page rather than an option. *@
-                            <div class="section-header">
-                                <h3>Activity Groups</h3>
-                                <FluentButton Appearance="ButtonAppearance.Primary"
-                                              Size="ButtonSize.Small"
-                                              IconStart="@FluentIcons.PersonAdd"
-                                              OnClick="OnJoinGroupAsync">
-                                    Join Group
-                                </FluentButton>
-                            </div>
-                            @if (!string.IsNullOrEmpty(_activityGroupsError))
+                        <Badge>
+                            @if (_student.IsDeleted)
                             {
-                                <FluentMessageBar Intent="MessageBarIntent.Error">@_activityGroupsError</FluentMessageBar>
+                                <span class="status-pill status-pill--danger">
+                                    <span class="status-pill__dot" aria-hidden="true"></span>Archived
+                                </span>
                             }
-                            @if (_studentGroups is null)
+                            else if (ActiveEnrollment is not null)
                             {
-                                <div class="spinner-container">
-                                    <FluentSpinner />
-                                </div>
-                            }
-                            else if (_studentGroups.Length == 0)
-                            {
-                                <FluentMessageBar Intent="MessageBarIntent.Info">
-                                    Not a member of any activity groups yet — use Join Group to add one.
-                                </FluentMessageBar>
+                                <span class="status-pill status-pill--success">
+                                    <span class="status-pill__dot" aria-hidden="true"></span>Enrolled
+                                </span>
                             }
                             else
                             {
-                                <FluentDataGrid Items="@_studentGroups.AsQueryable()"
-                                                TGridItem="ActivityGroupDto"
-                                                Class="activity-groups-grid">
-                                    <TemplateColumn Title="Group">
-                                        <a href="/activity-groups/@context.Id">@context.Name</a>
-                                    </TemplateColumn>
-                                    <TemplateColumn Title="Category">@(context.Category ?? "—")</TemplateColumn>
-                                    <TemplateColumn Title="Status">
-                                        <FluentBadge Appearance="@BadgeAppearance.Filled" Color="@(context.IsActive ? BadgeColor.Success : BadgeColor.Subtle)">@(context.IsActive ? "Active" : "Inactive")</FluentBadge>
-                                    </TemplateColumn>
-                                    <TemplateColumn Title="Members">@context.ActiveMemberCount</TemplateColumn>
-                                    <TemplateColumn Title="Actions" Class="activity-group-actions-col">
-                                        <FluentButton Appearance="ButtonAppearance.Transparent"
-                                                      Size="ButtonSize.Small"
-                                                      Disabled="@_savingGroupAction"
-                                                      OnClick="@(() => OnLeaveGroupAsync(context.Id))">
-                                            Leave
-                                        </FluentButton>
-                                    </TemplateColumn>
-                                </FluentDataGrid>
+                                <span class="status-pill status-pill--warning">
+                                    <span class="status-pill__dot" aria-hidden="true"></span>Not enrolled
+                                </span>
                             }
-                        
+                            @if (CurrentGradeLabel is { } grade)
+                            {
+                                <FluentBadge Appearance="BadgeAppearance.Tint">@grade</FluentBadge>
+                            }
+                            @if (CurrentPeriodLabel is { } period)
+                            {
+                                <FluentBadge Appearance="BadgeAppearance.Tint">@period</FluentBadge>
+                            }
+                        </Badge>
 
-                        @* ── Guardians (embedded, not in a tab) ───────────────────
-                           Replaces the deprecated <GuardiansTab>. The
-                           page owns the link list + the dialog opens
-                           + the API calls. The "Manage" button opens
-                           GuardianPickerDialog; the per-row "Edit"
-                           button opens GuardianFormDialog in ForEdit
-                           mode. Each action is IMMEDIATE (the view
-                           page has no Save flow of its own) — the
-                           page reloads the link list on success. The
-                           dedicated StudentGuardiansList component
-                           is presentational only (no API calls, no
-                           dialog opens) and is shared with Edit.razor. *@
-                        <div class="section-header">
-                            <h3>Guardians</h3>
-                            <FluentButton Appearance="ButtonAppearance.Primary"
-                                          Size="ButtonSize.Small"
-                                          IconStart="@FluentIcons.PersonAdd"
-                                          OnClick="OnManageGuardiansAsync">
-                                Manage
-                            </FluentButton>
-                        </div>
-                        @if (!string.IsNullOrEmpty(_guardianError))
-                        {
-                            <FluentMessageBar Intent="MessageBarIntent.Error">@_guardianError</FluentMessageBar>
-                        }
-                        <StudentGuardiansList Items="_links.ToArray()"
-                                               RelationshipNameLookup="ResolveRelName"
-                                               SalutationLookup="ResolveSalutation"
-                                               OnEdit="OnEditGuardianAsync"
-                                               OnRemove="OnRemoveGuardianAsync"
-                                               OnViewAllContacts="OnViewAllContactsAsync" />
+                        <TitleMenu>
+                            <RowActionsMenu UseMenuService="false"
+                                            ForceKebab="true"
+                                            Actions="@PageActions"
+                                            AriaLabel="Page actions" />
+                        </TitleMenu>
 
-                        @* ── Contact history ─────────────────────────────────────
-                           Append-only log of contact edits/deletes against this
-                           student. Loaded from the new /contacts/audit endpoint and
-                           rendered as a compact timeline. Empty state is shown
-                           when no changes have been recorded yet. *@
-                        <div class="section-header">
-                            <h3>Contact history <FluentBadge Appearance="BadgeAppearance.Filled">@_contactHistory.Length</FluentBadge></h3>
-                        </div>
-                        @if (_contactHistoryLoading)
-                        {
-                            <div class="spinner-container"><FluentSpinner /></div>
-                        }
-                        else if (!string.IsNullOrEmpty(_contactHistoryError))
-                        {
-                            <FluentMessageBar Intent="MessageBarIntent.Error">@_contactHistoryError</FluentMessageBar>
-                        }
-                        else if (_contactHistory.Length == 0)
-                        {
-                            <FluentMessageBar Intent="MessageBarIntent.Info">
-                                No contact changes recorded yet.
-                            </FluentMessageBar>
-                        }
-                        else
-                        {
-                            <ul class="student-contact-history">
-                                @foreach (var entry in _contactHistory)
-                                {
-                                    <li class="student-contact-history__entry">
-                                        <div class="student-contact-history__meta">
-                                            <span class="student-contact-history__actor">@entry.ActorDisplayName</span>
-                                            <span class="muted">· @entry.OccurredAt.ToLocalTime().ToString("g")</span>
-                                        </div>
-                                        <div class="student-contact-history__change">
-                                            <FluentBadge Appearance="@ChangeKindBadgeAppearance(entry.ChangeKind)" Color="@ChangeKindBadgeColor(entry.ChangeKind)">@entry.ChangeKind</FluentBadge>
-                                            <span class="student-contact-history__value-line">
-                                                @FormatHistoryValue(entry.PreviousChannel, entry.PreviousValue, entry.PreviousCountryCode)
-                                                @if (entry.ChangeKind == "Updated")
+                        <ChildContent>
+                            <p class="student-meta" id="student-view-meta">
+                                <code>@_student.StudentNumber</code>
+                                <span class="student-meta__sep" aria-hidden="true">·</span>
+                                <span>@AgeText</span>
+                                <span class="student-meta__sep" aria-hidden="true">·</span>
+                                <span>@GenderText</span>
+                                <span class="student-meta__sep" aria-hidden="true">·</span>
+                                <span>@GuardianCountText</span>
+                                <span class="student-meta__sep" aria-hidden="true">·</span>
+                                <span>@GroupCountText</span>
+                            </p>
+
+                            <div class="region-grid-host">
+                                <div class="region-grid">
+
+                                    @* ── Main column: the student's own data, then its people ───────── *@
+                                    <div class="region-grid__main">
+
+                                        <PanelSection Id="student-view-details"
+                                                      Title="Details"
+                                                      TitleId="student-view-details-title"
+                                                      ShowBorder="false">
+                                            <div class="fact-grid">
+                                                <FieldDisplay Label="Student #"><code>@_student.StudentNumber</code></FieldDisplay>
+                                                <FieldDisplay Label="Date of birth">@(_student.DateOfBirth?.ToString("d MMM yyyy") ?? "—")</FieldDisplay>
+                                                <FieldDisplay Label="Age">@AgeText</FieldDisplay>
+                                                <FieldDisplay Label="Gender">@GenderText</FieldDisplay>
+                                                <FieldDisplay Label="Record created">@_student.CreatedAt.ToLocalTime().ToString("d MMM yyyy, HH:mm")</FieldDisplay>
+                                                <FieldDisplay Label="Last updated">@_student.UpdatedAt.ToLocalTime().ToString("d MMM yyyy, HH:mm")</FieldDisplay>
+                                            </div>
+                                        </PanelSection>
+
+                                        @* ── Enrollment: where the student is now, then where they have been ── *@
+                                        <PanelSection Id="student-view-enrollment"
+                                                      Title="Enrollment"
+                                                      TitleId="student-view-enrollment-title"
+                                                      ShowBorder="false"
+                                                      Count="@_enrollments?.Length">
+                                            <HeaderActions>
+                                                <RowActionsMenu UseMenuService="false"
+                                                                ForceKebab="true"
+                                                                Actions="@EnrollmentPanelActions"
+                                                                AriaLabel="Enrollment actions" />
+                                            </HeaderActions>
+                                            <ChildContent>
+                                                @if (_enrollments is null)
                                                 {
-                                                    <text> → @FormatHistoryValue(entry.NewChannel, entry.NewValue, entry.NewCountryCode)</text>
+                                                    <div class="spinner-container">
+                                                        <FluentSpinner />
+                                                    </div>
                                                 }
-                                            </span>
-                                        </div>
-                                        @if (!string.IsNullOrWhiteSpace(entry.Reason))
-                                        {
-                                            <div class="student-contact-history__reason muted">Reason: @entry.Reason</div>
-                                        }
-                                    </li>
-                                }
-                            </ul>
-                        }
+                                                else if (_enrollments.Length == 0)
+                                                {
+                                                    <FluentMessageBar Intent="MessageBarIntent.Info">
+                                                        No enrollments yet — use Enroll to add the first one.
+                                                    </FluentMessageBar>
+                                                }
+                                                else
+                                                {
+                                                    @if (ActiveEnrollment is { } current)
+                                                    {
+                                                        @* An inline zone, not a panel (§3): the current placement as
+                                                           three labelled facts plus how long it has been in force. *@
+                                                        <div class="placement" id="student-view-placement">
+                                                            <div class="placement__cell">
+                                                                <span class="placement__label">Current grade</span>
+                                                                <span class="placement__value">@PlacementLabel(current)</span>
+                                                            </div>
+                                                            <div class="placement__cell">
+                                                                <span class="placement__label">Period</span>
+                                                                <span class="placement__value">@PeriodLabel(current)</span>
+                                                            </div>
+                                                            <div class="placement__cell">
+                                                                <span class="placement__label">Enrolled since</span>
+                                                                <span class="placement__value">@current.EnrolledOn.ToString("d MMM yyyy")</span>
+                                                            </div>
+                                                            @if (DaysInPlacement(current) is { } days)
+                                                            {
+                                                                <div class="placement__gap"></div>
+                                                                <div class="placement__aside">@DaysText(days) in this placement</div>
+                                                            }
+                                                        </div>
+                                                    }
 
-                    }
-                </ChildContent>
-                <Fallback>
-                    <FluentMessageBar Intent="MessageBarIntent.Warning">
-                        You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
-                    </FluentMessageBar>
-                </Fallback>
-            </TenantGate>
+                                                    <div class="subrule">Placement history</div>
 
-            <div class="action-bar">
-                <FluentButton Appearance="ButtonAppearance.Outline" OnClick='() => Nav.NavigateTo("/students")'>Back to Students</FluentButton>
-            </div>
+                                                    <ul class="tl">
+                                                        @foreach (var enrollment in _enrollments.OrderByDescending(e => e.EnrolledOn))
+                                                        {
+                                                            var isCurrent = IsActiveEnrollment(enrollment);
+                                                            <li class="tl__item @(isCurrent ? "tl__item--current" : null)">
+                                                                <span class="tl__node" aria-hidden="true"></span>
+                                                                <div class="tl__row">
+                                                                    <span class="tl__grade">@PlacementLabel(enrollment)</span>
+                                                                    @if (isCurrent)
+                                                                    {
+                                                                        <span class="status-pill status-pill--success">
+                                                                            <span class="status-pill__dot" aria-hidden="true"></span>Current
+                                                                        </span>
+                                                                    }
+                                                                    else if (enrollment.ExitDate is { } exit)
+                                                                    {
+                                                                        <span class="status-pill status-pill--neutral">
+                                                                            <span class="status-pill__dot" aria-hidden="true"></span>Exited @exit.ToString("d MMM yyyy")
+                                                                        </span>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        <span class="status-pill status-pill--neutral">
+                                                                            <span class="status-pill__dot" aria-hidden="true"></span>@enrollment.Status
+                                                                        </span>
+                                                                    }
+                                                                    @{
+                                                                        var nodeActions = NodeActions(enrollment);
+                                                                    }
+                                                                    @if (nodeActions.Count > 0)
+                                                                    {
+                                                                        <span class="tl__actions">
+                                                                            <RowActionsMenu UseMenuService="false"
+                                                                                            Actions="@nodeActions"
+                                                                                            AriaLabel="Placement actions" />
+                                                                        </span>
+                                                                    }
+                                                                </div>
+                                                                <div class="tl__meta">@PlacementMeta(enrollment)</div>
+                                                            </li>
+                                                        }
+                                                    </ul>
+                                                }
+                                            </ChildContent>
+                                        </PanelSection>
 
-            @if (!string.IsNullOrEmpty(_error))
-            {
-                <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
-            }
-        </FluentStack>
+                                        @* ── Contacts: the student's OWN contacts (§1.6 of the redesign doc).
+                                           The page used to render contact HISTORY without ever showing the current
+                                           list; these two blocks answer one question and must stay adjacent. *@
+                                        <PanelSection Id="student-view-contacts"
+                                                      Title="Contacts"
+                                                      TitleId="student-view-contacts-title"
+                                                      ShowBorder="false"
+                                                      Count="@_contacts?.Length">
+                                            <ChildContent>
+                                                @if (!string.IsNullOrEmpty(_contactsError))
+                                                {
+                                                    <FriendlyErrorBar Message="@_contactsError" />
+                                                }
+                                                @if (_contacts is null)
+                                                {
+                                                    <div class="spinner-container">
+                                                        <FluentSpinner />
+                                                    </div>
+                                                }
+                                                else if (_contacts.Length == 0)
+                                                {
+                                                    <p class="muted-note" id="student-view-contacts-empty">
+                                                        No contacts recorded for this student. Guardians below carry
+                                                        their own.
+                                                    </p>
+                                                }
+                                                else
+                                                {
+                                                    <div class="contact-chips">
+                                                        @foreach (var contact in _contacts)
+                                                        {
+                                                            <span class="contact-chip" @key="contact.Id">
+                                                                <span class="contact-chip__channel">@ContactChannelLabel(contact.Channel)</span>
+                                                                @ContactValue(contact)
+                                                                @if (!string.IsNullOrWhiteSpace(contact.Label))
+                                                                {
+                                                                    <span class="contact-chip__note">@contact.Label</span>
+                                                                }
+                                                            </span>
+                                                        }
+                                                    </div>
+                                                }
+                                                @if (_contacts is { Length: > 0 })
+                                                {
+                                                    <p class="muted-note">
+                                                        This student's <strong>own</strong> contacts — guardians' contacts live on
+                                                        their cards below. Edited on <strong>Edit</strong>.
+                                                    </p>
+                                                }
+                                            </ChildContent>
+                                        </PanelSection>
+
+                                        <PanelSection Id="student-view-guardians"
+                                                      Title="Guardians"
+                                                      TitleId="student-view-guardians-title"
+                                                      ShowBorder="false"
+                                                      Count="@_links.Count">
+                                            <HeaderActions>
+                                                <RowActionsMenu UseMenuService="false"
+                                                                Actions="@GuardianPanelActions"
+                                                                AriaLabel="Guardian actions" />
+                                            </HeaderActions>
+                                            <ChildContent>
+                                                @if (!string.IsNullOrEmpty(_guardianError))
+                                                {
+                                                    <FluentMessageBar Intent="MessageBarIntent.Error">@_guardianError</FluentMessageBar>
+                                                }
+                                                @if (_links.Count == 0)
+                                                {
+                                                    <p class="muted-note" id="student-view-guardians-empty">
+                                                        No guardians linked yet — use Manage to add one.
+                                                    </p>
+                                                }
+                                                else
+                                                {
+                                                    <ul class="guardian-cards">
+                                                        @foreach (var link in _links)
+                                                        {
+                                                            <li class="guardian-card" @key="link.GuardianId">
+                                                                <span class="student-monogram student-monogram--sm"
+                                                                      style="@GuardianMonogramStyle(link)" aria-hidden="true">@GuardianInitials(link)</span>
+                                                                <div class="guardian-card__body">
+                                                                    <div class="guardian-card__top">
+                                                                        <span class="guardian-card__name">@GuardianName(link)</span>
+                                                                        @if (ResolveRelName(link.RelationshipCodedValueId) is { } rel)
+                                                                        {
+                                                                            <FluentBadge Appearance="BadgeAppearance.Tint">@rel</FluentBadge>
+                                                                        }
+                                                                        @if (link.IsEmergencyContact)
+                                                                        {
+                                                                            <FluentBadge Appearance="BadgeAppearance.Tint">Emergency contact</FluentBadge>
+                                                                        }
+                                                                        @if (link.Role == GuardianRole.Primary)
+                                                                        {
+                                                                            <span class="guardian-card__primary">Primary</span>
+                                                                        }
+                                                                        <span class="guardian-card__actions">
+                                                                            <RowActionsMenu UseMenuService="false"
+                                                                                            Actions="@GuardianRowActions(link)"
+                                                                                            AriaLabel="@($"Actions for {GuardianName(link)}")" />
+                                                                        </span>
+                                                                    </div>
+                                                                    <div class="contact-chips">
+                                                                        @foreach (var contact in link.Contacts.Take(3))
+                                                                        {
+                                                                            <span class="contact-chip">
+                                                                                <span class="contact-chip__channel">@ContactChannelLabel(contact.Channel)</span>
+                                                                                @GuardianContactValue(contact)
+                                                                            </span>
+                                                                        }
+                                                                        @if (link.HasMoreContacts)
+                                                                        {
+                                                                            <button type="button"
+                                                                                    class="contact-chip__more"
+                                                                                    @onclick="() => OnViewAllContactsAsync(link)">
+                                                                                View all @link.TotalContactCount contacts
+                                                                            </button>
+                                                                        }
+                                                                    </div>
+                                                                </div>
+                                                            </li>
+                                                        }
+                                                    </ul>
+                                                }
+                                            </ChildContent>
+                                        </PanelSection>
+
+                                    </div>
+
+                                    @* ── Rail: relationships and the audit trail ─────────────────────── *@
+                                    <div class="region-grid__rail">
+
+                                        <PanelSection Id="student-view-groups"
+                                                      Title="Activity groups"
+                                                      TitleId="student-view-groups-title"
+                                                      Collapsible="true"
+                                                      Count="@_studentGroups?.Length">
+                                            <HeaderActions>
+                                                <RowActionsMenu UseMenuService="false"
+                                                                ForceKebab="true"
+                                                                Actions="@GroupPanelActions"
+                                                                AriaLabel="Activity group actions" />
+                                            </HeaderActions>
+                                            <ChildContent>
+                                                @if (!string.IsNullOrEmpty(_activityGroupsError))
+                                                {
+                                                    <FluentMessageBar Intent="MessageBarIntent.Error">@_activityGroupsError</FluentMessageBar>
+                                                }
+                                                @if (_studentGroups is null)
+                                                {
+                                                    <div class="spinner-container">
+                                                        <FluentSpinner />
+                                                    </div>
+                                                }
+                                                else if (_studentGroups.Length == 0)
+                                                {
+                                                    <p class="muted-note" id="student-view-groups-empty">
+                                                        Not a member of any activity groups yet.
+                                                    </p>
+                                                }
+                                                else
+                                                {
+                                                    <RailChips>
+                                                        @foreach (var group in _studentGroups)
+                                                        {
+                                                            @* Category is OPTIONAL free text (ActivityGroup.cs FR-1), so an
+                                                               empty one renders nothing — never an em dash. *@
+                                                            <RailChip @key="group.Id"
+                                                                      Text="@group.Name"
+                                                                      Disabled="@_savingGroupAction"
+                                                                      OnRemove="() => OnLeaveGroupAsync(group.Id)">
+                                                                <span class="group-chip">
+                                                                    <span>@group.Name</span>
+                                                                    @if (!string.IsNullOrWhiteSpace(group.Category))
+                                                                    {
+                                                                        <span class="group-chip__category">@group.Category</span>
+                                                                    }
+                                                                </span>
+                                                            </RailChip>
+                                                        }
+                                                    </RailChips>
+                                                }
+                                            </ChildContent>
+                                        </PanelSection>
+
+                                        @* ── Subjects: the §6 union for the active placement's grade. Reuse —
+                                           GET /students/{id}/subjects and both RailBand variants already exist;
+                                           the view page simply never called them. *@
+                                        <PanelSection Id="student-view-subjects"
+                                                      Title="Subjects"
+                                                      TitleId="student-view-subjects-title"
+                                                      Count="@_subjects?.Count">
+                                            <ChildContent>
+                                                @if (!string.IsNullOrEmpty(_subjectsError))
+                                                {
+                                                    <FriendlyErrorBar Message="@_subjectsError" />
+                                                }
+                                                @if (_subjects is null)
+                                                {
+                                                    <div class="spinner-container">
+                                                        <FluentSpinner />
+                                                    </div>
+                                                }
+                                                else if (_subjects.Count == 0)
+                                                {
+                                                    <p class="muted-note" id="student-view-subjects-empty">
+                                                        @* States the OUTCOME, not a fact about the grade: "nothing
+                                                           resolved for this placement" is true both when the grade has no
+                                                           subjects and when the placement's period matched none — this branch
+                                                           cannot tell those apart (owner ruling, round 13: sub-periods are
+                                                           informational, and belong on the assignment, not here). Do not
+                                                           restate it as "the grade has no subjects". *@
+                                                        @(ActiveEnrollment is null
+                                                            ? "Subjects follow the placement — this student has no active enrollment."
+                                                            : "No subjects could be resolved for this placement.")
+                                                    </p>
+                                                }
+                                                else
+                                                {
+                                                    <p class="muted-note" id="student-view-subjects-source">
+                                                        From <strong>@CurrentGradeLabel</strong> — the grade of the current placement.
+                                                    </p>
+
+                                                    @if (RequiredSubjects.Count > 0)
+                                                    {
+                                                        <RailBand Id="student-view-subjects-required"
+                                                                  Label="Needs explicit enrolment"
+                                                                  Hint="@RequiredHint"
+                                                                  Variant="RailBandVariant.Required">
+                                                            <RailChips>
+                                                                @foreach (var subject in RequiredSubjects)
+                                                                {
+                                                                    @* Enrolled = a fact; missing = struck WITH the
+                                                                       reason, and not actionable here: FR-ER-24 makes the
+                                                                       edit page the enrolment surface. *@
+                                                                    @if (subject.IsEnrolled)
+                                                                    {
+                                                                        <RailChip @key="@($"{subject.TopicId}-in")" Text="@subject.Name" />
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        <RailChip @key="@($"{subject.TopicId}-missing")"
+                                                                                  Text="@subject.Name"
+                                                                                  Blocked="true"
+                                                                                  Reason="choose it on the Edit page" />
+                                                                    }
+                                                                }
+                                                            </RailChips>
+                                                        </RailBand>
+                                                    }
+
+                                                    @if (AssumedSubjects.Count > 0)
+                                                    {
+                                                        <RailBand Id="student-view-subjects-assumed"
+                                                                  Label="Assumed"
+                                                                  Hint="@AssumedHint"
+                                                                  Variant="RailBandVariant.Assumed">
+                                                            <RailChips>
+                                                                @foreach (var subject in AssumedSubjects)
+                                                                {
+                                                                    @* Implied enrolment (FR-ER-1): membership IS the
+                                                                       enrolment, so there is no record and nothing to act on. *@
+                                                                    <RailChip @key="subject.TopicId" Text="@subject.Name" />
+                                                                }
+                                                            </RailChips>
+                                                        </RailBand>
+                                                    }
+                                                }
+                                            </ChildContent>
+                                        </PanelSection>
+
+                                        <PanelSection Id="student-view-contact-history"
+                                                      Title="Contact history"
+                                                      TitleId="student-view-contact-history-title"
+                                                      Collapsible="true"
+                                                      Count="@_contactHistory.Length">
+                                            <ChildContent>
+                                                <p class="muted-note" id="student-view-contact-history-source">
+                                                    Audit of the <strong>student's own</strong> contacts — guardian edits do
+                                                    not appear here.
+                                                </p>
+                                                @if (_contactHistoryLoading)
+                                                {
+                                                    <div class="spinner-container"><FluentSpinner /></div>
+                                                }
+                                                else if (!string.IsNullOrEmpty(_contactHistoryError))
+                                                {
+                                                    <FluentMessageBar Intent="MessageBarIntent.Error">@_contactHistoryError</FluentMessageBar>
+                                                }
+                                                else if (_contactHistory.Length == 0)
+                                                {
+                                                    <p class="muted-note" id="student-view-contact-history-empty">
+                                                        No contact changes recorded yet.
+                                                    </p>
+                                                }
+                                                else
+                                                {
+                                                    <ul class="student-contact-history">
+                                                        @foreach (var entry in _contactHistory)
+                                                        {
+                                                            <li class="student-contact-history__entry">
+                                                                <div class="student-contact-history__meta">
+                                                                    <span class="student-contact-history__actor">@entry.ActorDisplayName</span>
+                                                                    <span class="muted">· @entry.OccurredAt.ToLocalTime().ToString("g")</span>
+                                                                </div>
+                                                                <div class="student-contact-history__change">
+                                                                    @* A change KIND is a state, so it is a pill — the same four-variant
+                                                                       vocabulary the page header uses. Not a FluentBadge: a deletion must
+                                                                       read as destructive, and v5's BadgeColor is only reliable for the
+                                                                       four colours it actually paints (Success is a dead rule). *@
+                                                                    <span class="status-pill @ChangeKindPillClass(entry.ChangeKind)">
+                                                                        <span class="status-pill__dot" aria-hidden="true"></span>@entry.ChangeKind
+                                                                    </span>
+                                                                    <span class="student-contact-history__value-line">
+                                                                        @FormatHistoryValue(entry.PreviousChannel, entry.PreviousValue, entry.PreviousCountryCode)
+                                                                        @if (entry.ChangeKind == "Updated")
+                                                                        {
+                                                                            <text> → @FormatHistoryValue(entry.NewChannel, entry.NewValue, entry.NewCountryCode)</text>
+                                                                        }
+                                                                    </span>
+                                                                </div>
+                                                                @if (!string.IsNullOrWhiteSpace(entry.Reason))
+                                                                {
+                                                                    <div class="student-contact-history__reason muted">Reason: @entry.Reason</div>
+                                                                }
+                                                            </li>
+                                                        }
+                                                    </ul>
+                                                }
+                                            </ChildContent>
+                                        </PanelSection>
+
+                                    </div>
+                                </div>
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(_error))
+                            {
+                                <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                            }
+                        </ChildContent>
+                    </AuthoringShell>
+                }
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageBarIntent.Warning">
+                    You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            </Fallback>
+        </TenantGate>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -348,18 +585,16 @@
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
-    // ── Guardian link state (page-owned; replaces the deprecated
-    //    <GuardiansTab>) ──
+    // ── Guardian link state (page-owned) ──
     //
     // The view page has no Save flow of its own, so every
     // link / unlink / edit is IMMEDIATE. The page owns the link
-    // list, the dialog opens, and the API calls. The dedicated
-    // <StudentGuardiansList> component is a thin presenter that
-    // fires the EventCallback<StudentGuardianViewDto> handlers
-    // below on every user action.
+    // list, the dialog opens, and the API calls; each guardian
+    // renders as a card whose kebab raises the handlers below.
     private List<SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto> _links = new();
     private Dictionary<Guid, string> _relNames = new();
-    // Spec §4.8: salutation (title) lookup for the guardian grid Name cell.
+    // Spec §4.8: salutation (title) lookup for the guardian card's name,
+    // in the card's accessible label and in the contacts dialog's title.
     // Loaded once per page load; covers Mr/Mrs/Ms/etc. across all linked
     // guardians. Empty when salutations aren't configured for the tenant.
     private Dictionary<Guid, string> _salutations = new();
@@ -375,6 +610,15 @@
     // guardians list. Join Group opens JoinGroupsDialog; Leave exits the
     // student from that group. Both actions are immediate (view page has no
     // Save flow) and reload the list on success.
+    private SchoolCollab.Students.Core.DTOs.ContactDto[]? _contacts;
+    private string? _contactsError;
+
+    // ── Subject bands (subject-enrollment-requirement-flag.md §6 union, FR-ER-16/17) ──
+    // Same query the edit rail uses. Null = not loaded yet, so "not loaded" never reads as
+    // "no subjects"; the two bands render nothing until it arrives.
+    private List<SchoolCollab.Students.Core.DTOs.StudentSubjectEnrollmentDto>? _subjects;
+    private string? _subjectsError;
+
     private ActivityGroupDto[]? _studentGroups;
     private string? _activityGroupsError;
     private bool _savingGroupAction;
@@ -431,20 +675,225 @@
         return age < 0 ? null : age;
     }
 
-    private RenderFragment StatusBadge => __builder =>
+    // ── Identity header ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>The trail (§4 of panel-layout-pattern.md). "Students" links back; Q120 moved the old
+    /// footer "Back to Students" button up here, so the page has no navigation control below the fold.</summary>
+    private IReadOnlyList<AuthoringCrumb> ShellCrumbs =>
+        [new AuthoringCrumb("Students", "/students"), new AuthoringCrumb(FullName)];
+
+    private string FullName => _student is null
+        ? "…"
+        : $"{_student.FirstName} {_student.LastName}".Trim();
+
+    private string AgeText => AgeFromDob(_student?.DateOfBirth) is { } age ? $"{age} years" : "—";
+
+    private string GenderText => string.IsNullOrWhiteSpace(_student?.GenderName) ? "—" : _student!.GenderName!;
+
+    private string GuardianCountText => _links.Count == 1 ? "1 guardian" : $"{_links.Count} guardians";
+
+    private string GroupCountText => _studentGroups is null
+        ? "activity groups …"
+        : _studentGroups.Length == 1 ? "1 activity group" : $"{_studentGroups.Length} activity groups";
+
+    private string CurrentGradeLabel => ActiveEnrollment is { } e ? PlacementLabel(e) : null;
+
+    private string CurrentPeriodLabel =>
+        ActiveEnrollment is { } e && _periodNames.TryGetValue(e.PeriodId, out var p) ? p : null;
+
+    /// <summary>Initials for the monogram. Two letters, derived — never a stored avatar (Q117: inline
+    /// markup, not a component; there is no image upload behind it).</summary>
+    private string MonogramInitials
+    {
+        get
+        {
+            if (_student is null) return "?";
+            var first = _student.FirstName.Trim();
+            var last = _student.LastName.Trim();
+            return $"{(first.Length > 0 ? first[0] : '?')}{(last.Length > 0 ? last[0] : '?')}".ToUpperInvariant();
+        }
+    }
+
+    /// <summary>
+    /// The monogram's tint comes from ONE token pair, never a fixed hue (the dark render of the mock
+    /// showed a hue-only disc staying pale lavender on a dark page). The hue is derived from the name so a
+    /// student keeps the same colour across visits without storing anything.
+    /// </summary>
+    private string MonogramStyle => $"--monogram-hue: {HueFor(FullName)}";
+
+    private string GuardianMonogramStyle(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto link) =>
+        $"--monogram-hue: {HueFor(GuardianName(link))}";
+
+    private string GuardianInitials(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto link)
+    {
+        var first = link.FirstName.Trim();
+        var last = link.LastName.Trim();
+        return $"{(first.Length > 0 ? first[0] : '?')}{(last.Length > 0 ? last[0] : '?')}".ToUpperInvariant();
+    }
+
+    private static int HueFor(string text)
+    {
+        var hash = 0;
+        foreach (var c in text)
+        {
+            hash = (hash * 31 + c) & 0x7FFFFFFF;
+        }
+        return hash % 360;
+    }
+
+    // ── Page / panel / row menus ─────────────────────────────────────────────────────────────
+
+    private IReadOnlyList<RowAction> PageActions =>
+    [
+        new RowAction { Label = "Edit student…", Href = $"/students/{Id}/edit" },
+        new RowAction { Label = "Copy student number", OnClick = CopyStudentNumberAsync, Disabled = _student is null },
+        new RowAction { Label = "Back to students", Href = "/students" },
+    ];
+
+    private IReadOnlyList<RowAction> EnrollmentPanelActions =>
+    [
+        new RowAction
+        {
+            Label = "Enroll in grade level…",
+            OnClick = OnEnrollAsync,
+            Disabled = _enrollments is null || _savingEnrollment,
+            DisabledReason = _enrollments is null ? "Enrollments are still loading." : null,
+        },
+    ];
+
+    /// <summary>Transfer / Withdraw belong to the row they change; a closed placement has no actions at
+    /// all, so <see cref="RowActionsMenu"/> renders nothing for it (it renders nothing for an empty list).</summary>
+    private IReadOnlyList<RowAction> NodeActions(StudentEnrollmentDto enrollment) =>
+        IsActiveEnrollment(enrollment)
+            ? [
+                new RowAction { Label = "Transfer…", OnClick = OnTransferAsync, Disabled = _savingEnrollment },
+                new RowAction { Label = "Withdraw…", OnClick = OnWithdrawAsync, Disabled = _savingEnrollment },
+            ]
+            : [];
+
+    /// <summary>One action, so <see cref="RowActionsMenu"/> renders it as a labelled button rather than a
+    /// kebab — the repo's own rule (one action ⇒ visible control).</summary>
+    private IReadOnlyList<RowAction> GuardianPanelActions =>
+        [new RowAction { Label = "Manage guardians…", OnClick = OnManageGuardiansAsync }];
+
+    private IReadOnlyList<RowAction> GuardianRowActions(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto link) =>
+    [
+        new RowAction { Label = "Edit link…", OnClick = () => OnEditGuardianAsync(link) },
+        new RowAction { Label = "View all contacts…", OnClick = () => OnViewAllContactsAsync(link) },
+        new RowAction
+        {
+            Label = "Remove link…",
+            Destructive = true,
+            ConfirmMessage = $"Remove {GuardianName(link)} from this student? The guardian record itself is kept.",
+            OnClick = () => OnRemoveGuardianAsync(link),
+        },
+    ];
+
+    private IReadOnlyList<RowAction> GroupPanelActions =>
+        [new RowAction { Label = "Join activity group…", OnClick = OnJoinGroupAsync }];
+
+    private async Task CopyStudentNumberAsync()
     {
         if (_student is null) return;
-        if (_student.IsDeleted)
+        try
         {
-            <FluentBadge Appearance="BadgeAppearance.Filled">Deleted</FluentBadge>
-            ;
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _student.StudentNumber);
+        }
+        catch (Exception ex)
+        {
+            // Clipboard access is browser- and context-dependent (insecure origin, denied permission).
+            // A failed copy must not look like a failed page: log it and leave the number on screen.
+            Logger.LogDebug(ex, "Clipboard write failed for student {StudentNumber}", _student.StudentNumber);
+        }
+    }
+
+    // ── Presentation helpers ─────────────────────────────────────────────────────────────────
+
+    private string PlacementLabel(StudentEnrollmentDto enrollment)
+    {
+        var grade = _gradeLevelNames.TryGetValue(enrollment.GradeLevelId, out var g)
+            ? g
+            : enrollment.GradeLevelId.ToString()[..8];
+        return enrollment.StreamCodedValueId is { } streamId
+               && _streamNames.TryGetValue(streamId, out var stream)
+            ? $"{grade} ({stream})"
+            : grade;
+    }
+
+    private string PeriodLabel(StudentEnrollmentDto enrollment) =>
+        _periodNames.TryGetValue(enrollment.PeriodId, out var p) ? p : enrollment.PeriodId.ToString()[..8];
+
+    private string PlacementMeta(StudentEnrollmentDto enrollment)
+    {
+        var parts = new List<string>
+        {
+            PeriodLabel(enrollment),
+            $"enrolled {enrollment.EnrolledOn:d MMM yyyy}",
+        };
+        if (enrollment.ExitDate is { } exit)
+        {
+            parts.Add($"exited {exit:d MMM yyyy}");
         }
         else
         {
-            <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
-            ;
+            parts.Add("no exit date");
         }
+        if (DaysInPlacement(enrollment) is { } days)
+        {
+            parts.Add(DaysText(days));
+        }
+        return string.Join(" · ", parts);
+    }
+
+    /// <summary>Days the placement has been (or was) in force. Null when the dates cannot describe a span.</summary>
+    /// <summary>
+    /// "1 day" / "N days". The first live render of this page said "1 days in this placement" — a
+    /// pluralisation bug no test saw, because both render tests assert the block and neither asserts the
+    /// count's wording. Interpolating a number straight into a pluralised noun is the whole bug.
+    /// </summary>
+    private static string DaysText(int days) => days == 1 ? "1 day" : $"{days} days";
+
+    private static int? DaysInPlacement(StudentEnrollmentDto enrollment)
+    {
+        var end = enrollment.ExitDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var days = end.DayNumber - enrollment.EnrolledOn.DayNumber;
+        return days < 0 ? null : days;
+    }
+
+    private string GuardianName(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto link) =>
+        string.IsNullOrWhiteSpace(link.DisplayName)
+            ? $"{link.FirstName} {link.LastName}".Trim()
+            : link.DisplayName!;
+
+    private static string ContactChannelLabel(ContactChannel channel) => channel switch
+    {
+        ContactChannel.Email => "Email",
+        ContactChannel.SMS => "SMS",
+        ContactChannel.WhatsApp => "WhatsApp",
+        _ => channel.ToString(),
     };
+
+    private static string ContactValue(SchoolCollab.Students.Core.DTOs.ContactDto contact) =>
+        string.IsNullOrWhiteSpace(contact.CountryCode) ? contact.Value : $"{contact.CountryCode} {contact.Value}";
+
+    private static string GuardianContactValue(SchoolCollab.Students.Core.DTOs.GuardianContactViewDto contact) =>
+        string.IsNullOrWhiteSpace(contact.CountryCode) ? contact.Value : $"{contact.CountryCode} {contact.Value}";
+
+    // ── Subject bands (mirrors Edit.razor's bands; same union, same two variants) ─────────────
+
+    private List<SchoolCollab.Students.Core.DTOs.StudentSubjectEnrollmentDto> RequiredSubjects =>
+        _subjects?.Where(s => s.RequiresEnrollment).ToList() ?? [];
+
+    private List<SchoolCollab.Students.Core.DTOs.StudentSubjectEnrollmentDto> AssumedSubjects =>
+        _subjects?.Where(s => !s.RequiresEnrollment).ToList() ?? [];
+
+    private string RequiredHint =>
+        RequiredSubjects is { Count: > 0 } required
+            ? $"{required.Count(s => s.IsEnrolled)} of {required.Count} enrolled"
+            : string.Empty;
+
+    private string AssumedHint =>
+        AssumedSubjects is { Count: > 0 } assumed ? $"included with the grade · {assumed.Count}" : string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -515,13 +964,18 @@
             _streamNames = (streamsTask.Result ?? Array.Empty<CodedValueDto>())
                 .ToDictionary(s => s.Id, s => s.Name);
 
-            // 3. Guardian link list (page-owned, replaces the deprecated
-            //    <GuardiansTab>). The list is used by the StudentGuardiansList
-            //    below the title row.
+            // 3. Guardian link list (page-owned; rendered as cards in the main column).
             await LoadGuardiansAsync(ct);
 
             // 3b. Contact change history for this student.
             await LoadContactHistoryAsync(ct);
+
+            // 3c. The student's OWN current contacts (§1.6). The audit above documented a list this page
+            //     never showed; both now sit in the same column, adjacent.
+            await LoadContactsAsync(ct);
+
+            // 3d. The §6 subject union for the active placement's grade (§1.5).
+            await LoadSubjectsAsync(ct);
 
             // 4. Activity Groups the student is an active member of (spec
             //    §3.6 FR-28). Loaded alongside the guardians list; the section
@@ -651,16 +1105,16 @@
 
     // ── Guardian link handlers (page-owned, immediate persist) ──
     //
-    // Replaces the deprecated <GuardiansTab>. Each action is
-    // IMMEDIATE — the view page has no Save flow of its own, so
-    // the link / unlink / edit lands the moment the user confirms
-    // the dialog. The page reloads the list on success so the
-    // StudentGuardiansList re-renders without a full page refresh.
+    // Each action is IMMEDIATE — the view page has no Save flow of
+    // its own, so the link / unlink / edit lands the moment the user
+    // confirms the dialog. The page reloads the list on success so
+    // the guardian cards re-render without a full page refresh.
     //
     // "Manage" opens GuardianPickerDialog (the same dialog the
     // wizard uses for adding multiple guardians to a student);
-    // "Edit" opens GuardianFormDialog in ForEdit mode; "Remove"
-    // is a single API call. The per-row relationship / role /
+    // "Edit link…" opens GuardianFormDialog in ForEdit mode; "Remove
+    // link…" is a single API call, confirmed by RowActionsMenu because
+    // it is a destructive row action. The per-row relationship / role /
     // emergency flag changes go through
     // Api.UpdateGuardianLinkAsync (PUT /students/{studentId}/guardians/{guardianId}).
 
@@ -810,20 +1264,20 @@
 
     /// <summary>
     /// Opens the read-only <see cref="GuardianContactsDialog"/> for a
-    /// guardian whose row shows the <c>View all (N) contacts</c> anchor
-    /// (TotalContactCount &gt; 3 — spec 2026-07-27 §4.4 / §4.5). The
-    /// grid raises this callback; the page owns the dialog open since
-    /// <see cref="StudentGuardiansList"/> is presentational only.
+    /// guardian whose card shows the <c>View all (N) contacts</c> chip
+    /// (HasMoreContacts — spec 2026-07-27 §4.4 / §4.5). The card's chip
+    /// calls this; the page owns the dialog open since the card is
+    /// presentational only.
     /// Title is the salutation-aware guardian name; subtitle is
     /// <c>"Relationship · Role"</c> when the relationship name resolves,
     /// otherwise just the role. Mirrors the name-format used by the
-    /// guardians grid (title + DisplayName-or-First+Last).
+    /// guardian card (title + DisplayName-or-First+Last).
     /// </summary>
     private async Task OnViewAllContactsAsync(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto link)
     {
         if (_disposed) return;
 
-        // Mirrors StudentGuardiansList.FormatGuardianName: prefer
+        // Mirrors the card's name resolution: prefer
         // DisplayName; fall back to "First Last"; prepend salutation.
         var baseName = string.IsNullOrWhiteSpace(link.DisplayName)
             ? $"{link.FirstName} {link.LastName}".Trim()
@@ -925,16 +1379,15 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    // v5 FluentBadge carries colour outside Appearance (MigrationFluentBadge.md):
-    // Accent and Neutral both map to BadgeAppearance.Filled.
-    private static BadgeAppearance ChangeKindBadgeAppearance(string changeKind)
-        => changeKind == "Deleted" ? BadgeAppearance.Filled : BadgeAppearance.Filled;
-
-    // v4 highlighted the Deleted entry (Accent) against the ordinary Updated one
-    // (Neutral); v5 carries that in BadgeColor, so a removal reads as the destructive
-    // event it is and stays distinct from an update.
-    private static BadgeColor ChangeKindBadgeColor(string changeKind)
-        => changeKind == "Deleted" ? BadgeColor.Danger : BadgeColor.Subtle;
+    // A contact-history entry is Added / Updated / Deleted. A removal is the destructive one and must
+    // read as such; the other two are ordinary events. These are STATES, so they use the shared pill
+    // vocabulary rather than a FluentBadge whose Success rule is misspelled in v5.
+    private static string ChangeKindPillClass(string changeKind) => changeKind switch
+    {
+        "Deleted" => "status-pill--danger",
+        "Added" => "status-pill--success",
+        _ => "status-pill--neutral",
+    };
 
     private static string FormatHistoryValue(string? channel, string? value, string? countryCode)
     {
@@ -1026,7 +1479,7 @@
     /// Active groups are accented; inactive fall back to neutral so the section's
     /// visual language matches the group details page.
     /// </summary>
-    private static Appearance GroupStatusBadge(bool isActive) => isActive ? Appearance.Accent : Appearance.Neutral;
+
 
     public void Dispose()
     {
@@ -1034,5 +1487,47 @@
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+    }
+
+    private async Task LoadContactsAsync(CancellationToken ct)
+    {
+        try
+        {
+            _contacts = await Api.ListContactsAsync(ContactOwnerType.Student, Id, ct) ?? [];
+            _contactsError = null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load contacts for student {StudentId}", Id);
+            _contactsError = "Could not load this student's contacts.";
+        }
+    }
+
+    /// <summary>
+    /// The §6 "my subjects" union for the student's active placement. The grade is derived server-side,
+    /// so a mismatch cannot produce a silently empty list here.
+    /// </summary>
+    private async Task LoadSubjectsAsync(CancellationToken ct)
+    {
+        try
+        {
+            _subjects = (await Api.ListStudentSubjectsAsync(Id, ct))?.ToList();
+            _subjectsError = null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load subjects for student {StudentId}", Id);
+            _subjectsError = "Could not load this student's subjects.";
+        }
     }
 }

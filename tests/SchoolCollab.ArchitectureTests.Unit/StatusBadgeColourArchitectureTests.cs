@@ -22,6 +22,15 @@ namespace SchoolCollab.ArchitectureTests.Unit;
 /// pages whose bUnit fixtures need a full API/feature-flag scaffold; for those, this table is the pin
 /// that fails if a colour is dropped again — the exact regression, since dropping a <c>Color</c>
 /// binding compiles.</para>
+///
+/// <para><b>Known limitation, found 2026-10-27 while redesigning the student view:</b> FluentUI 5.0.1
+/// ships the success rule misspelled — <c>fluent-badge[color=sucess]</c>, verified against
+/// <c>microsoft.fluentui.aspnetcore.components/5.0.1</c>'s own stylesheet. So <c>BadgeColor.Success</c>
+/// paints NOTHING, and every pinned "Success : Subtle" pair below renders two identical
+/// <c>Filled</c> chips. This test's premise is therefore false for those sites: it proves the binding
+/// is present, not that it works. The student view stopped using the pair altogether — its status is a
+/// <c>.status-pill</c> whose colours are app.css tokens — which is why its entries moved to
+/// <see cref="MovedToStatusPill"/>. Migrating the rest is deferred, not forgotten.</para>
 /// </summary>
 [TestClass]
 public class StatusBadgeColourArchitectureTests
@@ -36,8 +45,6 @@ public class StatusBadgeColourArchitectureTests
             ["Color=\"@(_group.IsActive ? BadgeColor.Success : BadgeColor.Subtle)\""]),
         ("src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroups.razor",
             ["Color=\"@(context.IsActive ? BadgeColor.Success : BadgeColor.Subtle)\""]),
-        ("src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor",
-            ["Color=\"@(context.IsActive ? BadgeColor.Success : BadgeColor.Subtle)\""]),
         ("src/Settings/SchoolCollab.Settings.Application/Components/Pages/ConfigFlags/Index.razor",
             ["Color=\"@(context.IsEnabled ? BadgeColor.Success : BadgeColor.Subtle)\""]),
         ("src/Settings/SchoolCollab.Settings.Application/Components/Pages/ConfigFlagDetail.razor",
@@ -48,9 +55,6 @@ public class StatusBadgeColourArchitectureTests
         ("src/Students/SchoolCollab.Students.Application/Components/Pages/ActivityGroups/ActivityGroupDetails.razor",
             ["Color=\"@MemberStatusColor(m.Status)\"",
              "status == \"Active\" ? BadgeColor.Success : BadgeColor.Subtle"]),
-        ("src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor",
-            ["Color=\"@ChangeKindBadgeColor(entry.ChangeKind)\"",
-             "changeKind == \"Deleted\" ? BadgeColor.Danger : BadgeColor.Subtle"]),
         ("src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/Periods.razor",
             ["Color=\"@GetStatusColor(context.Status)\"",
              "\"Active\"    => BadgeColor.Success,",
@@ -69,6 +73,28 @@ public class StatusBadgeColourArchitectureTests
              "\"Completed\" => null,"]),
     ];
 
+    /// <summary>
+    /// The sites that moved OFF the flattened <c>FluentBadge</c> pair and onto the shared
+    /// <c>.status-pill</c> (app.css + <c>--status-*</c> tokens). They carry the same obligation the table
+    /// above does — a status chip must be able to distinguish its states — through a mechanism that
+    /// actually paints: the pill declares both halves of its own colour instead of asking FluentUI for a
+    /// badge variant whose rule is misspelled upstream.
+    /// <para>
+    /// Asserted on the VARIANT CLASSES and the dot, not on the labels: the wording is free to change, the
+    /// requirement that each state stays visually distinct is not.
+    /// </para>
+    /// </summary>
+    private static readonly (string File, string[] Required)[] MovedToStatusPill =
+    [
+        // Student view: the enrollment status (Enrolled / Not enrolled) and the contact-change kind
+        // (Added / Updated / Deleted) were the two flattened badges on this page.
+        ("src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor",
+            ["status-pill status-pill--success",
+             "status-pill status-pill--warning",
+             "status-pill status-pill--danger",
+             "status-pill status-pill--neutral",
+             "class=\"status-pill__dot\" aria-hidden=\"true\""]),
+    ];
     [TestMethod]
     public void FlattenedStatusBadges_CarryTheirV4SemanticsInBadgeColor()
     {
@@ -92,10 +118,29 @@ public class StatusBadgeColourArchitectureTests
             }
         }
 
+        foreach (var (file, required) in MovedToStatusPill)
+        {
+            var path = Path.Combine(RepoRoot, file.Replace('/', Path.DirectorySeparatorChar));
+
+            if (!File.Exists(path))
+            {
+                offenders.Add($"{file} — file not found; the pinned site moved.");
+                continue;
+            }
+
+            var text = File.ReadAllText(path);
+
+            foreach (var snippet in required.Where(s => !text.Contains(s, StringComparison.Ordinal)))
+            {
+                offenders.Add($"{file} — missing {snippet} (the .status-pill replacement for the "
+                    + "flattened badge; its colours are app.css tokens and DO paint)");
+            }
+        }
+
         offenders.Should().BeEmpty(
             "the flattened Accent/Neutral status badges must carry their semantics in BadgeColor " +
-            "(MigrationFluentBadge.md §Color); dropping it restores two visually identical status chips " +
-            "and compiles clean");
+            "(MigrationFluentBadge.md §Color) or, on a migrated surface, in the shared .status-pill; " +
+            "dropping either restores two visually identical status chips and compiles clean");
     }
 
     private static string FindRepoRoot()
