@@ -16,6 +16,24 @@ for all operations — it infers the repo from `git remote -v` when run inside a
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`.
 - **Close**: `gh issue close <number> --comment "..."`.
 
+## Closing an issue when the work lands
+
+**How a ticket closes in this repo is settled elsewhere — follow it, do not re-derive it.** Acceptance
+closes a round's tickets; the rule and its detail live in
+`documents/solution/spec-and-ticket-skills-in-the-orchestrator.md` §6 (owner 2026-10-21) and
+`documents/rounds/README.md`.
+
+What this file adds is the trap, because it costs a wrongly-closed ticket:
+
+- GitHub also honours closing keywords — `close`/`closes`/`closed`, `fix`/`fixes`/`fixed`,
+  `resolve`/`resolves`/`resolved` — written as `KEYWORD #<n>` in a **PR description or a commit message**.
+  Those fire when the PR merges into the default branch: before acceptance, and whether or not the ticket
+  was deferred. Do not use one as the close gesture here.
+- A **PR title is never scanned** for a keyword, and the `(#447)` in a squash-merge title is the
+  **pull-request** number, not an issue.
+- Tests and CI never close issues: a close carries an evidence row and a verdict, and a build outcome is
+  neither.
+
 ## Repo specifics
 
 - **Durable specs stay in `documents/specs/`.** The tracker issue is the work item; the spec file is
