@@ -14,6 +14,60 @@ entry here shrinks to a pointer at that check.
 
 ---
 
+## A script that has never run is not a deliverable (2026-10-28)
+
+**Rule.** A seed, fixture, migration or one-off helper script is delivered only once it has **executed against a
+real database** and its own self-check agreed with what the documentation claims. Writing it is not delivering
+it: a script is the one artifact where "it looks right" and "it runs" have no relationship at all — nothing in
+the build compiles it, no test imports it, and it is usually the only code in the change that nothing else ever
+calls.
+
+**Evidence.** L2b shipped `student-view-probe-seed.{students,assignments}.sql` — a documented expected-count
+table, a self-checking fold, and two halves spanning two databases — and the implementer never ran either half.
+The first execution failed on its first insert: `null value in column "gender_coded_value_id" of relation
+"students" violates not-null constraint` (the column is NOT NULL per migration
+`20260716183515_RequireStudentDobAndGender`). The second, once it ran, printed `review_required 3` where its own
+runbook documented `2`, because the "awaiting submission" fixture carried `mandatory_review = true` and doubled
+as a second review fixture. Both defects survived four review seats — plan gate, worker, static reviewer,
+acceptance — and both surfaced inside a minute of execution.
+
+**Trigger.** You are about to hand back, accept, or merge any `.sql`, `.ps1`, `.sh` or similar one-off script —
+especially a dev-only probe seed, where "dev-only" is exactly why nobody thought to run it. The cheap proof is
+one execution against the target database with its self-check output pasted into the round doc. If it cannot run
+in this environment, that is a finding to report, never a reason to accept it.
+
+---
+
+## A correction is not finished until every copy of the old value is gone (2026-10-28)
+
+**Rule.** When a review finding corrects a **value** — a route, a signature, a file path, a claim about another
+assembly — grep the round doc for the old value and fix **every** occurrence before re-submitting. A round doc
+states the same fact in four places (the plan's prose, the expected-files table, the criteria, the test rows),
+and the table is the one a worker implements from; the criteria are not.
+
+**Evidence.** L2b's plan gate (iteration 1) found that the client's wire path omitted the `/assignments`
+segment. The amendment fixed C8 to `assignments/{studentId}/assignment-stats` and fixed the test row — and left
+the **implementation row** saying `{studentId}/assignment-stats`. Iteration 2 returned NO-GO on exactly that
+contradiction: *"the row the worker implements from still says the wrong wire path"*. The residue was not
+cosmetic — the panel would have rendered "unavailable" against a **healthy** endpoint, and C8's own test would
+have encoded the wrong path, so every test would have agreed with the bug. `grep -n 'assignment-stats' <round
+ doc>` after the amendment shows both strings side by side in one screen.
+
+**Trigger.** Any amendment after a gate NO-GO, a reviewer's `file:line` correction, or your own mid-plan
+change of mind. Before re-submitting, search the document for the value you just changed — a second hit that
+did not move is the defect. Distinct from *"A claim about the codebase is only as true as the search that
+produced it"*: that entry governs **making** a claim, this one governs **updating** one.
+
+**Why this is not promoted into a check.** It fired twice on the day it was written — a plan amendment that
+fixed a wire path in three places and left the fourth, then a corrected `NOT NULL` note sitting directly above
+its own stale "it is nullable in the schema" comment. Both times the catch was a **seat** (plan gate iteration
+2, then the acceptance seat), not a mechanism, and both times it landed before merge. The defect is semantic: no
+grep distinguishes a stale sentence from a deliberately quoted old value, and round docs legitimately quote old
+paths inside their gate transcripts. **The check is a seat, not a grep — do not "promote" this into a test that
+only matches wording.**
+
+---
+
 ## A source-string test can pass on a comment (2026-10-28)
 
 **Rule.** An assertion of the form "this `.razor` contains X" must match **markup** — a tag, an attribute, a
