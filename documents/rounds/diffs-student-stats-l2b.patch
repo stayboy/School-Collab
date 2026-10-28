@@ -1,0 +1,1813 @@
+diff --git a/documents/runbooks/student-view-probe-seed.assignments.sql b/documents/runbooks/student-view-probe-seed.assignments.sql
+new file mode 100644
+index 00000000..82385712
+--- /dev/null
++++ b/documents/runbooks/student-view-probe-seed.assignments.sql
+@@ -0,0 +1,137 @@
++-- Dev-only probe fixtures for the student-view assignment-stats panel (issue #444, layer L2b).
++-- The ASSIGNMENTS half: six assignments plus their recipient links, two submissions and two guardian gates,
++-- so every segment of both bars is non-zero and each rule the panel claims can be checked by eye.
++--
++-- WHY THIS FILE EXISTS AND IS NOT IN MigrationService: MigrationService ships to every environment, so probe
++-- fixtures would land in production (owner Q145).
++--
++-- Idempotent by FIXED GUIDS and PREFIXED ROWS: every row this script owns is deleted by id and re-inserted.
++-- Run it AFTER the students half, which creates the probe student and the guardian contact the recipient rows
++-- point at (ids are bare GUIDs — there is no cross-database foreign key):
++--   psql "$ASSIGNMENTS_DSN" -v tenant_id=<tenant-guid> -f documents/runbooks/student-view-probe-seed.assignments.sql
++-- See documents/runbooks/student-view-probe-seed.md.
++
++\set ON_ERROR_STOP on
++
++BEGIN;
++
++-- ── Owned rows, removed by id so a re-run converges ────────────────────────────────────────────────────────
++DELETE FROM guardian_submission_gates
++ WHERE id IN ('9a7e0000-0000-4000-8000-000000000001', '9a7e0000-0000-4000-8000-000000000002');
++DELETE FROM assignment_submissions
++ WHERE id IN ('45ba0000-0000-4000-8000-000000000001', '45ba0000-0000-4000-8000-000000000002');
++DELETE FROM assignment_recipients
++ WHERE id IN ('ac0a0000-0000-4000-8000-000000000001', 'ac0a0000-0000-4000-8000-000000000002',
++              'ac0a0000-0000-4000-8000-000000000003', 'ac0a0000-0000-4000-8000-000000000004',
++              'ac0a0000-0000-4000-8000-000000000005', 'ac0a0000-0000-4000-8000-000000000006');
++DELETE FROM assignments
++ WHERE id IN ('a50a0000-0000-4000-8000-000000000001', 'a50a0000-0000-4000-8000-000000000002',
++              'a50a0000-0000-4000-8000-000000000003', 'a50a0000-0000-4000-8000-000000000004',
++              'a50a0000-0000-4000-8000-000000000005', 'a50a0000-0000-4000-8000-000000000006');
++
++-- ── Six assignments: one per state the panel distinguishes ─────────────────────────────────────────────────
++-- status: 0 Draft, 1 Published, 2 Closed, 3 Scheduled, 4 Archived (AssignmentStatus).
++-- subject_coded_value_id is retained NOT NULL by the schema (kept for the MigrationService backfill), so it
++-- carries a fixed placeholder GUID; topic_id, grade_level_id and every other optional column stay NULL.
++INSERT INTO assignments (id, tenant_id, title, assignment_number, subject_coded_value_id,
++                         status, published_at, mandatory_review,
++                         created_by_teacher_id, created_at, updated_at)
++VALUES
++    -- 1. Draft: recipient-linked, never sent → Assigned only ("not sent" on the funnel).
++    ('a50a0000-0000-4000-8000-000000000001', :'tenant_id'::uuid, 'PROBE — not sent (draft)',
++     'PROBE-01', '50000000-0000-4000-8000-000000000001', 0, NULL, true,
++     '70000000-0000-4000-8000-000000000001', now(), now()),
++
++    -- 2. Published, mandatory review, gate REVIEWED → Sent out + Review required + Reviewed.
++    ('a50a0000-0000-4000-8000-000000000002', :'tenant_id'::uuid, 'PROBE — review gate cleared',
++     'PROBE-02', '50000000-0000-4000-8000-000000000001', 1, now() - interval '10 days', true,
++     '70000000-0000-4000-8000-000000000001', now(), now()),
++
++    -- 3. Published, nothing submitted → Sent out, counted in "awaiting submission".
++    --    mandatory_review is FALSE on purpose: a gated assignment belongs in "awaiting review" and must
++    --    never be a second fixture for it. Set true here and the review axis reads 3 required, which
++    --    contradicts the expected counts this script asserts at the bottom.
++    ('a50a0000-0000-4000-8000-000000000003', :'tenant_id'::uuid, 'PROBE — awaiting submission',
++     'PROBE-03', '50000000-0000-4000-8000-000000000001', 1, now() - interval '9 days', false,
++     '70000000-0000-4000-8000-000000000001', now(), now()),
++
++    -- 4. Published, submission FINALIZED but still ReviewState.Pending → Submitted, "awaiting marking".
++    ('a50a0000-0000-4000-8000-000000000004', :'tenant_id'::uuid, 'PROBE — awaiting marking',
++     'PROBE-04', '50000000-0000-4000-8000-000000000001', 1, now() - interval '8 days', false,
++     '70000000-0000-4000-8000-000000000001', now(), now()),
++
++    -- 5. Published, submission finalized AND Graded → Submitted + Marked.
++    ('a50a0000-0000-4000-8000-000000000005', :'tenant_id'::uuid, 'PROBE — marked',
++     'PROBE-05', '50000000-0000-4000-8000-000000000001', 1, now() - interval '7 days', false,
++     '70000000-0000-4000-8000-000000000001', now(), now()),
++
++    -- 6. Published, mandatory review, gate NOT reviewed → Review required, "awaiting review"
++    --    (and it must NOT count in awaiting submission — the gate is an overlay, not a funnel step).
++    ('a50a0000-0000-4000-8000-000000000006', :'tenant_id'::uuid, 'PROBE — held by the review gate',
++     'PROBE-06', '50000000-0000-4000-8000-000000000001', 1, now() - interval '6 days', true,
++     '70000000-0000-4000-8000-000000000001', now(), now());
++
++-- ── Recipient links: what makes an assignment "Assigned" (AssignmentRecipient.WardStudentId) ───────────────
++-- owner_type 1 = ContactOwnerType.Guardian; owner_id is the guardian from the students half, contact_id is
++-- that guardian's contact. channel 0 = Email, so short_link_code stays NULL and the global unique index on it
++-- is never involved. role 0 = GuardianRole.Primary.
++INSERT INTO assignment_recipients (id, tenant_id, assignment_id, owner_type, owner_id, ward_student_id,
++                                   contact_id, channel, role, created_at, updated_at)
++SELECT link.id, :'tenant_id'::uuid, link.assignment_id, 1,
++       '9c0a0000-0000-4000-8000-000000000001', '5c0a0000-0000-4000-8000-000000000001',
++       'cc0a0000-0000-4000-8000-000000000002', 0, 0, now(), now()
++FROM (VALUES
++        ('ac0a0000-0000-4000-8000-000000000001'::uuid, 'a50a0000-0000-4000-8000-000000000001'::uuid),
++        ('ac0a0000-0000-4000-8000-000000000002'::uuid, 'a50a0000-0000-4000-8000-000000000002'::uuid),
++        ('ac0a0000-0000-4000-8000-000000000003'::uuid, 'a50a0000-0000-4000-8000-000000000003'::uuid),
++        ('ac0a0000-0000-4000-8000-000000000004'::uuid, 'a50a0000-0000-4000-8000-000000000004'::uuid),
++        ('ac0a0000-0000-4000-8000-000000000005'::uuid, 'a50a0000-0000-4000-8000-000000000005'::uuid),
++        ('ac0a0000-0000-4000-8000-000000000006'::uuid, 'a50a0000-0000-4000-8000-000000000006'::uuid)
++     ) AS link(id, assignment_id);
++
++-- ── Two submissions: one finalized-but-unmarked, one finalized-and-graded ─────────────────────────────────
++-- review_state: 0 Pending, 1 Reviewed, 2 Graded (ReviewState). Marked requires finalized_at AND Graded —
++-- exactly the pair the panel's "awaiting marking" segment depends on.
++INSERT INTO assignment_submissions (id, tenant_id, assignment_id, student_id, last_submitted_at,
++                                    finalized_at, review_state, sign_off_state, created_at, updated_at)
++VALUES
++    ('45ba0000-0000-4000-8000-000000000001', :'tenant_id'::uuid,
++     'a50a0000-0000-4000-8000-000000000004', '5c0a0000-0000-4000-8000-000000000001',
++     now() - interval '5 days', now() - interval '5 days', 0, 0, now(), now()),
++    ('45ba0000-0000-4000-8000-000000000002', :'tenant_id'::uuid,
++     'a50a0000-0000-4000-8000-000000000005', '5c0a0000-0000-4000-8000-000000000001',
++     now() - interval '5 days', now() - interval '5 days', 2, 0, now(), now());
++
++-- ── Two guardian gates: one reviewed (Reviewed), one open (Awaiting review) ────────────────────────────────
++INSERT INTO guardian_submission_gates (id, tenant_id, assignment_id, student_id, reviewed_by_guardian_id,
++                                       reviewed_at, review_comment, submission_enabled_for_student,
++                                       created_at, updated_at)
++VALUES
++    ('9a7e0000-0000-4000-8000-000000000001', :'tenant_id'::uuid,
++     'a50a0000-0000-4000-8000-000000000002', '5c0a0000-0000-4000-8000-000000000001',
++     '9c0a0000-0000-4000-8000-000000000001', now() - interval '10 days', 'PROBE — cleared', true,
++     now(), now()),
++    ('9a7e0000-0000-4000-8000-000000000002', :'tenant_id'::uuid,
++     'a50a0000-0000-4000-8000-000000000006', '5c0a0000-0000-4000-8000-000000000001',
++     NULL, NULL, NULL, false, now(), now());
++
++COMMIT;
++
++-- What the panel must read for this fixture (the same fold GetStudentAssignmentStatsQueryHandler performs):
++--   Assigned 6 · Sent out 5 · Submitted 2 · Marked 1 · Review required 2 · Reviewed 1
++--   funnel: 1 not sent, 3 awaiting submission, 1 awaiting marking, 1 marked  → sums to Assigned (6)
++--   review: 1 of 2 reviewed, 1 awaiting — "required on 2 of the 5 sent", never "of 6".
++SELECT
++    count(*)                                                                        AS assigned,
++    count(*) FILTER (WHERE a.status = 1)                                            AS sent_out,
++    count(*) FILTER (WHERE s.finalized_at IS NOT NULL)                              AS submitted,
++    count(*) FILTER (WHERE s.finalized_at IS NOT NULL AND s.review_state = 2)       AS marked,
++    count(*) FILTER (WHERE a.status = 1 AND a.mandatory_review)                     AS review_required,
++    count(*) FILTER (WHERE a.status = 1 AND a.mandatory_review AND g.reviewed_at IS NOT NULL) AS reviewed
++FROM assignments a
++JOIN assignment_recipients r ON r.assignment_id = a.id AND r.ward_student_id = '5c0a0000-0000-4000-8000-000000000001'
++LEFT JOIN assignment_submissions s ON s.assignment_id = a.id AND s.student_id = r.ward_student_id
++LEFT JOIN guardian_submission_gates g ON g.assignment_id = a.id AND g.student_id = r.ward_student_id
++WHERE a.id IN ('a50a0000-0000-4000-8000-000000000001', 'a50a0000-0000-4000-8000-000000000002',
++               'a50a0000-0000-4000-8000-000000000003', 'a50a0000-0000-4000-8000-000000000004',
++               'a50a0000-0000-4000-8000-000000000005', 'a50a0000-0000-4000-8000-000000000006');
+diff --git a/documents/runbooks/student-view-probe-seed.md b/documents/runbooks/student-view-probe-seed.md
+new file mode 100644
+index 00000000..f5624686
+--- /dev/null
++++ b/documents/runbooks/student-view-probe-seed.md
+@@ -0,0 +1,132 @@
++# Runbook — seed the student-view assignment-stats probe
++
++**Dev-only.** Two SQL scripts that put one student, one guardian and six assignments into a developer's local
++AppHost databases, so the student view's **Assignments** rail panel (issue #444, layer L2b) can be observed
++against real counts.
++
++They are **never** part of `MigrationService` (owner Q145): that runs in every environment, and a probe
++student plus half a dozen fake assignments would ship to production. Nothing here is referenced by a test —
++the automated evidence is the bUnit/API suites; this script exists for the one thing they cannot show, a real
++browser against a real database (`.github/copilot/rules/testing.md` § "UI rounds need one live pass").
++
++## Symptom
++
++The student view's **Assignments** rail panel (`/students/{id}`) reads wrong or empty while the endpoint is
++healthy, or a change to the panel cannot be judged at all because no student in the dev database has the
++assignment states the panel distinguishes. Three shapes:
++
++- **"Assignment stats are unavailable right now."** on a student the viewer expects to have assignments —
++  either the hop failed (check `assignments-api` is running and its log for the 502) or the probe fixtures
++  below were never seeded for the **current tenant**.
++- **A panel of zeros** for a student who has assignments — the fixtures exist under a different tenant id, which
++  is the most common cause: the ids are fixed, the tenant is a variable.
++- **A funnel or review bar that cannot be checked by eye** — the seeded student has only one assignment state, so
++  every segment but one is zero. Re-seed with both halves of this runbook to get one of each state.
++
++## What it seeds, and what each row proves
++
++| Row | State | Panel consequence |
++|---|---|---|
++| `PROBE — not sent (draft)` | `Status = Draft` | counted in **Assigned** only → the funnel's *not sent* segment |
++| `PROBE — review gate cleared` | published, `MandatoryReview = true`, gate **reviewed** | **Sent out** + **Review required** + **Reviewed** |
++| `PROBE — awaiting submission` | published, no submission | Sent out → *awaiting submission* |
++| `PROBE — awaiting marking` | published, submission finalized, `ReviewState = Pending` | **Submitted** → *awaiting marking* (never *marked*) |
++| `PROBE — marked` | published, submission finalized, `ReviewState = Graded` | Submitted + **Marked** |
++| `PROBE — held by the review gate` | published, `MandatoryReview = true`, gate **not reviewed** | Sent out + Review required → *awaiting review* |
++
++The expected counts are therefore **Assigned 6 · Sent out 5 · Submitted 2 · Marked 1 · Review required 2 ·
++Reviewed 1**, which renders as:
++
++- funnel: `1 not sent`, `3 awaiting submission`, `1 awaiting marking`, `1 marked` — summing to **Assigned (6)**;
++- review bar: `1 of 2 reviewed · 1 awaiting — required on 2 of the 5 sent` (**not** "of 6": a draft cannot be
++  gated for review).
++
++The guardian exists so the deferred **guardian-card** probe (Q141 of the page round) runs in the same AppHost
++session: one Primary guardian, one SMS contact, linked to the probe student.
++
++## Run it
++
++1. Start the AppHost and wait until the databases are up (the Resource page shows `students-db` and
++   `assignments-db` healthy with their connection strings).
++2. Pick the tenant you are signed in as. The dev tenant switcher shows the name; get the id from the settings
++   database:
++
++   ```bash
++   psql "$SETTINGS_DSN" -c "select id, name from tenants order by name;"
++   ```
++
++   Seeded tenants are `Hydeson School` and `Little Legends`. Tenant ids are random GUIDs, which is why the
++   scripts take one as a variable rather than hard-coding it.
++3. Take the two Postgres connection strings from the Aspire dashboard (`studentsdb` / `assignmentsdb` — the
++   dashboard shows them with the password redacted, so copy them from the app host's own configuration or from
++   the container's `POSTGRES_*` values) and export them:
++
++   ```bash
++   export STUDENTS_DSN="host=localhost port=<p> dbname=students-db user=postgres password=<...>"
++   export ASSIGNMENTS_DSN="host=localhost port=<p> dbname=assignments-db user=postgres password=<...>"
++   ```
++
++4. Run the two halves **in this order** — the assignments half points its recipient rows at the student and
++   the guardian contact the students half creates:
++
++   ```bash
++   psql "$STUDENTS_DSN"    -v tenant_id=<tenant-guid> -f documents/runbooks/student-view-probe-seed.students.sql
++   psql "$ASSIGNMENTS_DSN" -v tenant_id=<tenant-guid> -f documents/runbooks/student-view-probe-seed.assignments.sql
++   ```
++
++   Pass the **bare** guid: the scripts interpolate it as `:'tenant_id'`, which adds the SQL quotes itself.
++   Passing `-v tenant_id="'<guid>'"` would arrive double-quoted and the cast to `uuid` would fail.
++5. Open `/students/5c0a0000-0000-4000-8000-000000000001` (the first script prints that id).
++
++### If step 4 aborts on `gender_coded_value_id`
++
++`students.gender_coded_value_id` is **NOT NULL**, and coded values live in `settings-db`, which the students
++connection cannot see — so the script cannot look one up itself. It handles that two ways:
++
++- **By default it inherits** the value from any existing student in the same database
++  (`SELECT gender_coded_value_id FROM students WHERE gender_coded_value_id IS NOT NULL LIMIT 1 \gset`).
++  On a dev database that already has students — the normal case — you need to do nothing.
++- **On a database with no students**, the inherit step finds nothing and the script stops with
++  `seed: no gender_id available — pass -v gender_id=<guid>`. Take a real id from the tenant's coded values
++  and pass it:
++
++  ```bash
++  psql "$SETTINGS_DSN" -tAc "select id from coded_values where code ilike 'male' or code ilike 'female' limit 1"
++  psql "$STUDENTS_DSN" -v tenant_id=<tenant-guid> -v gender_id=<that-guid> \
++       -f documents/runbooks/student-view-probe-seed.students.sql
++  ```
++
++Pass the bare GUID, like `tenant_id`: the script interpolates it as `:'gender_id'` and adds the quotes.
++
++## Re-running
++
++Both scripts **delete their own rows by fixed id and re-insert**. Re-running converges on the fixture state; it
++never duplicates, and it never touches a row it did not create. To probe a different tenant, re-run both with
++that tenant's id — the delete/re-insert carries the new `tenant_id` through.
++
++To remove the fixture entirely:
++
++```sql
++DELETE FROM guardian_submission_gates WHERE id IN ('9a7e0000-0000-4000-8000-000000000001','9a7e0000-0000-4000-8000-000000000002');
++DELETE FROM assignment_submissions    WHERE id IN ('45ba0000-0000-4000-8000-000000000001','45ba0000-0000-4000-8000-000000000002');
++DELETE FROM assignment_recipients     WHERE id LIKE 'ac0a0000-%';
++DELETE FROM assignments               WHERE id LIKE 'a50a0000-%';
++DELETE FROM contacts                  WHERE id LIKE 'cc0a0000-%';
++DELETE FROM student_guardians         WHERE id LIKE '1c0a0000-%';
++DELETE FROM guardians                 WHERE id LIKE '9c0a0000-%';
++DELETE FROM students                  WHERE id LIKE '5c0a0000-%';
++```
++
++(The last four run against `students-db`, the first four against `assignments-db`.)
++
++## What the probe is looking at
++
++1. **The counts.** The six numbers match the table above, and the funnel's four segments sum to *Assigned*.
++2. **The review denominator.** The foot line says "required on 2 of the 5 sent" — the panel never divides by
++   *Assigned*.
++3. **Degradation.** Stop `assignments-api` in the Aspire dashboard and reload: the panel shows one muted line,
++   "Assignment stats are unavailable right now.", with **no numbers at all**, and every other block still
++   renders. Start it again and reload to confirm the panel comes back.
++4. **Colour is not the message.** Every segment is named in the legend or the foot line.
++
++Record what you saw (and any deviation) in the round doc — a probe that is not written down did not happen.
+diff --git a/documents/runbooks/student-view-probe-seed.students.sql b/documents/runbooks/student-view-probe-seed.students.sql
+new file mode 100644
+index 00000000..627f73a0
+--- /dev/null
++++ b/documents/runbooks/student-view-probe-seed.students.sql
+@@ -0,0 +1,81 @@
++-- Dev-only probe fixtures for the student-view assignment-stats panel (issue #444, layer L2b).
++--
++-- WHY THIS FILE EXISTS AND IS NOT IN MigrationService: MigrationService ships to every environment, so a
++-- fixture set that names a probe student and half a dozen fake assignments would land in production. This
++-- script runs by hand against a developer's local AppHost database (owner Q145).
++--
++-- Idempotent by FIXED GUIDS and PREFIXED ROWS: every row this script owns is deleted by id and re-inserted,
++-- so a re-run converges on the intended state instead of duplicating. Nothing else is touched.
++--
++-- Run with (from the repository root; see documents/runbooks/student-view-probe-seed.md):
++--   psql "$STUDENTS_DSN"    -v tenant_id=<tenant-guid> -f documents/runbooks/student-view-probe-seed.students.sql
++--   psql "$ASSIGNMENTS_DSN" -v tenant_id=<tenant-guid> -f documents/runbooks/student-view-probe-seed.assignments.sql
++--
++-- The two halves exist because the fixtures span two databases: the student and its guardian live in
++-- students-db, the assignments and submissions in assignments-db. The probe student's id is shared between
++-- them as a bare GUID (there is no cross-database foreign key).
++
++\set ON_ERROR_STOP on
++
++BEGIN;
++
++-- ── Owned rows, removed by id so a re-run converges ────────────────────────────────────────────────────────
++DELETE FROM contacts          WHERE id IN ('cc0a0000-0000-4000-8000-000000000001',
++                                            'cc0a0000-0000-4000-8000-000000000002');
++DELETE FROM student_guardians WHERE id = '1c0a0000-0000-4000-8000-000000000001';
++DELETE FROM guardians         WHERE id = '9c0a0000-0000-4000-8000-000000000001';
++DELETE FROM students          WHERE id = '5c0a0000-0000-4000-8000-000000000001';
++
++-- ── The probe student ────────────────────────────────────────────────────────────────────────────────────────
++-- `gender_coded_value_id` is NOT NULL (migration 20260716183515_RequireStudentDobAndGender), so a NULL
++-- insert aborts the whole script. Coded values live in settings-db, which this connection cannot
++-- see, so the value cannot be looked up from here: inherit it from any existing student in this database
++-- (the usual case), or pass -v gender_id=<guid>. Against a database with no students you must pass it.
++\if :{?gender_id}
++\else
++  SELECT gender_coded_value_id AS gender_id FROM students
++   WHERE gender_coded_value_id IS NOT NULL LIMIT 1 \gset
++\endif
++\if :{?gender_id}
++\else
++  \echo 'seed: no gender_id available - pass -v gender_id=<guid> (see the runbook).'
++  \quit 1
++\endif
++
++INSERT INTO students (id, tenant_id, student_number, first_name, last_name, date_of_birth,
++                      gender_coded_value_id, is_deleted, created_at, updated_at)
++VALUES ('5c0a0000-0000-4000-8000-000000000001', :'tenant_id'::uuid, 'SC-PROBE-0001',
++        'Probe', 'Assignment Student', DATE '2013-04-18',
++        :'gender_id'::uuid, false, now(), now());
++
++-- ── A guardian, so the deferred guardian-card probe (Q141) runs in the same AppHost session ─────────────────
++INSERT INTO guardians (id, tenant_id, first_name, last_name, display_name,
++                       title_coded_value_id, address, community_id, is_deleted, created_at, updated_at)
++VALUES ('9c0a0000-0000-4000-8000-000000000001', :'tenant_id'::uuid, 'Thandi', 'Probe',
++        'Thandi Probe', NULL, NULL, NULL, false, now(), now());
++
++-- role = 0 is GuardianRole.Primary; a Primary guardian is what the review gate's sign-off speaks for.
++INSERT INTO student_guardians (id, tenant_id, student_id, guardian_id, relationship_coded_value_id,
++                               role, is_emergency_contact, created_by_guardian_id, created_at, updated_at)
++VALUES ('1c0a0000-0000-4000-8000-000000000001', :'tenant_id'::uuid,
++        '5c0a0000-0000-4000-8000-000000000001', '9c0a0000-0000-4000-8000-000000000001',
++        NULL, 0, true, NULL, now(), now());
++
++-- ── Contacts: one the student owns, one the guardian owns ───────────────────────────────────────────────────
++-- owner_type 0 = ContactOwnerType.Student, 1 = Guardian. channel 0 = Email, 1 = SMS.
++-- The guardian's contact id is the one the assignments half uses as a recipient's contact_id.
++INSERT INTO contacts (id, tenant_id, owner_type, owner_id, channel, value, label,
++                      country_code, display_order, is_verified, is_deleted, created_at, updated_at)
++VALUES ('cc0a0000-0000-4000-8000-000000000001', :'tenant_id'::uuid, 0,
++        '5c0a0000-0000-4000-8000-000000000001', 0, 'probe.student@example.org', 'School account',
++        NULL, 0, true, false, now(), now()),
++       ('cc0a0000-0000-4000-8000-000000000002', :'tenant_id'::uuid, 1,
++        '9c0a0000-0000-4000-8000-000000000001', 1, '0821234567', NULL,
++        '+27', 0, true, false, now(), now());
++
++COMMIT;
++
++-- What the run should print: one row, the probe student, ready to open at /students/<id>.
++SELECT s.id AS probe_student_id, s.student_number, s.tenant_id
++FROM students s
++WHERE s.id = '5c0a0000-0000-4000-8000-000000000001';
+diff --git a/documents/solution/student-view-redesign.md b/documents/solution/student-view-redesign.md
+index 2612876a..4fdfa5df 100644
+--- a/documents/solution/student-view-redesign.md
++++ b/documents/solution/student-view-redesign.md
+@@ -696,3 +696,78 @@ is not the theme.
+ 
+ **Still not live-verified:** the guardian **cards** and the per-card contact chips — none of the three seeded
+ students has a guardian, so that markup is covered by `StudentViewRendersTests` only.
++
++### 8.7 Layer 2 (L2b) — the assignment-stats panel, shipped as its own stacked layer
++
++**Scope.** Step 9 of §5 — the one block on this page that is not reuse (§1.7). It shipped in two layers
++because the Assignments side is a contract of its own: **L2a** (merged) added the grouped-count query and
++`GET /assignments/{studentId}/assignment-stats`; **L2b** (this record) adds the Students port, the Students
++endpoint, the client method, the rail panel and the probe fixtures. Nothing under `src/Assignments/**` moved.
++
++#### Findings that shaped the implementation
++
++| Finding | Where it bites |
++|---|---|
++| The counts can only cross as **JSON**, because `Students.Core` and `Students.Application` may not reference an Assignments assembly (AGENTS.md § "Cross-context access", Q152). So the six counts are **mirrored** in `Students.Core/DTOs/StudentAssignmentStats.cs` | A mirror binds by property NAME: a renamed member deserializes to `0`, silently. Pinned by a `ReadFromJsonAsync` round trip asserting all six values (`StudentAssignmentStatsReaderHttpClientTests`) |
++| The existing `assignments-api` named client's base address is the **host root** (`https+http://assignments-api`), and L2a's route lives on the `/assignments` group | The hop path must be `assignments/{studentId}/assignment-stats`, **with** that segment. Without it the call 404s and the panel reports "unavailable" against a healthy endpoint — and a test that asserted the wrong path would have agreed with it |
++| The client class's other reads use `GetFromJsonAsync` and therefore **throw**; `_logger` was injected and unused | The panel's degradation is **new code**, not an inherited convention: `GetAssignmentStatsAsync` catches `HttpRequestException` and `JsonException`, logs a warning and returns `null` |
++| `null` from that client means both "not loaded" and "failed" | The page carries a separate `_assignmentStatsUnavailable` flag. Without it the panel either flashes "unavailable" on every load or never shows it at all |
++| A failed stats hop, folded into the first `Task.WhenAll`, rejects **before** `_student` is assigned | The load is its own sequential `await` after `_student` is set. Folded in, the whole page collapses to a spinner plus an error bar; sequenced, the cost is one muted panel |
++
++#### What shipped
++
++| File | Change |
++|---|---|
++| `Students.Core/DTOs/StudentAssignmentStats.cs` | **new** — the six-int mirror (`Assigned, SentOut, Submitted, Marked, ReviewRequired, Reviewed`), documented derived invariants |
++| `Students.Core/Services/IStudentAssignmentStatsReader.cs` | **new** — the port; **throws** on failure (the `IActivityGroupAssignmentQuery` precedent), the caller decides |
++| `Students.Api/Services/StudentAssignmentStatsReaderHttpClient.cs` | **new** — the port over the existing `assignments-api` client, `GET assignments/{id}/assignment-stats` |
++| `Students.Api/Program.cs` | **one registration** beside the activity-group query. **No** new `AddCrossModuleHttpClient`: that pipeline already carries the tenant and bearer handlers (Q151) |
++| `Students.Api/Endpoints/StudentStatsRoutes.cs` | **new** — `MapStudentStatsRoutes`, relative `/{id:guid}/assignment-stats`, typed `Ok<StudentAssignmentStats>`; a hop failure is logged and answered `502` problem |
++| `Students.Api/StudentEndpoints.cs` | **one chained call**; still five `RequireAuthIfOidc` groups and zero inline `MapGet` |
++| `Students.Application/Services/StudentsApiClient.cs` | **one method** — `GetAssignmentStatsAsync`, `try/catch` → `null` + `LogWarning` |
++| `.../Pages/Students/Detail.razor` (+ `.razor.css`) | the rail's **first** panel, its load, and the three render states |
++| Tests | `StudentViewRendersTests` (4 new renders), `StudentDetailSectionsTests` (rail list + section identity), new `StudentAssignmentStatsReaderHttpClientTests`, new `StudentStatsRoutesTests`, new `StudentAssignmentStatsPortPlacementTests`, `OpenApiSurfaceArchitectureTests` pin `3 → 4` |
++| `documents/runbooks/student-view-probe-seed.{md,students.sql,assignments.sql}` | **new** — dev-only fixtures (Q145; never `MigrationService`) |
++
++#### Display semantics as implemented
++
++- **Header count** = `Assigned`. **Tiles** = the four progress counts, verbatim.
++- **Funnel bar** derives its four segments in the UI (Q155): `Assigned − SentOut` (*not sent*),
++  `SentOut − Submitted` (*awaiting submission*), `Submitted − Marked` (*awaiting marking*), `Marked`. It
++  totals **Assigned**, and each segment is also named in a legend beside the bar.
++- **Review bar** totals **`ReviewRequired`** — its own denominator — and its foot line reads
++  "N of M reviewed · K awaiting — required on M of the S sent", never "of Assigned". A draft cannot be gated,
++  so dividing by Assigned would overstate the work left.
++- **Three states, not two.** A failed or self-contradicting payload renders one muted line with **no numbers**
++  (not even the header count); `Assigned = 0` renders tiles at 0 and **no bars** (Q154); a coherent non-zero
++  set renders the panel. A negative derived difference (`Marked > Submitted`, `SentOut > Assigned`,
++  `Reviewed > ReviewRequired`) is inconsistent data, not a chart to clamp.
++
++#### Deviations from §5 / the mock, and why
++
++1. **The review axis's two tiles are not rendered.** §1.7's axis-2 table defines `Requires guardian review` /
++   `Reviewed` / `Awaiting review`, and the owner's steer for this block was **one bar plus a footnote** — "not a
++   caption plus two tiles plus a second bar". The round's control table lists the two review counts in the foot
++   line, so the tiles would have been a third copy of the same two numbers.
++2. **No percentage on the review bar.** The owner's steer names "… 83%"; the round's control table does not, and
++   a rounded percentage is a claim nothing pins. The exact counts (`10 of 12`) carry the same information.
++3. **The review bar is omitted when `ReviewRequired = 0`.** Q154's rule — a bar at zero implies "0% of
++   something" — applies to this axis with `ReviewRequired` as its denominator, so a panel with no mandatory-review
++   assignments shows the progress axis only. This is derived from Q154 rather than separately ruled.
++4. **Two seed scripts, not one.** The fixtures span two databases (`students-db` and `assignments-db`); one file
++   cannot run against both without a `\connect` that re-prompts for a password.
++5. **The panel is not collapsible.** Collapsibility is a per-panel opt-in the mock's consent table does not grant
++   this panel (`panel-layout-pattern.md` §6), so it renders no chevron.
++
++#### Verification
++
++| Check | Result |
++|---|---|
++| `dotnet build SchoolCollab.slnx -c Release` | **0 errors** (41 pre-existing warnings, none from this change) |
++| `SchoolCollab.Admin.Tests.Unit` | **870** passed / 0 failed (this diff adds 5 renders and 1 source-level test) |
++| `SchoolCollab.Students.Api.Tests.Unit` | **37** passed / 0 failed (4 new client tests, 2 new route tests) |
++| `SchoolCollab.Students.Tests.Unit` | **695** passed / 0 failed (unchanged by this diff) |
++| `SchoolCollab.ArchitectureTests.Unit` | **160** passed / 0 failed (2 new port-placement tests, OpenAPI pin `3 → 4`) |
++| Runbook router | the new runbook carries a `## Symptom` block, which `RunbookSymptomRouterTests` requires of every file in `documents/runbooks/` |
++| The negative render assertions were **watched failing** | a `.stat-bar` injected into the zero branch turns `Zero_Assigned_Renders_The_Tiles_But_No_Bars` red, then was reverted — the Q154 pin is a real assertion, not a comment |
++| Live browser probe (AppHost + `student-view-probe-seed.*.sql`) | **run by the parent after implementation** — six counts, funnel and review wording correct (6 assigned / 5 sent / 2 submitted / 1 marked / 2 required / 1 reviewed, foot reading "required on 2 of the 5 sent"); with `assignments-api` stopped the panel reads "Assignment stats are unavailable right now." with no numbers while both grids still render. Transcript: `documents/rounds/round-student-stats-l2b.md` § "Live probe (C11)". It also found two defects in the seed fixtures the implementer never executed — recorded there |
+diff --git a/src/Students/SchoolCollab.Students.Api/Endpoints/StudentStatsRoutes.cs b/src/Students/SchoolCollab.Students.Api/Endpoints/StudentStatsRoutes.cs
+new file mode 100644
+index 00000000..15b163db
+--- /dev/null
++++ b/src/Students/SchoolCollab.Students.Api/Endpoints/StudentStatsRoutes.cs
+@@ -0,0 +1,53 @@
++using Microsoft.AspNetCore.Http.HttpResults;
++using Microsoft.AspNetCore.Mvc;
++using Microsoft.AspNetCore.Routing;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Students.Core.DTOs;
++using SchoolCollab.Students.Core.Services;
++
++namespace SchoolCollab.Students.Api.Endpoints;
++
++/// <summary>
++/// Issue #444 (layer L2b) — the student assignment-stats read: the six counts the student view's rail
++/// panel renders. Mapped with a <b>relative</b> path on whichever group the orchestrator hands it, so it
++/// inherits that group's prefix (<c>/students</c>) and its <c>RequireAuthIfOidc</c> policy; the route
++/// carries no authorization of its own and no feature-flag branch.
++/// </summary>
++public static class StudentStatsRoutes
++{
++    public static RouteGroupBuilder MapStudentStatsRoutes(this RouteGroupBuilder group)
++    {
++        // GET /students/{id}/assignment-stats — a typed result, so the generated document carries a real
++        // response schema. A hop failure becomes a logged problem (502) rather than a bare 500 or a 200
++        // carrying zeros: zeros are a claim, unavailable is a fact, and the failure must stay visible to
++        // telemetry (round doc, Open decision A).
++        group.MapGet("/{id:guid}/assignment-stats",
++            async Task<Results<Ok<StudentAssignmentStats>, ProblemHttpResult>> (
++                Guid id,
++                [FromServices] IStudentAssignmentStatsReader reader,
++                [FromServices] ILoggerFactory loggerFactory,
++                CancellationToken ct) =>
++            {
++                try
++                {
++                    return TypedResults.Ok(await reader.GetAsync(id, ct));
++                }
++                catch (Exception ex) when (ex is not OperationCanceledException)
++                {
++                    loggerFactory
++                        .CreateLogger(typeof(StudentStatsRoutes).FullName!)
++                        .LogError(ex,
++                            "Assignment stats hop to the Assignments API failed for student {StudentId}; "
++                            + "the view renders the panel as unavailable",
++                            id);
++
++                    return TypedResults.Problem(
++                        title: "Assignment stats are unavailable",
++                        detail: "The Assignments API could not be reached for this student's assignment counts.",
++                        statusCode: StatusCodes.Status502BadGateway);
++                }
++            });
++
++        return group;
++    }
++}
+diff --git a/src/Students/SchoolCollab.Students.Api/Program.cs b/src/Students/SchoolCollab.Students.Api/Program.cs
+index 59e34cc6..67a1c2af 100644
+--- a/src/Students/SchoolCollab.Students.Api/Program.cs
++++ b/src/Students/SchoolCollab.Students.Api/Program.cs
+@@ -89,6 +89,11 @@ builder.Services.AddCrossModuleHttpClient("assignments-api", "https+http://assig
+     .AddHttpMessageHandler<BearerForwardingDelegatingHandler>();
+ builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IActivityGroupAssignmentQuery,
+     SchoolCollab.Students.Api.Services.ActivityGroupAssignmentQueryHttpClient>();
++// Issue #444 (layer L2b): the student view's assignment counts ride the SAME named client above — no
++// second registration, because that pipeline is what makes the hop tenant-exact and bearer-forwarded
++// (owner Q151).
++builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IStudentAssignmentStatsReader,
++    SchoolCollab.Students.Api.Services.StudentAssignmentStatsReaderHttpClient>();
+ 
+ builder.Services.AddStudentsCore(builder.Configuration);
+ // Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)
+diff --git a/src/Students/SchoolCollab.Students.Api/Services/StudentAssignmentStatsReaderHttpClient.cs b/src/Students/SchoolCollab.Students.Api/Services/StudentAssignmentStatsReaderHttpClient.cs
+new file mode 100644
+index 00000000..6372ebab
+--- /dev/null
++++ b/src/Students/SchoolCollab.Students.Api/Services/StudentAssignmentStatsReaderHttpClient.cs
+@@ -0,0 +1,55 @@
++using System.Net.Http.Json;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Students.Core.DTOs;
++using SchoolCollab.Students.Core.Services;
++
++namespace SchoolCollab.Students.Api.Services;
++
++/// <summary>
++/// HTTP-backed <see cref="IStudentAssignmentStatsReader"/> (issue #444, layer L2b). Resolves the
++/// <b>existing</b> named client <c>assignments-api</c>, whose handler chain already supplies the tenant and
++/// the forwarded bearer token (owner Q151), and calls the route layer L2a shipped:
++/// <c>GET /assignments/{studentId}/assignment-stats</c>.
++/// <para>
++/// The <c>assignments/</c> segment is <b>required</b>: that named client's base address is the host root
++/// (<c>https+http://assignments-api</c>), and the Assignments route lives on its <c>/assignments</c> group.
++/// A path without it would 404 into a convincing "unavailable" against a healthy endpoint.
++/// </para>
++/// <para>
++/// Failures are loud here and degraded one layer up: an unreachable host is logged and rethrown, a
++/// non-success response throws through <c>EnsureSuccessStatusCode</c>, and an empty body throws rather than
++/// masquerading as six zeros. <c>StudentStatsRoutes</c> turns that into a logged problem.
++/// </para>
++/// </summary>
++public sealed class StudentAssignmentStatsReaderHttpClient(
++    IHttpClientFactory httpClientFactory,
++    ILogger<StudentAssignmentStatsReaderHttpClient> logger) : IStudentAssignmentStatsReader
++{
++    public async Task<StudentAssignmentStats> GetAsync(
++        Guid studentId, CancellationToken cancellationToken = default)
++    {
++        var client = httpClientFactory.CreateClient("assignments-api");
++
++        HttpResponseMessage response;
++        try
++        {
++            response = await client.GetAsync(
++                $"assignments/{studentId}/assignment-stats", cancellationToken);
++        }
++        catch (HttpRequestException ex)
++        {
++            logger.LogWarning(ex,
++                "Assignments API unreachable when reading assignment stats for student {StudentId}",
++                studentId);
++            throw;
++        }
++
++        response.EnsureSuccessStatusCode();
++
++        return await response.Content.ReadFromJsonAsync<StudentAssignmentStats>(cancellationToken)
++            // An empty body is a failed read, not six zero counts: the panel's "unavailable" state is the
++            // truthful answer, and zeros are a claim.
++            ?? throw new HttpRequestException(
++                $"The Assignments API answered an empty assignment-stats body for student {studentId}.");
++    }
++}
+diff --git a/src/Students/SchoolCollab.Students.Api/StudentEndpoints.cs b/src/Students/SchoolCollab.Students.Api/StudentEndpoints.cs
+index 33be69d6..87a7ec4c 100644
+--- a/src/Students/SchoolCollab.Students.Api/StudentEndpoints.cs
++++ b/src/Students/SchoolCollab.Students.Api/StudentEndpoints.cs
+@@ -24,7 +24,8 @@ public static class StudentEndpoints
+             .MapTopicAssignmentRoutes()
+             .MapEnrollmentExceptionRoutes()
+             .MapStudentTopicAssignmentRoutes()
+-            .MapStudentGuardianRoutes();   // G2: inherits RequireAuthorization from studentsGroup
++            .MapStudentGuardianRoutes()   // G2: inherits RequireAuthorization from studentsGroup
++            .MapStudentStatsRoutes();     // #444 L2b: /students/{id}/assignment-stats, same group policy
+ 
+         // Phase 2 (spec activity-group-enrollment.md §7.1/§7.2): activity-group CRUD + membership
+         // endpoints. Routes are root-level (/activity-groups/*) except the student→groups query, which
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor
+index b4ff91c8..853331eb 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor
+@@ -347,6 +347,101 @@
+                                     @* ── Rail: relationships and the audit trail ─────────────────────── *@
+                                     <div class="region-grid__rail">
+ 
++                                        @* ── Assignments: the student's six counts (issue #444, layer L2b). FIRST in the
++                                           rail (owner Q124) — it is what a form tutor opens this page to check. A
++                                           DERIVED panel, admissible in the rail by §5: it presents counts over other
++                                           aggregates. The funnel is computed here from the six counts (Q155), and a
++                                           payload that contradicts itself renders unavailable — never a clamped chart. *@
++                                        <PanelSection Id="student-view-assignments"
++                                                      Title="Assignments"
++                                                      TitleId="student-view-assignments-title"
++                                                      Count="@AssignmentStatsCount">
++                                            <ChildContent>
++                                                @if (_assignmentStatsUnavailable || (_assignmentStats is not null && Funnel is null))
++                                                {
++                                                    @* A failed hop, or a payload whose counts contradict each other, states the
++                                                       FACT and shows no numbers at all: zeros are a claim, unavailable is a fact
++                                                       (Q153). No count chip either — AssignmentStatsCount is null here. *@
++                                                    <p class="muted-note" id="student-view-assignments-unavailable">
++                                                        Assignment stats are unavailable right now.
++                                                    </p>
++                                                }
++                                                else if (_assignmentStats is not { } stats)
++                                                {
++                                                    <div class="spinner-container">
++                                                        <FluentSpinner />
++                                                    </div>
++                                                }
++                                                else
++                                                {
++                                                    <div class="stat-grid">
++                                                        <div class="stat">
++                                                            <div class="stat__value">@stats.Assigned</div>
++                                                            <div class="stat__label">Assigned</div>
++                                                        </div>
++                                                        <div class="stat">
++                                                            <div class="stat__value">@stats.SentOut</div>
++                                                            <div class="stat__label">Sent out</div>
++                                                        </div>
++                                                        <div class="stat">
++                                                            <div class="stat__value">@stats.Submitted</div>
++                                                            <div class="stat__label">Submitted</div>
++                                                        </div>
++                                                        <div class="stat stat--marked">
++                                                            <div class="stat__value">@stats.Marked</div>
++                                                            <div class="stat__label">Marked</div>
++                                                        </div>
++                                                    </div>
++
++                                                    @if (stats.Assigned == 0)
++                                                    {
++                                                        @* No bars at zero (Q154): a bar at 0% implies "0% of something", and
++                                                           the counts above already say the whole truth. *@
++                                                        <p class="muted-note" id="student-view-assignments-empty">
++                                                            No assignments for this student yet.
++                                                        </p>
++                                                    }
++                                                    else
++                                                    {
++                                                        var funnel = Funnel!.Value;
++
++                                                        @* Axis 1 — the work's progress, totalling Assigned. *@
++                                                        <div class="stat-bar" role="img" aria-label="@FunnelLabel(stats, funnel)">
++                                                            <span class="stat-bar__seg stat-bar__seg--not-sent" style="@SegmentFlex(funnel.NotSent)"></span>
++                                                            <span class="stat-bar__seg stat-bar__seg--awaiting-submission" style="@SegmentFlex(funnel.AwaitingSubmission)"></span>
++                                                            <span class="stat-bar__seg stat-bar__seg--awaiting-marking" style="@SegmentFlex(funnel.AwaitingMarking)"></span>
++                                                            <span class="stat-bar__seg stat-bar__seg--marked" style="@SegmentFlex(funnel.Marked)"></span>
++                                                        </div>
++
++                                                        @* Every segment is named in text as well as coloured (Q141 of the page
++                                                           round): the swatch is the only decoration it owns. *@
++                                                        <div class="stat-legend">
++                                                            <span class="stat-legend__item"><i class="stat-bar__seg stat-bar__seg--not-sent" aria-hidden="true"></i><b>@funnel.NotSent</b> not sent</span>
++                                                            <span class="stat-legend__item"><i class="stat-bar__seg stat-bar__seg--awaiting-submission" aria-hidden="true"></i><b>@funnel.AwaitingSubmission</b> awaiting submission</span>
++                                                            <span class="stat-legend__item"><i class="stat-bar__seg stat-bar__seg--awaiting-marking" aria-hidden="true"></i><b>@funnel.AwaitingMarking</b> awaiting marking</span>
++                                                            <span class="stat-legend__item"><i class="stat-bar__seg stat-bar__seg--marked" aria-hidden="true"></i><b>@funnel.Marked</b> marked</span>
++                                                        </div>
++
++                                                        @* Axis 2 — the guardian-review gate, over its OWN denominator. It is an overlay on
++                                                           the sent set, not the next step after marking, so it never reads "of Assigned".
++                                                           Rendering nothing when nothing requires review follows Q154: a bar at 0% implies
++                                                           "0% of something". *@
++                                                        @if (stats.ReviewRequired > 0)
++                                                        {
++                                                            <div class="stat-caption">Guardian review</div>
++                                                            <div class="stat-bar" role="img" aria-label="@ReviewBarLabel(stats, funnel)">
++                                                                <span class="stat-bar__seg stat-bar__seg--reviewed" style="@SegmentFlex(funnel.Reviewed)"></span>
++                                                                <span class="stat-bar__seg stat-bar__seg--awaiting-review" style="@SegmentFlex(funnel.AwaitingReview)"></span>
++                                                            </div>
++                                                            <p class="stat-foot" id="student-view-assignments-review-foot">
++                                                                <b>@funnel.Reviewed of @stats.ReviewRequired</b> reviewed · <b>@funnel.AwaitingReview</b> awaiting — required on @stats.ReviewRequired of the @stats.SentOut sent.
++                                                            </p>
++                                                        }
++                                                    }
++                                                }
++                                            </ChildContent>
++                                        </PanelSection>
++
+                                         <PanelSection Id="student-view-groups"
+                                                       Title="Activity groups"
+                                                       TitleId="student-view-groups-title"
+@@ -623,6 +718,73 @@
+     private string? _activityGroupsError;
+     private bool _savingGroupAction;
+ 
++    // ── Assignment stats state (issue #444, layer L2b) ──
++    // A TRI-STATE, and it needs two fields: `null` alone means both "not loaded yet" and "the hop failed",
++    // so it cannot drive three render states. `null` + this flag false = spinner; `null` + true = the
++    // unavailable line; non-null = the panel. Without the flag the panel either flashes "unavailable"
++    // during every load or never shows it at all.
++    private SchoolCollab.Students.Core.DTOs.StudentAssignmentStats? _assignmentStats;
++    private bool _assignmentStatsUnavailable;
++
++    /// <summary>
++    /// The funnel segments, derived HERE from the six counts (owner Q155) — never sent pre-computed, because a
++    /// <c>Draft</c> field on the wire could disagree with <c>Assigned − SentOut</c>. <c>null</c> means either
++    /// "not loaded" or "the payload contradicts itself": a negative difference (<c>Marked &gt; Submitted</c>,
++    /// <c>SentOut &gt; Assigned</c>, <c>Reviewed &gt; ReviewRequired</c>) is inconsistent data, and the panel
++    /// renders the unavailable state instead of a chart that lies. Never clamped.
++    /// </summary>
++    private AssignmentFunnel? Funnel
++    {
++        get
++        {
++            if (_assignmentStats is not { } stats) return null;
++
++            var notSent = stats.Assigned - stats.SentOut;
++            var awaitingSubmission = stats.SentOut - stats.Submitted;
++            var awaitingMarking = stats.Submitted - stats.Marked;
++            var awaitingReview = stats.ReviewRequired - stats.Reviewed;
++
++            if (notSent < 0 || awaitingSubmission < 0 || awaitingMarking < 0 || awaitingReview < 0)
++                return null;
++
++            return new AssignmentFunnel(
++                notSent, awaitingSubmission, awaitingMarking, stats.Marked,
++                stats.Reviewed, awaitingReview);
++        }
++    }
++
++    /// <summary>
++    /// The panel's header count — <c>Assigned</c> while the count set is coherent, otherwise nothing at all:
++    /// the unavailable state carries NO numbers, not even in the header (Q153).
++    /// </summary>
++    private int? AssignmentStatsCount =>
++        !_assignmentStatsUnavailable && Funnel is not null ? _assignmentStats?.Assigned : null;
++
++    /// <summary>The four funnel segments plus the two review-axis ones, all derived (see <see cref="Funnel"/>).</summary>
++    private readonly record struct AssignmentFunnel(
++        int NotSent,
++        int AwaitingSubmission,
++        int AwaitingMarking,
++        int Marked,
++        int Reviewed,
++        int AwaitingReview);
++
++    /// <summary>A segment's share of its bar: the count IS the weight, so the bar is proportional without any
++    /// percentage arithmetic a reader cannot check against the legend.</summary>
++    private static string SegmentFlex(int count) => $"flex: {count} 1 0;";
++
++    /// <summary>The funnel bar's accessible label, naming the four counts rather than relying on colour.</summary>
++    private static string FunnelLabel(
++        SchoolCollab.Students.Core.DTOs.StudentAssignmentStats stats, AssignmentFunnel funnel) =>
++        $"{stats.Assigned} assigned: {funnel.NotSent} not sent, {funnel.AwaitingSubmission} awaiting submission, "
++        + $"{funnel.AwaitingMarking} awaiting marking, {funnel.Marked} marked";
++
++    /// <summary>The review bar's accessible label, stated over its own denominator."</summary>
++    private static string ReviewBarLabel(
++        SchoolCollab.Students.Core.DTOs.StudentAssignmentStats stats, AssignmentFunnel funnel) =>
++        $"Guardian review: {funnel.Reviewed} reviewed, {funnel.AwaitingReview} awaiting review, "
++        + $"required on {stats.ReviewRequired} of the {stats.SentOut} sent";
++
+     /// <summary>
+     /// The student's currently-active enrollment. Active = no exit date AND
+     /// status == "Active". Falls back to the most recent enrollment that
+@@ -981,6 +1143,13 @@
+             //    §3.6 FR-28). Loaded alongside the guardians list; the section
+             //    grid + Leave/Join actions live below Enrollments.
+             await LoadStudentGroupsAsync(ct);
++
++            // 5. Assignment stats (issue #444, layer L2b) — the rail's FIRST panel (Q124). Its own
++            //    SEQUENTIAL await, deliberately NOT folded into the fan-out above: folded in, a failed
++            //    hop rejects before `_student` is assigned, and the page collapses to a spinner plus an
++            //    error bar instead of losing one panel. Sequenced here, the worst case is one
++            //    "unavailable" panel and every other block still renders.
++            await LoadAssignmentStatsAsync(ct);
+         }
+         catch (OperationCanceledException)
+         {
+@@ -1417,6 +1586,29 @@
+         await InvokeAsync(StateHasChanged);
+     }
+ 
++    /// <summary>
++    /// Loads the assignment counts. <see cref="StudentsApiClient.GetAssignmentStatsAsync"/> returns
++    /// <c>null</c> rather than throwing when the hop fails, so <c>null</c> here means "unavailable" — the
++    /// flag is what separates that from "not loaded yet".
++    /// </summary>
++    private async Task LoadAssignmentStatsAsync(CancellationToken ct)
++    {
++        try
++        {
++            var stats = await Api.GetAssignmentStatsAsync(Id, ct);
++            _assignmentStatsUnavailable = stats is null;
++            _assignmentStats = stats;
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (_disposed) return;
++            Logger.LogError(ex, "Failed to load assignment stats for student {StudentId}", Id);
++            _assignmentStatsUnavailable = true;
++        }
++        await InvokeAsync(StateHasChanged);
++    }
++
+     /// <summary>
+     /// Opens the JoinGroupsDialog (FR-29/FR-30) — a searchable multi-select of
+     /// available groups the student is not already an active member of.
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor.css b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor.css
+index b241111f..ca3887cc 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor.css
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor.css
+@@ -325,6 +325,130 @@
+     white-space: nowrap;
+ }
+ 
++/* ── Assignments: the six counts (issue #444, layer L2b) ────────────────────────────────
++   Two axes, two bars: the work's progress (totalling Assigned) and the guardian-review gate
++   (totalling ReviewRequired). Colour reinforces, never carries the meaning — every segment is
++   named in the legend or the foot line, and each bar carries an accessible label. */
++.stat-grid {
++    display: grid;
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++    gap: 8px;
++}
++
++.stat {
++    padding: 8px 10px;
++    border-radius: 8px;
++    border: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
++    background: var(--neutral-layer-1, #ffffff);
++}
++
++.stat__value {
++    font-size: 1.3rem;
++    font-weight: 700;
++    line-height: 1.1;
++}
++
++.stat__label {
++    margin-top: 2px;
++    font-size: 0.7rem;
++    font-weight: 600;
++    letter-spacing: 0.03em;
++    color: var(--neutral-foreground-hint, #616161);
++}
++
++/* The tile holding work that is actually finished — the one state the eye should catch first. */
++.stat--marked {
++    background: var(--status-success-bg, #e7f4ec);
++    border-color: var(--status-success-border, #b7dfc6);
++}
++
++.stat--marked .stat__value {
++    color: var(--status-success-fg, #14532d);
++}
++
++/* One bar per axis; the segments are weighted by their count (SegmentFlex in the code-behind). */
++.stat-bar {
++    display: flex;
++    gap: 2px;
++    height: 8px;
++    border-radius: 4px;
++    overflow: hidden;
++}
++
++.stat-bar__seg {
++    display: block;
++    height: 8px;
++    border-radius: 2px;
++}
++
++.stat-bar__seg--not-sent {
++    background: var(--status-neutral-dot, #8a8a8a);
++    opacity: 0.45;
++}
++
++.stat-bar__seg--awaiting-submission {
++    background: var(--accent-fill-rest, #0f6cbd);
++}
++
++.stat-bar__seg--awaiting-marking {
++    background: var(--status-warning-dot, #b8760a);
++}
++
++.stat-bar__seg--marked {
++    background: var(--status-success-dot, #107c41);
++}
++
++.stat-bar__seg--reviewed {
++    background: var(--band-groups-fg, #523aa0);
++    opacity: 0.75;
++}
++
++.stat-bar__seg--awaiting-review {
++    background: var(--status-warning-dot, #b8760a);
++}
++
++.stat-legend {
++    display: flex;
++    flex-wrap: wrap;
++    gap: 4px 10px;
++    font-size: 0.7rem;
++    color: var(--neutral-foreground-hint, #616161);
++}
++
++.stat-legend__item {
++    display: inline-flex;
++    align-items: center;
++    gap: 4px;
++}
++
++/* The legend's swatch reuses the segment classes at a fixed size — one palette, no second copy. */
++.stat-legend__item .stat-bar__seg {
++    width: 8px;
++    flex: 0 0 auto;
++}
++
++.stat-legend__item b {
++    font-weight: 700;
++    color: var(--neutral-foreground-1, #242424);
++}
++
++/* A labelled sub-section INSIDE the panel — never a nested box (§3). */
++.stat-caption {
++    margin-top: 2px;
++    font-size: 0.66rem;
++    font-weight: 700;
++    letter-spacing: 0.06em;
++    text-transform: uppercase;
++    color: var(--neutral-foreground-hint, #616161);
++}
++
++.stat-foot {
++    margin: 0;
++    font-size: 0.72rem;
++    line-height: 1.45;
++    color: var(--neutral-foreground-hint, #616161);
++}
++
+ /* ── Notes and muted text ───────────────────────────────────────────────────────────────── */
+ .muted-note {
+     margin: 0;
+diff --git a/src/Students/SchoolCollab.Students.Application/Services/StudentsApiClient.cs b/src/Students/SchoolCollab.Students.Application/Services/StudentsApiClient.cs
+index dbd9bf1e..8a859219 100644
+--- a/src/Students/SchoolCollab.Students.Application/Services/StudentsApiClient.cs
++++ b/src/Students/SchoolCollab.Students.Application/Services/StudentsApiClient.cs
+@@ -738,6 +738,35 @@ public sealed class StudentsApiClient : IContactsClient
+         return await EnrichSingleAsync(await response.Content.ReadFromJsonAsync<StudentDto>(ct), ct);
+     }
+ 
++    /// <summary>
++    /// Issue #444 (layer L2b) — the student's six assignment counts, or <c>null</c> when they cannot be read.
++    /// <b>This catch is new behaviour, not an inherited convention</b>: every other read on this class lets
++    /// <c>GetFromJsonAsync</c> throw, and this is the one read whose failure must not reach the page. A
++    /// non-success response (the Students endpoint answers a 502 when its Assignments hop fails), an
++    /// unreachable host and a malformed body all degrade the rail panel to its "unavailable" state while the
++    /// rest of the page renders.
++    /// </summary>
++    public async Task<StudentAssignmentStats?> GetAssignmentStatsAsync(Guid id, CancellationToken ct = default)
++    {
++        try
++        {
++            return await _http.GetFromJsonAsync<StudentAssignmentStats>(
++                $"/students/{id}/assignment-stats", ct);
++        }
++        catch (HttpRequestException ex)
++        {
++            _logger.LogWarning(ex,
++                "Assignment stats for student {StudentId} are unavailable; the panel will say so", id);
++            return null;
++        }
++        catch (JsonException ex)
++        {
++            _logger.LogWarning(ex,
++                "Assignment stats for student {StudentId} answered a body that could not be read", id);
++            return null;
++        }
++    }
++
+     // ── DTO enrichment (client service) ──────────────────────────────────────
+     // Age + GenderName are computed here (not in the UI, not in Students.Core)
+     // so the Students module stays decoupled from the CodedValues module. The
+diff --git a/src/Students/SchoolCollab.Students.Core/DTOs/StudentAssignmentStats.cs b/src/Students/SchoolCollab.Students.Core/DTOs/StudentAssignmentStats.cs
+new file mode 100644
+index 00000000..a366518d
+--- /dev/null
++++ b/src/Students/SchoolCollab.Students.Core/DTOs/StudentAssignmentStats.cs
+@@ -0,0 +1,34 @@
++namespace SchoolCollab.Students.Core.DTOs;
++
++/// <summary>
++/// Issue #444 (layer L2b) — the six counts a student's assignment record implies, as this context's own
++/// mirror of <c>SchoolCollab.Assignments.Contracts.StudentAssignmentStatsDto</c>. The mirror exists because
++/// <c>Students.Core</c> may not reference another context's assembly (AGENTS.md § "Cross-context access"):
++/// the hop is HTTP, so the type crosses as JSON and nothing else.
++/// <para>
++/// The member names are <b>identical</b> to the Assignments contract on purpose. <c>System.Text.Json</c>
++/// binds by name, so a renamed member would deserialize to <c>0</c> instead of failing loudly — the worst
++/// failure mode available. <c>StudentAssignmentStatsReaderHttpClientTests</c> pins all six values through
++/// a real <c>ReadFromJsonAsync</c> round trip for exactly that reason. Every member is <see cref="int"/>:
++/// no enum crosses this hop, so no converter is needed on either side.
++/// </para>
++/// <para>
++/// The derived quantities are the caller's to compute, never fields on the wire (owner Q155): the funnel is
++/// <c>Assigned − SentOut</c>, <c>SentOut − Submitted</c>, <c>Submitted − Marked</c> and <c>Marked</c>, and
++/// the review axis is <c>Reviewed</c> over <c>ReviewRequired</c>. A <b>negative</b> difference means the
++/// payload contradicts itself, and the caller renders "unavailable" rather than a clamped chart.
++/// </para>
++/// </summary>
++public sealed record StudentAssignmentStats(
++    /// <summary>Recipient-linked assignments of any status — a draft is counted here.</summary>
++    int Assigned,
++    /// <summary>Published, or scheduled with its publish time already passed.</summary>
++    int SentOut,
++    /// <summary>Sent, with a submission carrying a finalised timestamp.</summary>
++    int Submitted,
++    /// <summary>Sent, with that same submission finalised <b>and</b> graded.</summary>
++    int Marked,
++    /// <summary>Sent, on an assignment that mandates guardian review — the review axis's denominator.</summary>
++    int ReviewRequired,
++    /// <summary>Review-required, with the guardian-submission gate already reviewed.</summary>
++    int Reviewed);
+diff --git a/src/Students/SchoolCollab.Students.Core/Services/IStudentAssignmentStatsReader.cs b/src/Students/SchoolCollab.Students.Core/Services/IStudentAssignmentStatsReader.cs
+new file mode 100644
+index 00000000..b8eb7125
+--- /dev/null
++++ b/src/Students/SchoolCollab.Students.Core/Services/IStudentAssignmentStatsReader.cs
+@@ -0,0 +1,25 @@
++using SchoolCollab.Students.Core.DTOs;
++
++namespace SchoolCollab.Students.Core.Services;
++
++/// <summary>
++/// Cross-context port (issue #444, layer L2b) used by the student view to show a student's assignment
++/// counts. The HTTP implementation lives in <c>SchoolCollab.Students.Api</c> and reads
++/// <c>GET /assignments/{studentId}/assignment-stats</c> on the Assignments API through Aspire service
++/// discovery.
++/// <para>
++/// It <b>throws</b> when the Assignments API cannot be reached or answers non-success, matching
++/// <see cref="IActivityGroupAssignmentQuery"/>: the decision about what a failed hop means belongs to the
++/// caller. Here the caller degrades — the Students endpoint turns the failure into a logged problem, and
++/// the view renders an "unavailable" panel — so the reason stays visible in telemetry instead of being
++/// flattened into a zero count.
++/// </para>
++/// </summary>
++public interface IStudentAssignmentStatsReader
++{
++    /// <summary>
++    /// Returns the six counts for the given student. Throws when the Assignments API is unreachable or
++    /// answers non-success.
++    /// </summary>
++    Task<StudentAssignmentStats> GetAsync(Guid studentId, CancellationToken cancellationToken = default);
++}
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/StudentDetailSectionsTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/StudentDetailSectionsTests.cs
+index c5a1762e..541b19f7 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/StudentDetailSectionsTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/StudentDetailSectionsTests.cs
+@@ -54,7 +54,7 @@ public class StudentDetailSectionsTests
+         // documents/solution/panel-layout-pattern.md §2: every block on a create/view/edit page is a
+         // PanelSection, main column first, rail LAST. The page's blocks, in reading order:
+         //   main — Details, Enrollment, Contacts, Guardians
+-        //   rail — Activity groups, Subjects, Contact history
++        //   rail — Assignments, Activity groups, Subjects, Contact history
+         // A block that reverts to a bare <h3> escapes the one-box rule (and its border, its count, its
+         // header actions); a rail block moved into main silently changes how the page collapses at
+         // 899px container width.
+@@ -72,6 +72,7 @@ public class StudentDetailSectionsTests
+         ];
+         string[] railBlocks =
+         [
++            "student-view-assignments",
+             "student-view-groups",
+             "student-view-subjects",
+             "student-view-contact-history",
+@@ -393,6 +394,33 @@ public class StudentDetailSectionsTests
+             "guardian contacts render on the guardian card, capped at three chips plus a 'View all' affordance");
+     }
+ 
++    [TestMethod]
++    public void Detail_Assignments_Panel_Is_A_Titled_Panel_That_Opens_The_Rail()
++    {
++        // Issue #444 (layer L2b) / owner Q124: the six assignment counts are the FIRST rail block, because
++        // they are what a form tutor opens this page to check. The ordering rule in
++        // Detail_Renders_Each_Block_As_A_Panel_In_The_Documented_Order pins the position; this pins the
++        // section's own identity — a panel that lost its title, or moved its count onto the page, would
++        // still pass an order check.
++        var source = ReadDetailSource();
++
++        var panelIdx = source.IndexOf("Id=\"student-view-assignments\"", StringComparison.Ordinal);
++        panelIdx.Should().BeGreaterThan(source.IndexOf("class=\"region-grid__rail\"", StringComparison.Ordinal),
++            "the panel lives in the rail");
++
++        var panel = source.Substring(panelIdx, source.IndexOf("</PanelSection>", panelIdx, StringComparison.Ordinal) - panelIdx);
++
++        panel.Should().Contain("Title=\"Assignments\"", "the panel names the relationship it presents");
++        panel.Should().Contain("Count=\"@AssignmentStatsCount\"",
++            "the header count is Assigned — and it is withheld entirely while the counts are unavailable");
++        panel.Should().Contain("student-view-assignments-unavailable",
++            "a failed hop renders one muted line with no numbers (Q153)");
++        panel.Should().Contain("student-view-assignments-empty",
++            "Assigned = 0 renders the explicit empty line, never a blank body");
++        panel.Should().NotContain("Collapsible=\"true\"",
++            "collapsibility is a per-panel opt-in the mock did not grant this panel (§6)");
++    }
++
+     [TestMethod]
+     public void Detail_Razor_Css_Still_Defines_Every_Class_The_Markup_Consumes()
+     {
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/StudentViewRendersTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/StudentViewRendersTests.cs
+index cc8c071a..f9cdf170 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/StudentViewRendersTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/StudentViewRendersTests.cs
+@@ -154,9 +154,33 @@ public class StudentViewRendersTests : BunitContext
+         ]
+         """;
+ 
++    /// <summary>
++    /// The six assignment counts (issue #444, layer L2b). Chosen so the DERIVED funnel is auditable and its
++    /// four segments all differ: not sent 3, awaiting submission 9, awaiting marking 5, marked 7 — which sum to
++    /// Assigned 24. <c>Assigned</c> and <c>SentOut</c> also differ, so the review axis's "of the 21 sent" cannot
++    /// pass as "of 24" (criterion C4).
++    /// </summary>
++    private const string AssignmentStatsJson = """
++        { "assigned": 24, "sentOut": 21, "submitted": 12, "marked": 7,
++          "reviewRequired": 12, "reviewed": 10 }
++        """;
++
++    /// <summary>No assignments at all — tiles at 0 and NO bars (Q154).</summary>
++    private const string ZeroAssignmentStatsJson = """
++        { "assigned": 0, "sentOut": 0, "submitted": 0, "marked": 0, "reviewRequired": 0, "reviewed": 0 }
++        """;
++
++    /// <summary>A payload that contradicts itself: <c>Marked 25 &gt; Submitted 18</c>. The panel must say
++    /// unavailable rather than draw a negative "awaiting marking" segment (Q155 — never clamped).</summary>
++    private const string InconsistentAssignmentStatsJson = """
++        { "assigned": 24, "sentOut": 21, "submitted": 18, "marked": 25, "reviewRequired": 12, "reviewed": 10 }
++        """;
++
+     // ── The harness ─────────────────────────────────────────────────────────
+ 
+-    private sealed class ScriptedHandler : HttpMessageHandler
++    private sealed class ScriptedHandler(
++        string assignmentStatsJson = AssignmentStatsJson,
++        HttpStatusCode assignmentStatsStatus = HttpStatusCode.OK) : HttpMessageHandler
+     {
+         public readonly List<string> Calls = new();
+ 
+@@ -166,6 +190,16 @@ public class StudentViewRendersTests : BunitContext
+             var url = request.RequestUri!.PathAndQuery;
+             Calls.Add($"{request.Method.Method} {url}");
+ 
++            // The stats read is scripted apart from the list-shaped reads below: it is the one hop whose
++            // FAILURE the panel has to survive, so a test must be able to fail it and nothing else.
++            if (url.StartsWith($"/students/{StudentId}/assignment-stats", StringComparison.Ordinal))
++            {
++                return Task.FromResult(new HttpResponseMessage(assignmentStatsStatus)
++                {
++                    Content = new StringContent(assignmentStatsJson, Encoding.UTF8, "application/json"),
++                });
++            }
++
+             var body = url switch
+             {
+                 var u when u.StartsWith($"/students/{StudentId}/subjects", StringComparison.Ordinal) => SubjectsJson,
+@@ -208,8 +242,12 @@ public class StudentViewRendersTests : BunitContext
+             Task.FromResult(new AuthenticationState(_user));
+     }
+ 
+-    /// <summary>Registers the page's collaborators against the scripted API, then renders the page.</summary>
+-    private (IRenderedComponent<Detail> Cut, ScriptedHandler Handler) RenderPage()
++    /// <summary>Registers the page's collaborators against the scripted API, then renders the page. The
++    /// assignment-stats answer is a parameter because three of its states are their own assertions: loaded,
++    /// zero, and failed.</summary>
++    private (IRenderedComponent<Detail> Cut, ScriptedHandler Handler) RenderPage(
++        string assignmentStatsJson = AssignmentStatsJson,
++        HttpStatusCode assignmentStatsStatus = HttpStatusCode.OK)
+     {
+         var claims = new[]
+         {
+@@ -221,7 +259,7 @@ public class StudentViewRendersTests : BunitContext
+             User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestScheme")),
+         };
+ 
+-        var handler = new ScriptedHandler();
++        var handler = new ScriptedHandler(assignmentStatsJson, assignmentStatsStatus);
+         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
+         var codedValues = new CodedValuesApiClient(http);
+         var api = new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValues);
+@@ -255,7 +293,8 @@ public class StudentViewRendersTests : BunitContext
+ 
+         // Every block, in one page — no tabs, and the rail comes last.
+         cut.FindAll(".region-grid__main > *").Count.Should().Be(4, "Details, Enrollment, Contacts, Guardians");
+-        cut.FindAll(".region-grid__rail > *").Count.Should().Be(3, "Activity groups, Subjects, Contact history");
++        cut.FindAll(".region-grid__rail > *").Count.Should().Be(4,
++            "Assignments (first — Q124), Activity groups, Subjects, Contact history");
+         cut.FindAll("fluent-tabs").Should().BeEmpty("the view is a single page (StudentDetailSectionsTests pins it)");
+ 
+         // The reads the blocks depend on actually happened.
+@@ -265,6 +304,8 @@ public class StudentViewRendersTests : BunitContext
+         handler.Calls.Should().Contain($"GET /contacts?ownerType=Student&ownerId={StudentId}");
+         handler.Calls.Should().Contain($"GET /students/{StudentId}/subjects");
+         handler.Calls.Should().Contain($"GET /students/{StudentId}/activity-groups");
++        handler.Calls.Should().Contain($"GET /students/{StudentId}/assignment-stats",
++            "the Assignments panel's own read must actually have happened — scripted is not the same as called");
+     }
+ 
+     [TestMethod]
+@@ -360,6 +401,124 @@ public class StudentViewRendersTests : BunitContext
+         groups.TextContent.Should().Contain("Academic", "Category is optional free text and renders when set");
+     }
+ 
++    // ── Assignments panel (issue #444, layer L2b) ────────────────────────
++
++    [TestMethod]
++    public void The_Assignments_Block_Is_The_First_Rail_Panel_And_Shows_The_Four_Progress_Tiles()
++    {
++        var (cut, _) = RenderPage();
++        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments-title").Should().ContainSingle());
++
++        // First in the rail (Q124): asserted on the rendered DOM, not on the source order.
++        cut.FindAll(".region-grid__rail > *")[0].Id.Should().Be("student-view-assignments",
++            "the panel is what a form tutor opens this page to check, so it leads the rail");
++        cut.Find("#student-view-assignments-title").TextContent.Trim().Should().Be("Assignments");
++
++        // The header count IS Assigned — one number, the panel's own denominator.
++        cut.Find("#student-view-assignments .panel-section__count").TextContent.Trim().Should().Be("24");
++
++        var tiles = cut.FindAll("#student-view-assignments .stat")
++            .Select(tile => (
++                Value: tile.QuerySelector(".stat__value")!.TextContent.Trim(),
++                Label: tile.QuerySelector(".stat__label")!.TextContent.Trim()))
++            .ToArray();
++
++        tiles.Should().BeEquivalentTo(
++            new[] { ("24", "Assigned"), ("21", "Sent out"), ("12", "Submitted"), ("7", "Marked") },
++            options => options.WithStrictOrdering(),
++            "the four tiles are the DTO's four progress counts, verbatim");
++    }
++
++    [TestMethod]
++    public void The_Funnel_Bar_Totals_Assigned_And_The_Review_Bar_Totals_ReviewRequired()
++    {
++        var (cut, _) = RenderPage();
++        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments .stat-bar").Should().HaveCount(2));
++
++        // One bar per axis — never one bar carrying both, which is the defect the mock's second bar fixed.
++        var bars = cut.FindAll("#student-view-assignments .stat-bar");
++
++        // Axis 1: 3 + 9 + 5 + 7 = 24 = Assigned. The label states every derived segment, so a wrong
++        // difference cannot hide behind a plausible-looking width.
++        bars[0].GetAttribute("aria-label").Should().Be(
++            "24 assigned: 3 not sent, 9 awaiting submission, 5 awaiting marking, 7 marked",
++            "the four derived segments sum to Assigned");
++
++        // Axis 2: its OWN denominator — 12 required on 21 sent, never "of 24".
++        bars[1].GetAttribute("aria-label").Should().Be(
++            "Guardian review: 10 reviewed, 2 awaiting review, required on 12 of the 21 sent");
++
++        var foot = cut.Find("#student-view-assignments-review-foot").TextContent;
++        foot.Should().Contain("required on 12 of the 21 sent",
++            "the review axis names its own denominator: a draft cannot be gated for review");
++        foot.Should().NotContain("of 24", "'of Assigned' is the wrong denominator for this bar");
++
++        // Every segment is named in text as well as coloured.
++        var legend = cut.FindAll("#student-view-assignments .stat-legend__item")
++            .Select(item => item.TextContent.Trim())
++            .ToArray();
++
++        legend.Should().BeEquivalentTo(
++            new[] { "3 not sent", "9 awaiting submission", "5 awaiting marking", "7 marked" },
++            options => options.WithStrictOrdering());
++    }
++
++    [TestMethod]
++    public void Zero_Assigned_Renders_The_Tiles_But_No_Bars()
++    {
++        var (cut, _) = RenderPage(ZeroAssignmentStatsJson);
++        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments-empty").Should().ContainSingle());
++
++        cut.Find("#student-view-assignments .panel-section__count").TextContent.Trim().Should().Be("0");
++        cut.FindAll("#student-view-assignments .stat .stat__value")
++            .Select(value => value.TextContent.Trim())
++            .Should().AllBe("0", "a zero count is a fact, so the tiles still render");
++
++        cut.FindAll("#student-view-assignments .stat-bar").Should().BeEmpty(
++            "a bar at 0% implies '0% of something' (Q154)");
++        cut.Find("#student-view-assignments-empty").TextContent.Trim()
++            .Should().Be("No assignments for this student yet.");
++        cut.FindAll("#student-view-assignments .stat-legend").Should().BeEmpty("no segments, so nothing to name");
++    }
++
++    [TestMethod]
++    public void A_Failed_Hop_Renders_No_Numbers_And_The_Rest_Of_The_Page_Still_Renders()
++    {
++        var (cut, handler) = RenderPage(assignmentStatsStatus: HttpStatusCode.InternalServerError);
++        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments-unavailable").Should().ContainSingle());
++
++        // The read was attempted — otherwise this test would pass on a panel that never loaded.
++        handler.Calls.Should().Contain($"GET /students/{StudentId}/assignment-stats");
++
++        var panel = cut.Find("#student-view-assignments");
++        panel.TextContent.Trim().Should().Contain("Assignment stats are unavailable right now.");
++
++        // NO numbers at all, not even the header count: zeros are a claim, unavailable is a fact (Q153).
++        panel.QuerySelectorAll(".stat").Should().BeEmpty();
++        panel.QuerySelectorAll(".stat-bar").Should().BeEmpty();
++        panel.QuerySelectorAll(".panel-section__count").Should().BeEmpty();
++
++        // …and the failure costs one panel, not the page (the load is sequenced after _student is set).
++        cut.FindAll("#student-view-details-title").Should().ContainSingle();
++        cut.Find("#student-view-groups").TextContent.Should().Contain("Chess Club");
++        cut.Find("#student-view-placement").TextContent.Should().Contain("Year 8 (8A)");
++    }
++
++    [TestMethod]
++    public void An_Inconsistent_Payload_Renders_Unavailable_Rather_Than_A_Negative_Segment()
++    {
++        // Marked (25) > Submitted (18): the funnel would have to draw a negative "awaiting marking".
++        // The panel says the truth is unavailable instead of clamping a chart (Q155).
++        var (cut, _) = RenderPage(InconsistentAssignmentStatsJson);
++        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments-unavailable").Should().ContainSingle());
++
++        var panel = cut.Find("#student-view-assignments");
++        panel.QuerySelectorAll(".stat").Should().BeEmpty();
++        panel.QuerySelectorAll(".stat-bar").Should().BeEmpty();
++        panel.QuerySelectorAll(".panel-section__count").Should().BeEmpty(
++            "the header count is a number too, and this panel presents no numbers while the data contradicts itself");
++    }
++
+     [TestMethod]
+     public void An_Empty_Tenant_Renders_The_Fallback_And_Asks_The_Api_Nothing()
+     {
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/OpenApiSurfaceArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/OpenApiSurfaceArchitectureTests.cs
+index fbee9229..da35416d 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/OpenApiSurfaceArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/OpenApiSurfaceArchitectureTests.cs
+@@ -54,16 +54,18 @@ public class OpenApiSurfaceArchitectureTests
+     /// the round-notification-templates-b3a applicability read, the redesigned authoring surface's
+     /// by-id read, and that surface's adopt/promote copy routes (measured 2026-10-21 from the generated
+     /// document);
+-    /// Students.Api measures <b>3 of 164</b>: round <c>subject-enrollment-requirement</c> layer 1 made
++    /// Students.Api measures <b>4 of 165</b>: round <c>subject-enrollment-requirement</c> layer 1 made
+     /// its first three typed endpoints (<c>GET /students/topic-enrollment</c>,
+     /// <c>GET /students/{studentId}/subjects</c>, <c>PUT /students/topic-assignments/{id}/requires-enrollment</c>),
+-    /// which is the whole delta — no other Students operation was touched. Raise the number in the same PR
++    /// and round <c>student-stats-l2b</c> added the fourth —
++    /// <c>GET /students/{id}/assignment-stats</c>, typed <c>Ok&lt;StudentAssignmentStats&gt;</c>. Those are the
++    /// whole delta — no other Students operation was touched. Raise the number in the same PR
+     /// that converts handlers — a conversion that leaves it stale means the pin no longer describes the
+     /// document.
+     /// </summary>
+     private const int SettingsSchemaPin = 55;
+ 
+-    private const int StudentsSchemaPin = 3;
++    private const int StudentsSchemaPin = 4;
+ 
+     /// <summary>Strips an ASP.NET route constraint (<c>{id:guid}</c>) into the OpenAPI template (<c>{id}</c>).</summary>
+     private static readonly Regex RouteConstraint = new(@"\{([^}:]+):[^}]*\}", RegexOptions.Compiled);
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/StudentAssignmentStatsPortPlacementTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/StudentAssignmentStatsPortPlacementTests.cs
+new file mode 100644
+index 00000000..d737d7e7
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/StudentAssignmentStatsPortPlacementTests.cs
+@@ -0,0 +1,118 @@
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// Issue #444 (layer L2b) — where the student assignment-stats port lives, and what its placement buys.
++/// The students view needs six counts the Assignments context owns; owner Q152 mirrored them into
++/// <c>Students.Core</c> rather than referencing an Assignments assembly, so the hop stays HTTP and
++/// <c>Students.Application</c> never grows a cross-context project reference.
++/// <list type="number">
++///   <item>the port interface is in <c>Students.Core/Services</c> and the HTTP implementation in
++///       <c>Students.Api/Services</c> — the <c>IActivityGroupAssignmentQuery</c> precedent;</item>
++///   <item><b>neither</b> <c>Students.Core</c> <b>nor</b> <c>Students.Application</c> carries an Assignments
++///       assembly reference. This is the guarantee the mirror rests on: the moment either project references
++///       an Assignments assembly, the mirror is redundant and the bounded-context boundary is gone.</item>
++/// </list>
++/// <para>
++/// Scope, stated because it is easy to mistake for the neighbouring guard:
++/// <c>TeacherScopeWiringArchitectureTests.CrossContextProjectReferences_DoNotGrow</c> counts
++/// Assignments→Students edges — a different direction. This test is the only pin on
++/// Students→Assignments, so it must not be deleted as "already covered".
++/// </para>
++/// <para>
++/// Follows the <c>PortalSessionClaimsPortWiringArchitectureTests</c> idiom: read-only source scans, a
++/// <c>FindRepoRoot()</c> walk-up that THROWS rather than passing vacuously, and count-based assertions with
++/// named reasons.
++/// </para>
++/// </summary>
++[TestClass]
++public class StudentAssignmentStatsPortPlacementTests
++{
++    private static readonly string RepoRoot = FindRepoRoot();
++
++    private const string PortInterfaceFile =
++        "src/Students/SchoolCollab.Students.Core/Services/IStudentAssignmentStatsReader.cs";
++
++    private const string PortImplementationFile =
++        "src/Students/SchoolCollab.Students.Api/Services/StudentAssignmentStatsReaderHttpClient.cs";
++
++    /// <summary>The two projects that must stay free of the Assignments context.</summary>
++    private static readonly string[] AssignmentsFreeProjects =
++    [
++        "src/Students/SchoolCollab.Students.Core/SchoolCollab.Students.Core.csproj",
++        "src/Students/SchoolCollab.Students.Application/SchoolCollab.Students.Application.csproj",
++    ];
++
++    [TestMethod]
++    public void PortInterface_LivesInStudentsCore_AndTheImplementationInStudentsApi()
++    {
++        var port = Read(PortInterfaceFile);
++        port.Should().Contain("interface IStudentAssignmentStatsReader",
++            $"the cross-context port must be declared in {PortInterfaceFile}, where the consuming handlers can "
++            + "see it without an API-side dependency");
++
++        var implementation = Read(PortImplementationFile);
++        implementation.Should().Contain(": IStudentAssignmentStatsReader",
++            $"the HTTP implementation must live in {PortImplementationFile} — the port itself stays free of "
++            + "HttpClient and of service discovery");
++        implementation.Should().Contain("CreateClient(\"assignments-api\")",
++            "the client rides the EXISTING named client (owner Q151), whose handler chain already supplies the "
++            + "tenant and the forwarded bearer token; a second registration would silently drop both");
++    }
++
++    [TestMethod]
++    public void StudentsCore_AndApplication_CarryNoAssignmentsAssemblyReference()
++    {
++        var references = AssignmentsFreeProjects
++            .Select(project => new
++            {
++                Project = project,
++                Exists = File.Exists(Path.Combine(RepoRoot, project)),
++                Source = File.Exists(Path.Combine(RepoRoot, project)) ? Read(project) : string.Empty,
++            })
++            .ToArray();
++
++        // Anti-vacuity: both project files must be found, and each must actually carry references — a scan
++        // that read an empty or missing file would satisfy the negative assertion below while proving nothing.
++        references.Should().HaveCount(AssignmentsFreeProjects.Length);
++        foreach (var project in references)
++        {
++            project.Exists.Should().BeTrue($"'{project.Project}' must exist — this guard reads its references");
++            project.Source.Should().Contain("<ProjectReference",
++                $"'{project.Project}' must declare at least one project reference; otherwise the scan below "
++                + "reads nothing and the rule is ceremony");
++        }
++
++        foreach (var project in references)
++        {
++            project.Source.Should().NotContain("Assignments",
++                $"'{project.Project}' must not reference an Assignments assembly: the six counts are MIRRORED "
++                + "into Students.Core (owner Q152), and the hop is HTTP. A project reference here would delete "
++                + "the reason the mirror exists — and with it the bounded-context boundary AGENTS.md § "
++                + "'Cross-context access' requires");
++        }
++    }
++
++    private static string Read(string relativePath)
++    {
++        var path = Path.Combine(RepoRoot, relativePath);
++        return File.Exists(path)
++            ? File.ReadAllText(path)
++            : throw new FileNotFoundException($"Expected source file not found under the repo: {relativePath}");
++    }
++
++    private static string FindRepoRoot()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost")))
++        {
++            dir = dir.Parent;
++        }
++
++        return dir?.FullName
++            ?? throw new InvalidOperationException(
++                "Could not locate the repository root from " + AppContext.BaseDirectory);
++    }
++}
+diff --git a/tests/SchoolCollab.Students.Api.Tests.Unit/StudentAssignmentStatsReaderHttpClientTests.cs b/tests/SchoolCollab.Students.Api.Tests.Unit/StudentAssignmentStatsReaderHttpClientTests.cs
+new file mode 100644
+index 00000000..0d2e28df
+--- /dev/null
++++ b/tests/SchoolCollab.Students.Api.Tests.Unit/StudentAssignmentStatsReaderHttpClientTests.cs
+@@ -0,0 +1,196 @@
++using System.Net;
++using System.Text;
++using FluentAssertions;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.DependencyInjection.Extensions;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Http;
++using SchoolCollab.Students.Api.Services;
++using SchoolCollab.Students.Core.DTOs;
++
++namespace SchoolCollab.Students.Api.Tests.Unit;
++
++/// <summary>
++/// Issue #444 (layer L2b) — the wire half of the student-view stats panel: <see cref="StudentAssignmentStatsReaderHttpClient"/>.
++/// <list type="number">
++///   <item>the request path carries the <c>/assignments</c> segment. The named client's base address is the
++///       host root, and layer L2a's route lives on the <c>/assignments</c> group, so a path without it would
++///       404 — and the panel would render a convincing "unavailable" against a healthy endpoint;</item>
++///   <item>the request carries the tenant and the forwarded bearer token. Asserted over the <b>real</b>
++///       handler chain registered here exactly as <c>Students.Api/Program.cs</c> registers it — a hand-built
++///       <c>HttpClient</c> would carry no handlers and the assertion would be vacuous;</item>
++///   <item>all six counts survive a real <c>ReadFromJsonAsync</c> round trip. <c>Students.Core</c> mirrors the
++///       Assignments contract by name, and a misspelled member deserializes to <c>0</c> silently — this is the
++///       only automated failure that catches it.</item>
++/// </list>
++/// </summary>
++[TestClass]
++public class StudentAssignmentStatsReaderHttpClientTests
++{
++    private static readonly Guid StudentId = Guid.Parse("a0000000-0000-0000-0000-0000000000ff");
++    private static readonly Guid TenantId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
++
++    /// <summary>The named client's configured base address, verbatim from <c>Students.Api/Program.cs</c>.</summary>
++    private const string BaseAddress = "https+http://assignments-api";
++
++    private const string BearerToken = "Bearer test-bearer-token";
++
++    /// <summary>Six <b>distinct</b> values, so a member bound to the wrong JSON name is visible rather than
++    /// coincidentally equal.</summary>
++    private const string StatsJson = """
++        {
++          "assigned": 24,
++          "sentOut": 21,
++          "submitted": 18,
++          "marked": 15,
++          "reviewRequired": 12,
++          "reviewed": 10
++        }
++        """;
++
++    private sealed record CapturedCall(Uri Uri, string TenantHeader, string Authorization);
++
++    /// <summary>The innermost handler: records what survived the delegating chain and answers a fixed body.</summary>
++    private sealed class CapturingHandler(string json, HttpStatusCode statusCode = HttpStatusCode.OK) : HttpMessageHandler
++    {
++        public List<CapturedCall> Calls { get; } = [];
++
++        protected override Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request, CancellationToken cancellationToken)
++        {
++            Calls.Add(new CapturedCall(
++                request.RequestUri!,
++                Header(request, "x-tenant-id"),
++                Header(request, "Authorization")));
++
++            return Task.FromResult(new HttpResponseMessage(statusCode)
++            {
++                Content = new StringContent(json, Encoding.UTF8, "application/json"),
++            });
++        }
++
++        private static string Header(HttpRequestMessage request, string name)
++            => request.Headers.TryGetValues(name, out var values) ? string.Join(",", values) : string.Empty;
++    }
++
++    /// <summary>Real-auth posture (<c>DisableOIDCAuth</c> off) is the only mode in which a bearer is forwarded
++    /// at all — in the dev bypass the handler is a strict no-op.</summary>
++    private sealed class StubFeatureFlags : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => false;
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default)
++            => Task.FromResult(false);
++    }
++
++    private static IHttpContextAccessor InboundRequest()
++    {
++        var context = new DefaultHttpContext();
++        context.Request.Headers["x-tenant-id"] = TenantId.ToString();
++        context.Request.Headers.Authorization = BearerToken;
++
++        return new HttpContextAccessor { HttpContext = context };
++    }
++
++    /// <summary>
++    /// The named client registered the way <c>Students.Api/Program.cs</c> registers it — same name, same base
++    /// address, same two forwarding handlers — with the capturing handler as the primary one.
++    /// </summary>
++    private static (StudentAssignmentStatsReaderHttpClient Sut, ServiceProvider Provider) BuildClient(
++        IHttpContextAccessor accessor, HttpMessageHandler primary)
++    {
++        var services = new ServiceCollection();
++        services.AddLogging();
++        services.AddSingleton(accessor);
++        services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags());
++        services.TryAddTransient<TenantForwardingDelegatingHandler>();
++        services.TryAddTransient<BearerForwardingDelegatingHandler>();
++
++        services.AddCrossModuleHttpClient("assignments-api", BaseAddress, propagateTenant: false)
++            .AddHttpMessageHandler<TenantForwardingDelegatingHandler>()
++            .AddHttpMessageHandler<BearerForwardingDelegatingHandler>()
++            .ConfigurePrimaryHttpMessageHandler(() => primary);
++
++        var provider = services.BuildServiceProvider();
++        var sut = new StudentAssignmentStatsReaderHttpClient(
++            provider.GetRequiredService<IHttpClientFactory>(),
++            NullLogger<StudentAssignmentStatsReaderHttpClient>.Instance);
++
++        return (sut, provider);
++    }
++
++    [TestMethod]
++    public async Task GetAsync_RequestsTheAssignmentsGroupPathOnTheNamedClient()
++    {
++        var handler = new CapturingHandler(StatsJson);
++        var (sut, provider) = BuildClient(InboundRequest(), handler);
++        using (provider)
++        {
++            await sut.GetAsync(StudentId);
++        }
++
++        var call = handler.Calls.Should().ContainSingle().Subject;
++        call.Uri.Host.Should().Be("assignments-api", "the hop rides the existing named client (Q151)");
++        call.Uri.AbsolutePath.Should().Be(
++            $"/assignments/{StudentId}/assignment-stats",
++            "the /assignments segment is REQUIRED: the named client's base address is the host root, and "
++            + "layer L2a's route lives on the /assignments group. Without it the hop 404s and the panel "
++            + "reports 'unavailable' against an endpoint that is working");
++    }
++
++    [TestMethod]
++    public async Task GetAsync_ForwardsTheTenantAndTheBearerThroughTheRealHandlerChain()
++    {
++        var handler = new CapturingHandler(StatsJson);
++        var (sut, provider) = BuildClient(InboundRequest(), handler);
++        using (provider)
++        {
++            await sut.GetAsync(StudentId);
++        }
++
++        var call = handler.Calls.Should().ContainSingle().Subject;
++        call.TenantHeader.Should().Be(TenantId.ToString(),
++            "assignments are strict-tenant entities; a tenant-less hop can resolve the wrong tenant's counts");
++        call.Authorization.Should().Be(BearerToken,
++            "the receiving API is bearer-gated (ar-24), so the caller's token has to travel with the request");
++    }
++
++    [TestMethod]
++    public async Task GetAsync_BindsAllSixCountsThroughTheJsonRoundTrip()
++    {
++        var handler = new CapturingHandler(StatsJson);
++        var (sut, provider) = BuildClient(InboundRequest(), handler);
++        using (provider)
++        {
++            var stats = await sut.GetAsync(StudentId);
++
++            // One assertion per member, named: a mirror property that no longer matches the Assignments
++            // contract's JSON name would deserialize to 0 here rather than failing to compile.
++            stats.Assigned.Should().Be(24);
++            stats.SentOut.Should().Be(21, "a misspelled 'SentOut' binds to 0, never to an error");
++            stats.Submitted.Should().Be(18);
++            stats.Marked.Should().Be(15);
++            stats.ReviewRequired.Should().Be(12, "the mirror's names must match the Assignments contract exactly");
++            stats.Reviewed.Should().Be(10);
++        }
++    }
++
++    [TestMethod]
++    public async Task GetAsync_ThrowsWhenTheAssignmentsApiAnswersNonSuccess()
++    {
++        // The port's contract is to THROW (the caller decides what a failed hop means): the Students endpoint
++        // turns this into a logged 502, which is what keeps the breakage visible to telemetry.
++        var handler = new CapturingHandler("{}", HttpStatusCode.InternalServerError);
++        var (sut, provider) = BuildClient(InboundRequest(), handler);
++        using (provider)
++        {
++            var act = () => sut.GetAsync(StudentId);
++
++            await act.Should().ThrowAsync<HttpRequestException>();
++        }
++    }
++}
+diff --git a/tests/SchoolCollab.Students.Api.Tests.Unit/StudentStatsRoutesTests.cs b/tests/SchoolCollab.Students.Api.Tests.Unit/StudentStatsRoutesTests.cs
+new file mode 100644
+index 00000000..8553844a
+--- /dev/null
++++ b/tests/SchoolCollab.Students.Api.Tests.Unit/StudentStatsRoutesTests.cs
+@@ -0,0 +1,105 @@
++using System.Net;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Hosting.Server;
++using Microsoft.AspNetCore.TestHost;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Students.Api;
++using SchoolCollab.Students.Core.DTOs;
++using SchoolCollab.Students.Core.Services;
++
++namespace SchoolCollab.Students.Api.Tests.Unit;
++
++/// <summary>
++/// Issue #444 (layer L2b) — wire tests for <code>GET /students/{id}/assignment-stats</code>: the Students
++/// endpoint the view calls, whose own hop failure is the round's Open decision A ("5xx problem, logged,
++/// never a 200 carrying zeros"). Follows the <c>StudentTargetRoutesTests.BuildApp</c> precedent: a bare
++/// <c>WebApplication</c> on <c>UseTestServer</c> with only <c>MapStudentEndpoints</c> mapped — no Postgres,
++/// no RabbitMQ, no <c>WebApplicationFactory&lt;Program&gt;</c>.
++/// </summary>
++[TestClass]
++public class StudentStatsRoutesTests
++{
++    private static readonly Guid StudentId = Guid.Parse("a0000000-0000-0000-0000-0000000000ff");
++
++    private static readonly StudentAssignmentStats Counts = new(
++        Assigned: 24, SentOut: 21, Submitted: 18, Marked: 15, ReviewRequired: 12, Reviewed: 10);
++
++    private sealed class StubFeatureFlags : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => featureKey == FeatureFlagKeys.DisableOIDCAuth;
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) =>
++            Task.FromResult(IsEnabled(featureKey));
++    }
++
++    /// <summary>The port's own contract: it throws when the Assignments API cannot be reached, and the
++    /// endpoint decides what that means for the wire.</summary>
++    private sealed class StubReader(Func<Guid, StudentAssignmentStats> answer) : IStudentAssignmentStatsReader
++    {
++        public List<Guid> RequestedStudentIds { get; } = [];
++
++        public Task<StudentAssignmentStats> GetAsync(Guid studentId, CancellationToken cancellationToken = default)
++        {
++            RequestedStudentIds.Add(studentId);
++            return Task.FromResult(answer(studentId));
++        }
++    }
++
++    private static WebApplication BuildApp(out HttpClient client, IStudentAssignmentStatsReader reader)
++    {
++        var builder = WebApplication.CreateBuilder();
++        builder.WebHost.UseTestServer();
++        builder.Logging.SetMinimumLevel(LogLevel.Warning);
++
++        builder.Services.AddSingleton(reader);
++        builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags());
++
++        var app = builder.Build();
++        app.MapStudentEndpoints(app.Services.GetRequiredService<IFeatureFlagService>());
++        app.StartAsync().GetAwaiter().GetResult();
++
++        client = ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
++        return app;
++    }
++
++    [TestMethod]
++    public async Task AssignmentStats_ServesTheDocumentedPathWithTheSixCounts()
++    {
++        var reader = new StubReader(_ => Counts);
++        await using var app = BuildApp(out var client, reader);
++
++        var response = await client.GetAsync($"/students/{StudentId}/assignment-stats");
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
++
++        var json = await response.Content.ReadAsStringAsync();
++        var stats = JsonSerializer.Deserialize<StudentAssignmentStats>(
++            json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
++
++        stats.Should().Be(Counts, "the endpoint forwards the port's answer verbatim");
++        reader.RequestedStudentIds.Should().ContainSingle()
++            .Which.Should().Be(StudentId, "the route binds the student id from the path");
++    }
++
++    [TestMethod]
++    public async Task AssignmentStats_HopFailure_ReturnsAProblemInsteadOfZeroCounts()
++    {
++        // Open decision A: a 200 carrying available:false (or six zeros) would hide a cross-context
++        // breakage from telemetry — the one place it should be loud.
++        var reader = new StubReader(_ => throw new HttpRequestException("assignments-api is down"));
++        await using var app = BuildApp(out var client, reader);
++
++        var response = await client.GetAsync($"/students/{StudentId}/assignment-stats");
++
++        response.StatusCode.Should().Be(HttpStatusCode.BadGateway,
++            "a failed hop is a 5xx problem, never a 200 that claims zeros");
++        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
++        (await response.Content.ReadAsStringAsync()).Should().Contain("Assignment stats are unavailable");
++    }
++}

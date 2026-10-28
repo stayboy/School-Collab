@@ -89,6 +89,11 @@ builder.Services.AddCrossModuleHttpClient("assignments-api", "https+http://assig
     .AddHttpMessageHandler<BearerForwardingDelegatingHandler>();
 builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IActivityGroupAssignmentQuery,
     SchoolCollab.Students.Api.Services.ActivityGroupAssignmentQueryHttpClient>();
+// Issue #444 (layer L2b): the student view's assignment counts ride the SAME named client above — no
+// second registration, because that pipeline is what makes the hop tenant-exact and bearer-forwarded
+// (owner Q151).
+builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IStudentAssignmentStatsReader,
+    SchoolCollab.Students.Api.Services.StudentAssignmentStatsReaderHttpClient>();
 
 builder.Services.AddStudentsCore(builder.Configuration);
 // Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)

@@ -54,7 +54,7 @@ public class StudentDetailSectionsTests
         // documents/solution/panel-layout-pattern.md §2: every block on a create/view/edit page is a
         // PanelSection, main column first, rail LAST. The page's blocks, in reading order:
         //   main — Details, Enrollment, Contacts, Guardians
-        //   rail — Activity groups, Subjects, Contact history
+        //   rail — Assignments, Activity groups, Subjects, Contact history
         // A block that reverts to a bare <h3> escapes the one-box rule (and its border, its count, its
         // header actions); a rail block moved into main silently changes how the page collapses at
         // 899px container width.
@@ -72,6 +72,7 @@ public class StudentDetailSectionsTests
         ];
         string[] railBlocks =
         [
+            "student-view-assignments",
             "student-view-groups",
             "student-view-subjects",
             "student-view-contact-history",
@@ -391,6 +392,33 @@ public class StudentDetailSectionsTests
         // Guardian contacts stay on the guardian cards (chips built from link.Contacts).
         source.Should().Contain("link.Contacts.Take(3)",
             "guardian contacts render on the guardian card, capped at three chips plus a 'View all' affordance");
+    }
+
+    [TestMethod]
+    public void Detail_Assignments_Panel_Is_A_Titled_Panel_That_Opens_The_Rail()
+    {
+        // Issue #444 (layer L2b) / owner Q124: the six assignment counts are the FIRST rail block, because
+        // they are what a form tutor opens this page to check. The ordering rule in
+        // Detail_Renders_Each_Block_As_A_Panel_In_The_Documented_Order pins the position; this pins the
+        // section's own identity — a panel that lost its title, or moved its count onto the page, would
+        // still pass an order check.
+        var source = ReadDetailSource();
+
+        var panelIdx = source.IndexOf("Id=\"student-view-assignments\"", StringComparison.Ordinal);
+        panelIdx.Should().BeGreaterThan(source.IndexOf("class=\"region-grid__rail\"", StringComparison.Ordinal),
+            "the panel lives in the rail");
+
+        var panel = source.Substring(panelIdx, source.IndexOf("</PanelSection>", panelIdx, StringComparison.Ordinal) - panelIdx);
+
+        panel.Should().Contain("Title=\"Assignments\"", "the panel names the relationship it presents");
+        panel.Should().Contain("Count=\"@AssignmentStatsCount\"",
+            "the header count is Assigned — and it is withheld entirely while the counts are unavailable");
+        panel.Should().Contain("student-view-assignments-unavailable",
+            "a failed hop renders one muted line with no numbers (Q153)");
+        panel.Should().Contain("student-view-assignments-empty",
+            "Assigned = 0 renders the explicit empty line, never a blank body");
+        panel.Should().NotContain("Collapsible=\"true\"",
+            "collapsibility is a per-panel opt-in the mock did not grant this panel (§6)");
     }
 
     [TestMethod]

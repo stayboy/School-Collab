@@ -24,7 +24,8 @@ public static class StudentEndpoints
             .MapTopicAssignmentRoutes()
             .MapEnrollmentExceptionRoutes()
             .MapStudentTopicAssignmentRoutes()
-            .MapStudentGuardianRoutes();   // G2: inherits RequireAuthorization from studentsGroup
+            .MapStudentGuardianRoutes()   // G2: inherits RequireAuthorization from studentsGroup
+            .MapStudentStatsRoutes();     // #444 L2b: /students/{id}/assignment-stats, same group policy
 
         // Phase 2 (spec activity-group-enrollment.md §7.1/§7.2): activity-group CRUD + membership
         // endpoints. Routes are root-level (/activity-groups/*) except the student→groups query, which
