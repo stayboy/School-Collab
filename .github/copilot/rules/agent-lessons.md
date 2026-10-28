@@ -14,6 +14,28 @@ entry here shrinks to a pointer at that check.
 
 ---
 
+## A correction is not finished until every copy of the old value is gone (2026-10-28)
+
+**Rule.** When a review finding corrects a **value** — a route, a signature, a file path, a claim about another
+assembly — grep the round doc for the old value and fix **every** occurrence before re-submitting. A round doc
+states the same fact in four places (the plan's prose, the expected-files table, the criteria, the test rows),
+and the table is the one a worker implements from; the criteria are not.
+
+**Evidence.** L2b's plan gate (iteration 1) found that the client's wire path omitted the `/assignments`
+segment. The amendment fixed C8 to `assignments/{studentId}/assignment-stats` and fixed the test row — and left
+the **implementation row** saying `{studentId}/assignment-stats`. Iteration 2 returned NO-GO on exactly that
+contradiction: *"the row the worker implements from still says the wrong wire path"*. The residue was not
+cosmetic — the panel would have rendered "unavailable" against a **healthy** endpoint, and C8's own test would
+have encoded the wrong path, so every test would have agreed with the bug. `grep -n 'assignment-stats' <round
+ doc>` after the amendment shows both strings side by side in one screen.
+
+**Trigger.** Any amendment after a gate NO-GO, a reviewer's `file:line` correction, or your own mid-plan
+change of mind. Before re-submitting, search the document for the value you just changed — a second hit that
+did not move is the defect. Distinct from *"A claim about the codebase is only as true as the search that
+produced it"*: that entry governs **making** a claim, this one governs **updating** one.
+
+---
+
 ## A source-string test can pass on a comment (2026-10-28)
 
 **Rule.** An assertion of the form "this `.razor` contains X" must match **markup** — a tag, an attribute, a
