@@ -9,18 +9,18 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// Source-level regression tests for the single-page student detail view
 /// (<c>SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor</c>).
 ///
-/// The student view was modernized to be a single scrollable page
-/// (Profile, Enrollments, Guardians, Contacts) with no <c>FluentTabs</c>.
-/// Adding tabs back, dropping a section, or removing the per-section
-/// heading would all be silent visual regressions that don't show up in
-/// the build. These checks catch that at compile/test time.
+/// The student view is a single scrollable page (Details, Enrollment, Contacts, Guardians in the
+/// main column; Activity groups, Subjects, Contact history in the rail) with no <c>FluentTabs</c>.
+/// Adding tabs back, dropping a block, moving a per-row action up into a block header, or silently
+/// losing a scoped-CSS class the markup consumes are all regressions that the build cannot see.
+/// These checks catch that at test time.
 ///
-/// Pattern: read the .razor source from disk and assert on its content.
-/// A bUnit render test would be more "true", but Detail.razor depends
-/// on StudentsApiClient (a concrete class with 100+ methods, no
-/// IStudentsClient interface) and TenantGate, both of which are heavy
-/// to fake. Source-level assertions are the right tool for the
-/// structural invariants the team actually cares about.
+/// Pattern: read the .razor source from disk and assert on its content. A bUnit render test would
+/// be more "true", but Detail.razor depends on StudentsApiClient (a concrete class with 100+
+/// methods, no IStudentsClient interface) and TenantGate, both of which are heavy to fake.
+/// Source-level assertions are the right tool for the structural invariants the team actually cares
+/// about — but they must assert on MARKUP, never on a comment: two of these tests once passed only
+/// because a code comment happened to contain the phrase they searched for.
 /// </summary>
 [TestClass]
 public class StudentDetailSectionsTests
@@ -49,94 +49,119 @@ public class StudentDetailSectionsTests
     }
 
     [TestMethod]
-    public void Detail_Has_All_Four_Section_Headings()
+    public void Detail_Renders_Each_Block_As_A_Panel_In_The_Documented_Order()
     {
-        // The four sections, in the order they should appear:
-        // 1. Title row
-        // 2. Profile (FluentCard with profile-grid)
-        // 3. Enrollments
-        // 4. Guardians (carries each guardian's contacts via the C1/C2/C3
-        //    columns + the 'View all (N) contacts' anchor)
-        // The standalone Contacts section is REMOVED (spec 2026-07-27
-        // §4.1) — guardian contacts are now inside the guardians grid.
+        // documents/solution/panel-layout-pattern.md §2: every block on a create/view/edit page is a
+        // PanelSection, main column first, rail LAST. The page's blocks, in reading order:
+        //   main — Details, Enrollment, Contacts, Guardians
+        //   rail — Activity groups, Subjects, Contact history
+        // A block that reverts to a bare <h3> escapes the one-box rule (and its border, its count, its
+        // header actions); a rail block moved into main silently changes how the page collapses at
+        // 899px container width.
         var source = ReadDetailSource();
-        // Use a flexible matcher: any <h3> that contains the section name.
-        source.Should().MatchRegex(@"<h3>\s*Enrollments\s*</h3>", "Enrollments section heading");
-        source.Should().MatchRegex(@"<h3>\s*Guardians\s*</h3>", "Guardians section heading");
-        // Regression guard: no standalone Contacts section anymore.
-        source.Should().NotMatchRegex(@"<h3>\s*Contacts\s*</h3>",
-            "the <h3>Contacts</h3> section is removed — contacts live in the guardians grid");
-        // Profile uses profile-grid, not a heading, but the section header
-        // is a class="profile-grid" element.
-        source.Should().Contain("class=\"profile-grid\"", "Profile section uses profile-grid layout");
+
+        source.Should().NotMatchRegex(@"<h3>\s*(Details|Enrollment|Contacts|Guardians|Activity groups|Subjects|Contact history)\s*</h3>",
+            "blocks are PanelSections, never bare <h3> headings");
+
+        string[] mainBlocks =
+        [
+            "student-view-details",
+            "student-view-enrollment",
+            "student-view-contacts",
+            "student-view-guardians",
+        ];
+        string[] railBlocks =
+        [
+            "student-view-groups",
+            "student-view-subjects",
+            "student-view-contact-history",
+        ];
+
+        var mainIdx = source.IndexOf("class=\"region-grid__main\"", StringComparison.Ordinal);
+        var railIdx = source.IndexOf("class=\"region-grid__rail\"", StringComparison.Ordinal);
+        mainIdx.Should().BeGreaterThan(-1, "the page uses the shared two-region skeleton");
+        railIdx.Should().BeGreaterThan(mainIdx, "the rail comes LAST (§2 — it is enrichment, not the point)");
+
+        var previous = mainIdx;
+        foreach (var id in mainBlocks)
+        {
+            var idx = source.IndexOf($"Id=\"{id}\"", StringComparison.Ordinal);
+            idx.Should().BeGreaterThan(previous, $"block '{id}' must appear in the main column, in order");
+            idx.Should().BeLessThan(railIdx, $"block '{id}' belongs to the main column, not the rail");
+            previous = idx;
+        }
+
+        previous = railIdx;
+        foreach (var id in railBlocks)
+        {
+            var idx = source.IndexOf($"Id=\"{id}\"", StringComparison.Ordinal);
+            idx.Should().BeGreaterThan(previous, $"rail block '{id}' must appear after the rail opens, in order");
+            previous = idx;
+        }
     }
 
     [TestMethod]
-    public void Enroll_Action_Lives_In_Section_Header()
+    public void Enroll_Action_Lives_In_The_Enrollment_Panel_Header()
     {
-        // Enroll is the only section-level action: it always applies and
-        // never needs per-row context. It belongs in the section header
-        // next to the <h3>Enrollments</h3> title.
+        // Enroll is the Enrollment block's only action and it always applies — it needs no per-row
+        // context, so it belongs in that block's header row (§2's "the first block's header carries
+        // only its own controls"). One action ⇒ RowActionsMenu renders a labelled button, not a kebab.
         var source = ReadDetailSource();
 
-        // Locate the Enrollments section header. The Enroll button's label
-        // ("Enroll") is the content of a <FluentButton>; the text appears
-        // on its own line between the opening tag's `>` and the closing
-        // `</FluentButton>`. We assert by structural position rather than
-        // by exact substring so the test survives whitespace tweaks.
-        var headerStart = source.IndexOf("<h3>Enrollments</h3>", StringComparison.Ordinal);
-        headerStart.Should().BeGreaterThan(-1, "Enrollments section header exists");
+        var panelIdx = source.IndexOf("Id=\"student-view-enrollment\"", StringComparison.Ordinal);
+        panelIdx.Should().BeGreaterThan(-1, "the Enrollment block exists");
 
-        // Slice from the header onward, then find the first <FluentDataGrid>
-        // and the first <FluentMessageBar> — the section ends at the
-        // earlier of the two. The Enroll button must come before that.
-        var afterHeader = source.Substring(headerStart);
-        var firstEnroll = afterHeader.IndexOf("Enroll", StringComparison.Ordinal);
-        // Skip the <h3>Enrollments</h3> header itself: it contains "Enroll".
-        var headerMatchLen = "<h3>Enrollments</h3>".Length;
-        firstEnroll = afterHeader.IndexOf("Enroll", headerMatchLen, StringComparison.Ordinal);
-        firstEnroll.Should().BeGreaterThan(-1, "Enroll button label appears after the section header");
+        var headerActionsIdx = source.IndexOf("<HeaderActions>", panelIdx, StringComparison.Ordinal);
+        var bodyIdx = source.IndexOf("<ChildContent>", panelIdx, StringComparison.Ordinal);
+        headerActionsIdx.Should().BeGreaterThan(panelIdx, "the Enrollment block has a header-actions slot");
+        headerActionsIdx.Should().BeLessThan(bodyIdx, "the slot is in the HEADER, before the body");
 
-        var firstGrid = afterHeader.IndexOf("<FluentDataGrid", StringComparison.Ordinal);
-        var firstMsgBar = afterHeader.IndexOf("<FluentMessageBar", StringComparison.Ordinal);
-        var nextSection = firstGrid >= 0 && firstMsgBar >= 0 ? Math.Min(firstGrid, firstMsgBar)
-                       : firstGrid >= 0 ? firstGrid
-                       : firstMsgBar;
-        nextSection.Should().BeGreaterThan(-1, "Enrollments section has either a grid or an empty-state message bar");
-        firstEnroll.Should().BeLessThan(nextSection,
-            "Enroll button is in the section header, not in the grid");
+        // The action list is bound there, and it is the one that calls OnEnrollAsync.
+        source.Should().Contain("Actions=\"@EnrollmentPanelActions\"",
+            "the header slot renders the Enrollment panel's action list");
+        var actionsIdx = source.IndexOf("private IReadOnlyList<RowAction> EnrollmentPanelActions", StringComparison.Ordinal);
+        actionsIdx.Should().BeGreaterThan(-1, "the Enrollment panel's action list is declared");
+        source.Substring(actionsIdx).Should().Contain("OnEnrollAsync",
+            "the panel action is Enroll");
+
+        // …and Enroll is NOT in the page-level kebab: the page kebab carries page actions only
+        // (edit / copy / back), so an author does not have to hunt two menus for the same verb.
+        var pageActionsIdx = source.IndexOf("private IReadOnlyList<RowAction> PageActions", StringComparison.Ordinal);
+        var pageActionsEnd = source.IndexOf("];", pageActionsIdx, StringComparison.Ordinal);
+        source.Substring(pageActionsIdx, pageActionsEnd - pageActionsIdx)
+            .Should().NotContain("OnEnrollAsync", "Enroll is the Enrollment block's action, not the page's");
     }
 
     [TestMethod]
-    public void Transfer_And_Withdraw_Actions_Are_Per_Row()
+    public void Transfer_And_Withdraw_Actions_Are_Per_Placement()
     {
-        // Transfer and Withdraw are inherently per-enrollment operations
-        // (the row they affect). They live inside a TemplateColumn in the
-        // grid, and the row only renders them when that row's enrollment
-        // is the active one (IsActiveEnrollment predicate).
+        // Transfer and Withdraw are inherently per-enrollment operations — they change the row they
+        // sit on. They are built by NodeActions(enrollment) for the ACTIVE node only, so a closed
+        // placement renders no actions at all (RowActionsMenu renders nothing for an empty list).
         var source = ReadDetailSource();
 
-        // Both labels must appear in the markup.
-        source.Should().Contain("Transfer", "Transfer action button label is present");
-        source.Should().Contain("Withdraw", "Withdraw action button label is present");
+        var nodeActionsIdx = source.IndexOf("private IReadOnlyList<RowAction> NodeActions(", StringComparison.Ordinal);
+        nodeActionsIdx.Should().BeGreaterThan(-1, "the per-placement action builder exists");
+        var nodeActionsEnd = source.IndexOf("\n\n", nodeActionsIdx, StringComparison.Ordinal);
+        var nodeActions = source.Substring(nodeActionsIdx, nodeActionsEnd - nodeActionsIdx);
 
-        // They must come AFTER <FluentDataGrid> in source order (inside
-        // the row template, not in the section header).
-        var gridStart = source.IndexOf("<FluentDataGrid", StringComparison.Ordinal);
-        gridStart.Should().BeGreaterThan(-1, "Enrollments data grid exists");
-        var afterGrid = source.Substring(gridStart);
+        nodeActions.Should().Contain("OnTransferAsync", "Transfer is a placement action");
+        nodeActions.Should().Contain("OnWithdrawAsync", "Withdraw is a placement action");
+        nodeActions.Should().Contain("IsActiveEnrollment(enrollment)",
+            "only the current placement may be transferred or withdrawn — a closed one has no actions");
 
-        // Both labels must appear inside the grid (and the per-row
-        // OnClick handlers must be inside too).
-        afterGrid.Should().Contain("OnTransferAsync", "Transfer OnClick is wired inside the grid row template");
-        afterGrid.Should().Contain("OnWithdrawAsync", "Withdraw OnClick is wired inside the grid row template");
-        afterGrid.Should().Contain("Transfer", "Transfer label is rendered inside the grid");
-        afterGrid.Should().Contain("Withdraw", "Withdraw label is rendered inside the grid");
+        // The list is consumed inside the timeline node, not in the panel header.
+        var timelineIdx = source.IndexOf("<ul class=\"tl\">", StringComparison.Ordinal);
+        timelineIdx.Should().BeGreaterThan(-1, "the placement history renders as a list");
+        source.Substring(timelineIdx).Should().Contain("NodeActions(enrollment)",
+            "each timeline node renders its own actions");
 
-        // The Actions column with the per-row buttons uses the
-        // IsActiveEnrollment helper — assert its presence so a future
-        // regression (e.g. dropping the gate) would be caught.
-        source.Should().Contain("IsActiveEnrollment", "Per-row actions are gated by IsActiveEnrollment");
+        // The panel-level list must not carry them: a transfer applies to ONE placement.
+        var panelActionsIdx = source.IndexOf("private IReadOnlyList<RowAction> EnrollmentPanelActions", StringComparison.Ordinal);
+        var panelActionsEnd = source.IndexOf("];", panelActionsIdx, StringComparison.Ordinal);
+        var panelActions = source.Substring(panelActionsIdx, panelActionsEnd - panelActionsIdx);
+        panelActions.Should().NotContain("OnTransferAsync");
+        panelActions.Should().NotContain("OnWithdrawAsync");
     }
 
     [TestMethod]
@@ -261,75 +286,41 @@ public class StudentDetailSectionsTests
     }
 
     [TestMethod]
-    public void Detail_Embeds_Guardians_And_Contacts_Subcomponents()
+    public void Guardians_Block_Renders_Cards_And_Wires_The_View_All_Contacts_Dialog()
     {
-        // The view page is read-only and embeds two subcomponents:
-        //   - StudentGuardiansList  → "Guardians" section (who is
-        //     linked, with per-row Edit / Remove buttons that fire
-        //     EventCallback<StudentGuardianViewDto> back to the page).
-        //     The page owns the link list + the dialog opens + the
-        //     API calls. Replaces the deprecated <GuardiansTab>;
-        //     GuardianPickerDialog / GuardianFormDialog are opened
-        //     via ShowShellDialogAsync from the page-level
-        //     OnManageGuardiansAsync / OnEditGuardianAsync handlers.
-        //   - Guardians grid (StudentGuardiansList -> GuardianGrid
-        //     Linked mode) carries each guardian's contacts via the
-        //     C1/C2/C3 columns, with the per-row 'View all (N)
-        //     contacts' anchor opening <GuardianContactsDialog> via
-        //     OnViewAllContactsAsync.
-        // The student's own contact edit surface was MOVED to the Edit
-        // form (Edit.razor) — see EditContactEditorTests. The view page
-        // is read-only and the contact editor's write actions (Add,
-        // Verify, Set primary, Remove) don't belong on it.
-        // The component names in the markup confirm the wiring.
+        // Each guardian is a CARD (monogram, name, relationship/emergency labels, contact chips, its own
+        // kebab) — not a grid row with C1/C2/C3 columns. The contact-column grid was the reason this
+        // block's content could not fit the rail, and it truncated a guardian's 4th contact out of
+        // existence; the card shows the first three chips and hands the rest to the read-only dialog.
         var source = ReadDetailSource();
-        source.Should().Contain("<StudentGuardiansList",
-            "the Guardians section embeds the page-side StudentGuardiansList (replaces the deprecated GuardiansTab)");
-        source.Should().Contain("OnManageGuardiansAsync",
-            "the 'Manage' button is wired to open GuardianPickerDialog via ShowShellDialogAsync");
-        source.Should().Contain("OnEditGuardianAsync",
-            "the per-row 'Edit' button is wired to open GuardianFormDialog in ForEdit mode");
+
+        source.Should().NotMatchRegex(@"<StudentGuardiansList\s+[A-Z]",
+            "the guardian list is rendered inline as cards on this page — the grid subcomponent is retired here, "
+            + "and this matcher is on the ELEMENT, not on the name: the name still appears in comments and in "
+            + "<see cref=\"…\"/> references, which is how the first version of this assertion passed by accident");
         source.Should().NotContain("<GuardiansTab ",
-            "the deprecated <GuardiansTab> must NOT be rendered — replaced by the page-side dialog flow");
-        source.Should().NotContain("<ContactsEditor",
-            "the view page does NOT embed <ContactsEditor> — contact editing is on the Edit page");
-        // Spec 2026-07-27 §4.1: the standalone Contacts section is GONE —
-        // guardian contacts are inside the guardians grid (C1/C2/C3 + the
-        // 'View all (N) contacts' anchor -> GuardianContactsDialog). The
-        // Contacts section was redundant and is replaced by the grid.
-        source.Should().NotContain("<GuardianContactsList",
-            "the standalone Contacts section is removed — guardian contacts live in the guardians grid");
-        source.Should().NotContain("<h3>Contacts</h3>",
-            "the <h3>Contacts</h3> section header is removed (replaced by the grid)");
-    }
+            "the deprecated <GuardiansTab> must NOT be rendered");
 
-    [TestMethod]
-    public void Section_GuardiansGrid_Wires_OnViewAllContacts_To_GuardianContactsDialog()
-    {
-        // Spec 2026-07-27 §4.4 / §4.5: the per-row "View all (N) contacts"
-        // anchor (rendered by GuardianGrid in the Linked Name cell when
-        // TotalContactCount > 3) must open the read-only
-        // GuardianContactsDialog. StudentGuardiansList forwards the
-        // EventCallback; the page (Detail.razor) owns the dialog open via
-        // DialogService.ShowReadonlyDialogAsync<GuardianContactsDialog>.
-        var source = ReadDetailSource();
+        source.Should().Contain("<ul class=\"guardian-cards\">", "guardians render as cards");
+        source.Should().Contain("@key=\"link.GuardianId\"", "the card loop is keyed by guardian id");
+        source.Should().Contain("GuardianRowActions(link)", "each card carries its own kebab");
 
-        // The <StudentGuardiansList> element wires the callback.
-        source.Should().Contain("OnViewAllContacts=\"OnViewAllContactsAsync\"",
-            "the StudentGuardiansList forwards the 'View all' anchor click to the page");
-        // The page method opens the dialog via the read-only helper.
-        source.Should().Contain("OnViewAllContactsAsync(",
-            "the page defines an OnViewAllContactsAsync handler");
+        // The 'View all' affordance opens the read-only contact dialog, and only when there ARE more.
+        source.Should().Contain("link.HasMoreContacts",
+            "the 'View all' affordance is gated by HasMoreContacts, never rendered as a dead link");
+        source.Should().Contain("OnViewAllContactsAsync(link)",
+            "the card's 'View all' chip calls the page handler");
+
+        source.Should().Contain("OnManageGuardiansAsync",
+            "the block's header action opens GuardianPickerDialog via ShowShellDialogAsync");
+        source.Should().Contain("OnEditGuardianAsync",
+            "the card kebab opens GuardianFormDialog in ForEdit mode");
         source.Should().Contain("ShowReadonlyDialogAsync<GuardianContactsDialog>(",
             "the handler opens GuardianContactsDialog via the DialogServiceExtensions.ShowReadonlyDialogAsync helper");
-        // GuardianId / GuardianName / Subtitle are passed under the dialogs' key
-        // constants, which are nameof(<Parameter>).
         source.Should().Contain("GuardianContactsDialog.GuardianIdKey",
             "GuardianId is passed under the dialog's published [Parameter] key");
-        source.Should().Contain("GuardianContactsDialog.GuardianNameKey",
-            "GuardianName is passed under its key");
-        source.Should().Contain("GuardianContactsDialog.SubtitleKey",
-            "Subtitle is passed under its key");
+        source.Should().Contain("GuardianContactsDialog.GuardianNameKey", "GuardianName is passed under its key");
+        source.Should().Contain("GuardianContactsDialog.SubtitleKey", "Subtitle is passed under its key");
     }
 
     [TestMethod]
@@ -347,134 +338,170 @@ public class StudentDetailSectionsTests
     }
 
     [TestMethod]
-    public void Profile_Card_Has_No_Direct_Contact_Subheader_Or_Divider()
+    public void The_View_Page_Is_Read_Only_It_Never_Embeds_A_Contact_Editor()
     {
-        // The view-page Profile card used to host a Direct contact
-        // sub-section (a <FluentDivider class="profile-section-sep"> +
-        // a <h4>Direct contact</h4> sub-header + a <ContactsEditor
-        // OwnerType=Student>). That whole block has been MOVED to the
-        // Edit form. The view page is read-only.
-        // Asserted by structure: between the Profile <FluentCard> opening
-        // tag and its matching </FluentCard> closing tag, none of those
-        // markers appear.
+        // The view page shows data; it does not edit it. Contact EDITING (add / verify / set primary /
+        // remove) lives on the Edit form — EditContactEditorTests owns that side. This test replaces the
+        // old "Profile card holds no Direct contact sub-section" check, whose subject (the FluentCard's
+        // Direct contact block) no longer exists: the durable rule is that no editor appears HERE, not
+        // that one particular card refuses it.
         var source = ReadDetailSource();
-        var cardOpen = source.IndexOf("<FluentCard class=\"detail-card\">", StringComparison.Ordinal);
-        cardOpen.Should().BeGreaterThan(-1, "the Profile FluentCard exists");
-        var cardClose = source.IndexOf("</FluentCard>", cardOpen, StringComparison.Ordinal);
-        cardClose.Should().BeGreaterThan(-1, "the Profile FluentCard is closed");
-        var cardBody = source.Substring(cardOpen, cardClose - cardOpen);
 
-        cardBody.Should().NotContain("OwnerType=\"ContactOwnerType.Student\"",
-            "the student's own ContactsEditor is NOT rendered in the Profile card anymore (moved to the Edit form)");
-        cardBody.Should().NotContain("profile-section-sep",
-            "the .profile-section-sep divider was only used to separate the Direct contact sub-section — it is gone");
-        cardBody.Should().NotContain("section-header--sub",
-            "the .section-header--sub h4 was only used for the Direct contact sub-section — it is gone");
-        cardBody.Should().Contain("class=\"profile-grid\"",
-            "the Profile stat-cards are still inside the Profile card");
+        source.Should().NotContain("<ContactsEditor",
+            "the view page does NOT embed <ContactsEditor> — contact editing is on the Edit page");
+        source.Should().NotContain("OwnerType=\"ContactOwnerType.Student\"",
+            "no owner-scoped editor is rendered on the read-only view page");
+        source.Should().NotContain("profile-section-sep",
+            "the .profile-section-sep divider only existed to fence the old Direct contact block");
+        source.Should().NotContain("section-header--sub",
+            "the .section-header--sub h4 was the old Direct contact sub-header");
+
+        // The student's own contacts are still SHOWN — a read-only chip list, with the edit path named
+        // in the footer note instead of an inline editor.
+        source.Should().Contain("Id=\"student-view-contacts\"", "the Contacts block exists");
+        source.Should().Contain("class=\"contact-chips\"", "the contacts render as a read-only chip list");
     }
 
     [TestMethod]
-    public void Contacts_Section_IsRemoved_GuardiansGridCarriesContacts()
+    public void Contacts_Block_Lists_The_Students_Own_Contacts_Not_Guardian_Copies()
     {
-        // Spec 2026-07-27 §4.1: the standalone Contacts section is GONE.
-        // Guardian contacts are rendered inside the guardians grid —
-        // C1/C2/C3 columns plus the 'View all (N) contacts' anchor that
-        // opens <GuardianContactsDialog>. The view page no longer has a
-        // <h3>Contacts</h3> section header or a <GuardianContactsList>
-        // embed.
+        // Two different contact lists, deliberately adjacent and deliberately distinct:
+        //   • Contacts block — the STUDENT's own rows (ContactOwnerType.Student), loaded from
+        //     ListContactsAsync. Before this block existed the page rendered contact HISTORY without
+        //     ever showing the current list: an audit trail of a list the reader could not see.
+        //   • Guardian cards — each guardian's own contacts, on that guardian's card.
+        // Conflating them (rendering guardian contacts in the Contacts block) would attribute a
+        // guardian's mobile number to the student.
         var source = ReadDetailSource();
-        source.Should().NotContain("<h3>Contacts</h3>",
-            "the Contacts section header is removed");
-        source.Should().NotContain("<GuardianContactsList",
-            "the GuardianContactsList embed is removed");
-        // And the replacement IS wired: the guardians grid still has the
-        // 'View all' anchor plumbing via StudentGuardiansList (regression
-        // guard against accidentally removing the wiring at the same
-        // time as the section).
-        source.Should().Contain("OnViewAllContacts=\"OnViewAllContactsAsync\"",
-            "the guardians grid still wires the 'View all' anchor to the dialog");
+
+        source.Should().Contain("ListContactsAsync(ContactOwnerType.Student, Id",
+            "the Contacts block loads the student-owner contact rows");
+
+        var contactsIdx = source.IndexOf("Id=\"student-view-contacts\"", StringComparison.Ordinal);
+        contactsIdx.Should().BeGreaterThan(-1, "the Contacts block exists");
+        var guardiansIdx = source.IndexOf("Id=\"student-view-guardians\"", StringComparison.Ordinal);
+        guardiansIdx.Should().BeGreaterThan(contactsIdx,
+            "Contacts comes before Guardians: the student's own data precedes its people");
+
+        // The block's own hint names the scope, so a reader never has to guess whose numbers these are.
+        source.Substring(contactsIdx, guardiansIdx - contactsIdx)
+            .Should().Contain("student's <strong>own</strong> contacts",
+                "the block states whose contacts it lists");
+
+        // Guardian contacts stay on the guardian cards (chips built from link.Contacts).
+        source.Should().Contain("link.Contacts.Take(3)",
+            "guardian contacts render on the guardian card, capped at three chips plus a 'View all' affordance");
     }
 
     [TestMethod]
-    public void Detail_CSS_Defines_Detail_Card_Popup_Clipping_Fix()
+    public void Detail_Razor_Css_Still_Defines_Every_Class_The_Markup_Consumes()
     {
-        // The popup-clipping CSS workaround is REQUIRED because the Profile
-        // FluentCard hosts FluentSelect / CodedValueDropdown descendants. If
-        // someone removes it, dropdowns in any future inline control would
-        // silently clip.
+        // Scoped CSS (.razor.css) silently DROPS a rule whose selector matches nothing at build time? No —
+        // it silently keeps it, but the reverse failure is the one that bites: a rewrite of the component
+        // drops a rule while the markup still references the class, and the page renders unstyled with no
+        // warning. dialog-ui §3 calls this out. So: every class the markup uses must exist in the scoped
+        // file, which is the durable half of the retired '.page-container/.title-row/.action-bar' check —
+        // those three classes were deleted with the layout they styled, and asserting them would pin a
+        // dead implementation rather than a live guarantee.
         var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-        var cssPath = Path.GetFullPath(Path.Combine(
-            asmDir,
-            "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Application",
-            "Components", "Pages", "Students", "Detail.razor.css"));
-        File.Exists(cssPath).Should().BeTrue();
-        var css = File.ReadAllText(cssPath);
-        css.Should().Contain(".detail-card", "the .detail-card rule is required for the popup-clipping fix");
-        css.Should().Contain("contain: none !important", "the popup-clipping fix uses contain: none !important on the FluentCard");
-        css.Should().Contain("position: fixed !important", "the popup-clipping fix pins popups to the viewport");
-    }
+        var pagesDir = Path.GetFullPath(Path.Combine(
+            asmDir, "..", "..", "..", "..", "..",
+            "src", "Students", "SchoolCollab.Students.Application", "Components", "Pages", "Students"));
 
-    [TestMethod]
-    public void Detail_Preserves_Legacy_Layout_CSS_Classes()
-    {
-        // The .page-container, .title-row, .action-bar, .spinner-container
-        // rules were on the prior implementation and are still in use. The
-        // dialog-ui skill (§3) calls out that scoped-CSS hazards silently
-        // drop rules if someone rewrites the file.
-        var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-        var cssPath = Path.GetFullPath(Path.Combine(
-            asmDir,
-            "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Application",
-            "Components", "Pages", "Students", "Detail.razor.css"));
-        var css = File.ReadAllText(cssPath);
-        css.Should().Contain(".page-container");
-        css.Should().Contain(".title-row");
-        css.Should().Contain(".action-bar");
-        css.Should().Contain(".spinner-container");
+        var source = File.ReadAllText(Path.Combine(pagesDir, "Detail.razor"));
+        var css = File.ReadAllText(Path.Combine(pagesDir, "Detail.razor.css"));
+
+        string[] pageOwnedClasses =
+        [
+            "student-monogram", "student-title", "student-meta", "student-meta__sep",
+            "fact-grid",
+            "placement", "placement__cell", "placement__label", "placement__value",
+            "placement__gap", "placement__aside",
+            "subrule", "tl", "tl__item", "tl__node", "tl__row", "tl__grade", "tl__actions", "tl__meta",
+            "contact-chips", "contact-chip", "contact-chip__channel", "contact-chip__note", "contact-chip__more",
+            "guardian-cards", "guardian-card", "guardian-card__body", "guardian-card__top",
+            "guardian-card__name", "guardian-card__primary", "guardian-card__actions",
+            "group-chip", "group-chip__category",
+            "muted-note", "muted", "spinner-container",
+            "student-contact-history", "student-contact-history__entry",
+        ];
+
+        foreach (var cls in pageOwnedClasses)
+        {
+            source.Should().Contain(cls, $"the markup must still use '{cls}' — this list drives the assertion below");
+            css.Should().Contain($".{cls}", $"Detail.razor.css must define '.{cls}', which the markup consumes");
+        }
+
+        // The pill and the design tokens are SHARED, not page-scoped: they live in app.css so the next
+        // surface gets them for free. Pinning the split here stops both copies appearing.
+        css.Should().NotContain(".status-pill",
+            ".status-pill is shared CSS in app.css (Admin.Shared/wwwroot) — never duplicate it per page");
+        css.Should().NotContain("--status-success-bg:",
+            "the state palette is DECLARED once, in app.css's :root and [data-theme=dark] blocks — consuming "
+            + "the token here is the point, redefining it is the defect");
+        source.Should().NotContain("color: #",
+            "no literal colours in the markup; every colour comes from a token");
+        css.Should().NotContain("#fafafa",
+            "the old .student-contact-history__entry fell back to a literal #fafafa, which painted a white "
+            + "card in dark mode — dead token fallbacks must not come back");
     }
 
     // --- Activity Groups section (spec: activity-group-enrollment.md) ---
 
-    // AC-27 (FR-28): detail page shows Activity Groups section
+    // AC-27 (FR-28): detail page shows an Activity groups block
     [TestMethod]
     public void Detail_Has_ActivityGroups_Section()
     {
         var source = ReadDetailSource();
-        source.Should().MatchRegex(@"<h3>\s*Activity Groups\s*</h3>",
-            "the student Detail page must have an Activity Groups section heading");
+        source.Should().Contain("Id=\"student-view-groups\"",
+            "the student Detail page must have an Activity groups block");
+        source.Should().Contain("Title=\"Activity groups\"",
+            "the block's title is sentence case — Title Case is the page title's privilege, and the "
+            + "section headings were renamed after 'Activity Groups' read as a title among labels");
     }
 
-    // AC-27 (FR-28): Activity Groups section appears after Enrollments
+    // AC-27 (FR-28): the Activity groups block sits after Enrollment in reading order
     [TestMethod]
     public void Detail_ActivityGroups_Section_After_Enrollments()
     {
         var source = ReadDetailSource();
-        var enrollmentsIdx = source.IndexOf("<h3>Enrollments</h3>", StringComparison.OrdinalIgnoreCase);
-        var activityGroupsIdx = source.IndexOf("<h3>Activity Groups</h3>", StringComparison.OrdinalIgnoreCase);
-        enrollmentsIdx.Should().BeGreaterThan(0, "Enrollments section must exist");
-        activityGroupsIdx.Should().BeGreaterThan(enrollmentsIdx,
-            "Activity Groups section must appear after Enrollments");
+        var enrollmentsIdx = source.IndexOf("Id=\"student-view-enrollment\"", StringComparison.Ordinal);
+        var groupsIdx = source.IndexOf("Id=\"student-view-groups\"", StringComparison.Ordinal);
+        enrollmentsIdx.Should().BeGreaterThan(0, "the Enrollment block must exist");
+        groupsIdx.Should().BeGreaterThan(enrollmentsIdx,
+            "Activity groups must appear after Enrollment");
     }
 
-    // AC-28 (FR-29): Join Group button in section header
+    // AC-28 (FR-29): the join action is the block's header action
     [TestMethod]
-    public void Detail_ActivityGroups_Has_JoinGroup_Button()
+    public void Detail_ActivityGroups_Has_JoinGroup_Action()
     {
         var source = ReadDetailSource();
-        source.Should().Contain("Join Group",
-            "the Activity Groups section header must contain a Join Group button");
+
+        // Assert on the ACTION LIST, not on a phrase: this test used to pass because a code comment
+        // happened to contain "Join Group", which meant the action could have been renamed or removed
+        // and the assertion would still have gone green.
+        var actionsIdx = source.IndexOf("private IReadOnlyList<RowAction> GroupPanelActions", StringComparison.Ordinal);
+        actionsIdx.Should().BeGreaterThan(-1, "the Activity groups block declares its action list");
+        var actionsEnd = source.IndexOf("];", actionsIdx, StringComparison.Ordinal);
+        var actions = source.Substring(actionsIdx, actionsEnd - actionsIdx);
+        actions.Should().Contain("OnJoinGroupAsync", "the block's action joins a group");
+        actions.Should().Contain("Join activity group", "the action carries a visible label");
+
+        source.Should().Contain("Actions=\"@GroupPanelActions\"",
+            "the block's header renders that list");
     }
 
-    // AC-30 (FR-31): Leave button per membership row
+    // AC-30 (FR-31): each membership chip carries a remove (leave) affordance
     [TestMethod]
     public void Detail_ActivityGroups_Has_Leave_Action()
     {
         var source = ReadDetailSource();
-        source.Should().Contain("Leave",
-            "each active membership row must have a Leave button");
+        source.Should().Contain("OnRemove=\"() => OnLeaveGroupAsync(group.Id)\"",
+            "each membership chip is removable — the chip's ✕ leaves the group");
+        source.Should().Contain("<RailChip ",
+            "memberships render as chips; a chip carries its own remove affordance, so the leave action "
+            + "cannot drift away from the row it applies to");
     }
 
     // AC-31 (FR-32, NFR-11): section hidden when feature flag is OFF
@@ -486,8 +513,8 @@ public class StudentDetailSectionsTests
             "the Activity Groups section is NOT gated any more — FEATURE:EnableActivityGroups was retired "
             + "on 2026-10-26 and activity groups are an established feature, so re-wrapping this section in "
             + "a gate would silently hide it again");
-        source.Should().Contain("Join Group",
-            "the section itself must survive the gate's removal — it is the student's group membership surface");
+        source.Should().Contain("Join activity group",
+            "the block itself must survive the gate's removal — it is the student's group membership surface");
     }
 
     // ─── Contact history section (spec 2026-08-17 §6.3 / §7.3) ─────────
@@ -497,16 +524,16 @@ public class StudentDetailSectionsTests
     // source-level pattern used by the other section tests.
 
     [TestMethod]
-    public void Detail_Has_ContactHistory_Section_With_Count_Badge()
+    public void Detail_Has_ContactHistory_Section_With_Count()
     {
         var source = ReadDetailSource();
-        source.Should().Contain("Contact history",
-            "the student Detail page must render a Contact history section");
-        // The header shows a live count badge next to the title.
-        source.Should().Contain("_contactHistory.Length",
-            "the Contact history header shows a count badge bound to the loaded entries");
-        source.Should().Contain("<FluentBadge",
-            "the Contact history count badge uses a FluentBadge");
+        source.Should().Contain("Title=\"Contact history\"",
+            "the student Detail page must render a Contact history block");
+        // The count is the PanelSection's own, not a hand-rolled badge: one count mechanism for every
+        // block (§2), which is why the old '<FluentBadge> next to the heading' assertion is gone — it
+        // pinned the implementation and would have passed for any badge anywhere on the page.
+        source.Should().Contain("Count=\"@_contactHistory.Length\"",
+            "the Contact history header shows a live count of the loaded entries");
     }
 
     [TestMethod]

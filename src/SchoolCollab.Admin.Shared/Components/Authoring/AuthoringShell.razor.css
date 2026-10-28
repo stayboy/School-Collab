@@ -53,6 +53,12 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    /* Wraps rather than overflowing. The title group holds whatever the surface puts beside its name —
+       one owner chip on most pages, a status pill plus two context badges on the student view — and the
+       action bar keeps a fixed height only because it used to hold ONE chip. At a narrow viewport the
+       cluster now drops under the heading instead of pushing the actions off the right edge. */
+    flex-wrap: wrap;
+    min-width: 0;
 }
 
 .authoring-heading {

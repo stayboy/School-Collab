@@ -51,6 +51,39 @@ body {
     --band-assumed-bg: #e9f6f3;
     --band-assumed-accent: #b7ded6;
     --band-assumed-fg: #1d5c52;
+
+    /* The state palette for `.status-pill` (below). FOUR variants, each a bg/fg/dot/border quadruple, so a
+       pill is legible in both themes from ONE rule set. Why this exists at all: `<FluentBadge
+       Appearance="Filled">` paints the HOST and leaves the light-DOM span inheriting `--neutral-foreground-1`,
+       which app.css's global `p, span, label …` rule then repaints #242424 — 2.88:1 on #0f6cbd, the same defect
+       class the app bar carried until 2026-10-24. `BadgeColor.Success` is also dead in FluentUI 5.0.1 (the
+       shipped rule misspells `sucess`), so a status badge must not depend on `Color` at all.
+       Every value is measured ≥7:1 against its own background: colour still never carries meaning alone —
+       each pill also renders a text label and an aria-hidden dot. */
+    --status-success-bg: #e7f4ec;
+    --status-success-fg: #14532d;
+    --status-success-dot: #107c41;
+    --status-success-border: #b7dfc6;
+    --status-warning-bg: #fdf3e2;
+    --status-warning-fg: #7a5314;
+    --status-warning-dot: #b8760a;
+    --status-warning-border: #eccf9b;
+    --status-danger-bg: #fdecec;
+    --status-danger-fg: #7d1c1c;
+    --status-danger-dot: #c42b1c;
+    --status-danger-border: #f3bcbc;
+    --status-neutral-bg: #f0f0f0;
+    --status-neutral-fg: #424242;
+    --status-neutral-dot: #8a8a8a;
+    --status-neutral-border: #dcdcdc;
+
+    /* The monogram disc's LIGHTNESS steps. Only the HUE travels from the component (an inline
+       `--monogram-hue`); saturation and the three lightness steps are tokens, because a hue-only tint
+       renders a pale lavender disc on a dark page — a defect the mock shipped and then fixed. */
+    --monogram-saturation: 58%;
+    --monogram-bg-lightness: 90%;
+    --monogram-fg-lightness: 28%;
+    --monogram-border-lightness: 80%;
 }
 
 [data-theme="dark"],
@@ -65,6 +98,7 @@ body {
     --neutral-stroke-2: #525252;
     --neutral-foreground-hint: #b0b0b0;
     --neutral-foreground-hover: #ffffff;
+    --accent-fill-rest: #479ef5;
     --accent-foreground-rest: #ffffff;
 
     /* Dark band tints: the light pastels would glare, so the bands become low-chroma dark surfaces with the
@@ -79,6 +113,31 @@ body {
     --band-assumed-bg: #1e3531;
     --band-assumed-accent: #3f6f66;
     --band-assumed-fg: #a9d8cf;
+
+    /* The same four state variants re-derived for a dark surface rather than inverted: a dark tint with a
+       LIGHT label, keeping the dot as the only saturated element. */
+    --status-success-bg: #1e3a2b;
+    --status-success-fg: #a6e3bb;
+    --status-success-dot: #4cc27a;
+    --status-success-border: #3f6f52;
+    --status-warning-bg: #3a2f1c;
+    --status-warning-fg: #f0d9a8;
+    --status-warning-dot: #e0a93c;
+    --status-warning-border: #6d5a33;
+    --status-danger-bg: #3d1f1f;
+    --status-danger-fg: #f7b7b7;
+    --status-danger-dot: #e06c6c;
+    --status-danger-border: #6e3a3a;
+    --status-neutral-bg: #2d2d2d;
+    --status-neutral-fg: #d6d6d6;
+    --status-neutral-dot: #9c9c9c;
+    --status-neutral-border: #4a4a4a;
+
+    /* Dark: the disc must stay a disc — the lightness steps move, the hue does not. */
+    --monogram-saturation: 42%;
+    --monogram-bg-lightness: 26%;
+    --monogram-fg-lightness: 84%;
+    --monogram-border-lightness: 34%;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -463,6 +522,91 @@ h1:focus {
     color: var(--accent-foreground-rest, #0f6cbd);
     cursor: pointer;
     white-space: nowrap;
+}
+
+/* ── `.status-pill` — a CSS class, NOT a component (component-first-policy §2/§4/§6) ──────────────
+   The page renders four of these, all on one surface: that is ONE call site, so the second-call-site
+   extraction rule does not fire, and the §4 design-named exemption is not needed either. What it does
+   share is CSS, which is cheap and already precedented here (`.region-grid`, `.w-1`…`.w-9`, `.ta-lines-N`).
+   When a second surface wants a status pill it migrates to a component and takes this CSS with it — the
+   repo-wide migration is deliberately deferred.
+
+   Contrast is the reason the class exists. `<FluentBadge Appearance="Filled">` with no `Color` paints the
+   HOST `#0f6cbd` while its light-DOM `<span>` inherits `--neutral-foreground-1`, which app.css's global
+   `p, span, label, small, strong, em, code, pre` rule repaints `#242424` — 2.88:1, the same defect class as
+   the app bar fixed on 2026-10-24. Declaring both halves here is the fix; `Color="@BadgeColor.Success"`
+   cannot be it, because that variant's shipped rule is misspelled (`[color=sucess]`) in FluentUI 5.0.1.
+
+   Accessibility: every pill carries a TEXT label and an `aria-hidden` dot. Colour reinforces the label,
+   never replaces it, so the pill reads in greyscale and to a screen reader. */
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--status-neutral-border);
+    background: var(--status-neutral-bg);
+    color: var(--status-neutral-fg);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+
+/* The global `span { color: … }` rule above is more specific than inheritance, so each pill's own
+   label span has to be told which foreground to take. Without this the text falls back to
+   `--neutral-foreground-1` and the pill loses its contrast guarantee. */
+.status-pill > span {
+    color: inherit;
+}
+
+.status-pill__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: 0 0 auto;
+}
+
+.status-pill--success {
+    background: var(--status-success-bg);
+    border-color: var(--status-success-border);
+    color: var(--status-success-fg);
+}
+
+.status-pill--success .status-pill__dot {
+    background: var(--status-success-dot);
+}
+
+.status-pill--warning {
+    background: var(--status-warning-bg);
+    border-color: var(--status-warning-border);
+    color: var(--status-warning-fg);
+}
+
+.status-pill--warning .status-pill__dot {
+    background: var(--status-warning-dot);
+}
+
+.status-pill--danger {
+    background: var(--status-danger-bg);
+    border-color: var(--status-danger-border);
+    color: var(--status-danger-fg);
+}
+
+.status-pill--danger .status-pill__dot {
+    background: var(--status-danger-dot);
+}
+
+.status-pill--neutral {
+    background: var(--status-neutral-bg);
+    border-color: var(--status-neutral-border);
+    color: var(--status-neutral-fg);
+}
+
+.status-pill--neutral .status-pill__dot {
+    background: var(--status-neutral-dot);
 }
 
 /* ── One offset for every sticky thing on an authoring surface (§6) ─────────────────────────────

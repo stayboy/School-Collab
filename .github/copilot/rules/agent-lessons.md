@@ -14,6 +14,29 @@ entry here shrinks to a pointer at that check.
 
 ---
 
+## A source-string test can pass on a comment (2026-10-28)
+
+**Rule.** An assertion of the form "this `.razor` contains X" must match **markup** — a tag, an attribute, a
+line that starts the construct, an action list — never a phrase a human would also write. A `@code` comment,
+a `<see cref="…"/>` doc reference and a rendered label are indistinguishable to `String.Contains`, so a test
+anchored on prose keeps passing after the markup it was written to protect has been deleted.
+
+**Evidence.** Two `StudentDetailSectionsTests` assertions were green for the wrong reason, and the student-view
+redesign is what exposed them. `Detail_ActivityGroups_Has_JoinGroup_Button` asserted
+`source.Should().Contain("Join Group")` and matched a `@code` comment — *"Join Group opens JoinGroupsDialog"* —
+so the button could have been renamed or removed and the test would still have gone green.
+`Contacts_Section_IsRemoved_GuardiansGridCarriesContacts` asserted `NotContain("<StudentGuardiansList")` and
+was satisfied by a doc comment, `<StudentGuardiansList> component is a thin presenter…`, even while a real
+`<StudentGuardiansList …>` element sat in the markup. Both now assert the rendered mechanism: the panel's
+action list (`GroupPanelActions` → `OnJoinGroupAsync`) and the element matcher
+`<StudentGuardiansList\s+[A-Z]`, which a `<see cref>` cannot satisfy.
+
+**Trigger.** Writing — or trusting — a `Should().Contain(...)` / `Should().NotContain(...)` whose expected
+text reads like English: a label, a sentence, a component name in prose. If the expected string would look at
+home in a comment, the assertion is about the comment.
+
+---
+
 ## A claim about the codebase is only as true as the search that produced it (2026-10-27)
 
 **Rule.** Before writing any claim of the form "there is no X" **or** "every X does Y", search for the
