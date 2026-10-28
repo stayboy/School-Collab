@@ -540,6 +540,31 @@ public record WardAssignmentListItemDto(
     WardSubmissionStateDto State,
     bool HasLockedModules);
 
+/// <summary>
+/// Issue #444 (layer L2a) — the six counts a student's assignment record implies, served in one round
+/// trip. "Assigned" means <b>recipient-linked</b> (<c>AssignmentRecipient.WardStudentId</c>) and nothing
+/// wider: grade/group target resolution is cross-context and this read does not perform it.
+/// <para>
+/// The derived invariants are the caller's to compute and are pinned by
+/// <c>GetStudentAssignmentStatsHandlerTests</c>: <c>AwaitingMarking = Submitted − Marked</c>,
+/// <c>AwaitingReview = ReviewRequired − Reviewed</c>, and <c>ReviewRequired ≤ SentOut</c> — an assignment
+/// nobody has been sent cannot be gated for review.
+/// </para>
+/// </summary>
+public record StudentAssignmentStatsDto(
+    /// <summary>Recipient-linked assignments of any status — a <c>Draft</c> is counted here.</summary>
+    int Assigned,
+    /// <summary>Published, or <c>Scheduled</c> with its publish time already passed.</summary>
+    int SentOut,
+    /// <summary>Sent, with a submission carrying <c>FinalizedAt</c>.</summary>
+    int Submitted,
+    /// <summary>Sent, with that SAME submission finalized <b>and</b> <c>ReviewState.Graded</c>.</summary>
+    int Marked,
+    /// <summary>Sent, on a <c>MandatoryReview</c> assignment — the review axis's own denominator.</summary>
+    int ReviewRequired,
+    /// <summary>Review-required, with the <c>GuardianSubmissionGate</c> row reviewed.</summary>
+    int Reviewed);
+
 /// <summary>WS-D1 — route body for <c>POST …/modules/{moduleId}/progress</c>.</summary>
 public record RecordModuleProgressRequest(int Percent);
 

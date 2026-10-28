@@ -51,6 +51,9 @@ public static class Extensions
         services.AddScoped<ISubmissionRepository, SubmissionRepository>();
         services.AddScoped<IModuleProgressRepository, ModuleProgressRepository>();
         services.AddScoped<IWardAssignmentProjectionRepository, WardAssignmentProjectionRepository>();
+        // Issue #444 (layer L2a): the student assignment-stats read — recipient-link only, any status,
+        // with the sent test left to the handler's fold (never the ward read's visibility predicate).
+        services.AddScoped<IStudentAssignmentStatsRepository, StudentAssignmentStatsRepository>();
         services.AddScoped<IAssignmentActivityGroupRepository, AssignmentActivityGroupRepository>();
         // R3 (D4/P1-2): append-only AI generation headers. Registered in Core like the other
         // standalone-entity repositories; the extractor that feeds the stage path is registered by

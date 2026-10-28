@@ -58,6 +58,12 @@ public static class AssignmentEndpoints
 
         group.MapAssignmentRoutes();
 
+        // Issue #444 (layer L2a): the student assignment-stats read — the six counts in one round trip.
+        // Relative path on THIS group, so it inherits the /assignments prefix and the group's
+        // RequireAuthIfOidc policy. It deliberately sits outside the reader/writer sub-groups: those gate
+        // the teacher-portal roles, and this is the student's own record.
+        group.MapStudentStatsRoutes();
+
         // WS-A5 (spec §3.3): the ward assignment list, mounted under a sibling
         // /students group so the resource path is GET /students/{studentId}/assignments
         // (not under /assignments). Same auth posture as the assignments group.

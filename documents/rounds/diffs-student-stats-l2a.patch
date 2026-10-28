@@ -1,0 +1,793 @@
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+index e687d61c..8f97089f 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+@@ -58,6 +58,12 @@ public static class AssignmentEndpoints
+ 
+         group.MapAssignmentRoutes();
+ 
++        // Issue #444 (layer L2a): the student assignment-stats read — the six counts in one round trip.
++        // Relative path on THIS group, so it inherits the /assignments prefix and the group's
++        // RequireAuthIfOidc policy. It deliberately sits outside the reader/writer sub-groups: those gate
++        // the teacher-portal roles, and this is the student's own record.
++        group.MapStudentStatsRoutes();
++
+         // WS-A5 (spec §3.3): the ward assignment list, mounted under a sibling
+         // /students group so the resource path is GET /students/{studentId}/assignments
+         // (not under /assignments). Same auth posture as the assignments group.
+diff --git a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+index 6d159db8..958008e3 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+@@ -540,6 +540,31 @@ public record WardAssignmentListItemDto(
+     WardSubmissionStateDto State,
+     bool HasLockedModules);
+ 
++/// <summary>
++/// Issue #444 (layer L2a) — the six counts a student's assignment record implies, served in one round
++/// trip. "Assigned" means <b>recipient-linked</b> (<c>AssignmentRecipient.WardStudentId</c>) and nothing
++/// wider: grade/group target resolution is cross-context and this read does not perform it.
++/// <para>
++/// The derived invariants are the caller's to compute and are pinned by
++/// <c>GetStudentAssignmentStatsHandlerTests</c>: <c>AwaitingMarking = Submitted − Marked</c>,
++/// <c>AwaitingReview = ReviewRequired − Reviewed</c>, and <c>ReviewRequired ≤ SentOut</c> — an assignment
++/// nobody has been sent cannot be gated for review.
++/// </para>
++/// </summary>
++public record StudentAssignmentStatsDto(
++    /// <summary>Recipient-linked assignments of any status — a <c>Draft</c> is counted here.</summary>
++    int Assigned,
++    /// <summary>Published, or <c>Scheduled</c> with its publish time already passed.</summary>
++    int SentOut,
++    /// <summary>Sent, with a submission carrying <c>FinalizedAt</c>.</summary>
++    int Submitted,
++    /// <summary>Sent, with that SAME submission finalized <b>and</b> <c>ReviewState.Graded</c>.</summary>
++    int Marked,
++    /// <summary>Sent, on a <c>MandatoryReview</c> assignment — the review axis's own denominator.</summary>
++    int ReviewRequired,
++    /// <summary>Review-required, with the <c>GuardianSubmissionGate</c> row reviewed.</summary>
++    int Reviewed);
++
+ /// <summary>WS-D1 — route body for <c>POST …/modules/{moduleId}/progress</c>.</summary>
+ public record RecordModuleProgressRequest(int Percent);
+ 
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+index 5f9b33fd..dbedebd8 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+@@ -51,6 +51,9 @@ public static class Extensions
+         services.AddScoped<ISubmissionRepository, SubmissionRepository>();
+         services.AddScoped<IModuleProgressRepository, ModuleProgressRepository>();
+         services.AddScoped<IWardAssignmentProjectionRepository, WardAssignmentProjectionRepository>();
++        // Issue #444 (layer L2a): the student assignment-stats read — recipient-link only, any status,
++        // with the sent test left to the handler's fold (never the ward read's visibility predicate).
++        services.AddScoped<IStudentAssignmentStatsRepository, StudentAssignmentStatsRepository>();
+         services.AddScoped<IAssignmentActivityGroupRepository, AssignmentActivityGroupRepository>();
+         // R3 (D4/P1-2): append-only AI generation headers. Registered in Core like the other
+         // standalone-entity repositories; the extractor that feeds the stage path is registered by
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/StudentStatsRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/StudentStatsRoutes.cs
+new file mode 100644
+index 00000000..34ed9245
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/StudentStatsRoutes.cs
+@@ -0,0 +1,30 @@
++using Microsoft.AspNetCore.Http.HttpResults;
++using Microsoft.AspNetCore.Mvc;
++using Microsoft.AspNetCore.Routing;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetStudentAssignmentStats;
++using SchoolCollab.Core.CQRS;
++
++namespace SchoolCollab.Assignments.Api.Endpoints;
++
++/// <summary>
++/// Issue #444 (layer L2a) — the student assignment-stats read: the six counts in one round trip. Mapped
++/// with a <b>relative</b> path on whichever group the orchestrator hands it, so it inherits that group's
++/// prefix (<c>/assignments</c>) and its <c>RequireAuthIfOidc</c> policy; the route carries no authorization
++/// of its own and no feature-flag branch.
++/// </summary>
++public static class StudentStatsRoutes
++{
++    public static RouteGroupBuilder MapStudentStatsRoutes(this RouteGroupBuilder group)
++    {
++        // GET /assignments/{studentId}/assignment-stats — typed result, so the generated document carries
++        // a real response schema (R3).
++        group.MapGet("/{studentId:guid}/assignment-stats", async Task<Ok<StudentAssignmentStatsDto>> (
++            Guid studentId,
++            [FromServices] IQueryHandler<GetStudentAssignmentStats, StudentAssignmentStatsDto> handler,
++            CancellationToken ct) =>
++            TypedResults.Ok(await handler.HandleAsync(new GetStudentAssignmentStats(studentId), ct)));
++
++        return group;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/DTOs/StudentAssignmentStatRow.cs b/src/Assignments/SchoolCollab.Assignments.Core/DTOs/StudentAssignmentStatRow.cs
+new file mode 100644
+index 00000000..25193c5b
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/DTOs/StudentAssignmentStatRow.cs
+@@ -0,0 +1,34 @@
++using SchoolCollab.Assignments.Core.Domain;
++
++namespace SchoolCollab.Assignments.Core.DTOs;
++
++/// <summary>
++/// One recipient-linked assignment, reduced to the flags the stats fold consumes
++/// (<c>GetStudentAssignmentStatsQueryHandler</c>) — decision A(ii) of round
++/// <c>student-stats-l2a</c>: the arithmetic lives in testable C#, not in a SQL <c>GROUP BY</c>.
++/// <para>
++/// The read that produces these rows carries <b>no status predicate</b> — recipient link only. The
++/// sent test (Q126: <c>Published</c>, or <c>Scheduled</c> whose publish time has passed) is a fold rule,
++/// so a <c>Draft</c> row and a not-yet-active <c>Scheduled</c> row must reach the handler. Filtering the
++/// statuses in the WHERE clause would make <c>Assigned</c> equal <c>SentOut</c> and let the status rules
++/// pass vacuously.
++/// </para>
++/// </summary>
++/// <param name="Status">The assignment's lifecycle status — the raw input to the sent test.</param>
++/// <param name="AvailableFromUtc">The scheduled publish moment; only meaningful for
++/// <see cref="AssignmentStatus.Scheduled"/>.</param>
++/// <param name="MandatoryReview">Whether every send out of this assignment is gated on guardian review.</param>
++/// <param name="HasFinalizedSubmission">Whether this student's submission carries <c>FinalizedAt</c>.</param>
++/// <param name="ReviewState">That same submission's review state, null when no submission exists. Read
++/// together with <paramref name="HasFinalizedSubmission"/>: <c>Graded</c> is reachable without a
++/// finalization (<c>ApplyReview</c> is independent of the sign-off chain), so grading alone must never
++/// count as marked.</param>
++/// <param name="HasReviewedGate">Whether this student's <c>GuardianSubmissionGate</c> row carries
++/// <c>ReviewedAt</c>. Folded to a bool by the read so the handler never reasons about row existence.</param>
++public record StudentAssignmentStatRow(
++    AssignmentStatus Status,
++    DateTimeOffset? AvailableFromUtc,
++    bool MandatoryReview,
++    bool HasFinalizedSubmission,
++    ReviewState? ReviewState,
++    bool HasReviewedGate);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IStudentAssignmentStatsRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IStudentAssignmentStatsRepository.cs
+new file mode 100644
+index 00000000..ca02f1c6
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IStudentAssignmentStatsRepository.cs
+@@ -0,0 +1,23 @@
++using SchoolCollab.Assignments.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Core.Data.Repositories;
++
++/// <summary>
++/// Issue #444 (layer L2a) — the student-stats candidate set: every assignment
++/// <b>recipient-linked</b> to the student, <b>any status</b>, with its submission and guardian-gate
++/// flags folded to per-row values.
++/// <para>
++/// Deliberately NOT <see cref="IWardAssignmentProjectionRepository.ListWardAssignmentsAsync"/>: that read
++/// answers "what may this ward see?" and its WHERE clause already applies the published/scheduled-active
++/// predicate, so reusing it would make the candidate set identical to the sent set and every status rule
++/// in the fold would pass vacuously. The two reads answer two different questions by design; do not
++/// collapse them.
++/// </para>
++/// </summary>
++public interface IStudentAssignmentStatsRepository
++{
++    /// <summary>One row per recipient-linked assignment of <paramref name="studentId"/>, of any
++    /// status. The sent test (Q126) is left to
++    /// <c>GetStudentAssignmentStatsQueryHandler</c>'s fold, never to this query.</summary>
++    Task<List<StudentAssignmentStatRow>> ListStudentAssignmentStatRowsAsync(Guid studentId, CancellationToken ct = default);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/StudentAssignmentStatsRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/StudentAssignmentStatsRepository.cs
+new file mode 100644
+index 00000000..9eae8363
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/StudentAssignmentStatsRepository.cs
+@@ -0,0 +1,38 @@
++using Microsoft.EntityFrameworkCore;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Core.Data.Repositories;
++
++/// <summary>
++/// Issue #444 (layer L2a) — projects one <see cref="StudentAssignmentStatRow"/> per assignment the student
++/// is a linked recipient of. The <c>Where</c> carries the recipient-link predicate ONLY: a <c>Draft</c> and
++/// a not-yet-published <c>Scheduled</c> row must reach the fold, where the sent test lives (Q126, and the
++/// row type's doc).
++/// </summary>
++internal sealed class StudentAssignmentStatsRepository(AssignmentsDbContext db) : IStudentAssignmentStatsRepository
++{
++    public Task<List<StudentAssignmentStatRow>> ListStudentAssignmentStatRowsAsync(Guid studentId, CancellationToken ct = default)
++    {
++        return db.Assignments.AsNoTracking()
++            // Recipient link and nothing else — no status predicate. See the interface's doc: reusing the
++            // ward read's visibility predicate here would make Assigned equal SentOut.
++            .Where(a => db.AssignmentRecipients.Any(r => r.WardStudentId == studentId && r.AssignmentId == a.Id))
++            .Select(a => new StudentAssignmentStatRow(
++                a.Status,
++                a.AvailableFromUtc,
++                a.MandatoryReview,
++                // The two submission flags come from the SAME row: (tenant, assignment, student) is unique
++                // (uq_assignment_submissions_tenant_assignment_student), so the finalization and the review
++                // state can never be read off two different submissions.
++                db.AssignmentSubmissions.Any(s =>
++                    s.AssignmentId == a.Id && s.StudentId == studentId && s.FinalizedAt != null),
++                db.AssignmentSubmissions
++                    .Where(s => s.AssignmentId == a.Id && s.StudentId == studentId)
++                    .Select(s => (ReviewState?)s.ReviewState)
++                    .FirstOrDefault(),
++                db.GuardianSubmissionGates.Any(g =>
++                    g.AssignmentId == a.Id && g.StudentId == studentId && g.ReviewedAt != null)))
++            .ToListAsync(ct);
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetStudentAssignmentStats/GetStudentAssignmentStatsQuery.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetStudentAssignmentStats/GetStudentAssignmentStatsQuery.cs
+new file mode 100644
+index 00000000..c751a44f
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetStudentAssignmentStats/GetStudentAssignmentStatsQuery.cs
+@@ -0,0 +1,11 @@
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.CQRS;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetStudentAssignmentStats;
++
++/// <summary>
++/// Issue #444 (layer L2a) — the six counts a student's assignment record implies. Deliberately carries
++/// only the student: the counts join on the student, so there is no period (or placement-window)
++/// parameter that a caller could narrow into an empty result set (Q139).
++/// </summary>
++public sealed record GetStudentAssignmentStats(Guid StudentId) : IQuery<StudentAssignmentStatsDto>;
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetStudentAssignmentStats/GetStudentAssignmentStatsQueryHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetStudentAssignmentStats/GetStudentAssignmentStatsQueryHandler.cs
+new file mode 100644
+index 00000000..c525decf
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetStudentAssignmentStats/GetStudentAssignmentStatsQueryHandler.cs
+@@ -0,0 +1,88 @@
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++using SchoolCollab.Core.CQRS;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetStudentAssignmentStats;
++
++/// <summary>
++/// Issue #444 (layer L2a) — folds the student's recipient-linked assignment rows into the six counts of
++/// <see cref="StudentAssignmentStatsDto"/> in one repository call (decision A(ii): the rules stay in
++/// testable C# rather than in a SQL <c>GROUP BY</c>).
++/// <para>
++/// The read's candidate set is recipient-link only, so <c>Assigned</c> is wider than <c>SentOut</c>: the
++/// sent test (Q126) is applied HERE. <c>Marked</c> requires the same submission to be finalized AND
++/// <see cref="ReviewState.Graded"/> — <c>Graded</c> alone is reachable without a finalization, so grading
++/// on its own would let <c>Marked</c> exceed <c>Submitted</c>. The clock comes from the injected
++/// <see cref="TimeProvider"/>, never <see cref="DateTimeOffset.UtcNow"/>, so the scheduled boundary is
++/// assertable.
++/// </para>
++/// </summary>
++public sealed class GetStudentAssignmentStatsQueryHandler(
++    IStudentAssignmentStatsRepository statsRepository,
++    TimeProvider timeProvider) : IQueryHandler<GetStudentAssignmentStats, StudentAssignmentStatsDto>
++{
++    public async Task<StudentAssignmentStatsDto> HandleAsync(GetStudentAssignmentStats query, CancellationToken cancellationToken = default)
++    {
++        var rows = await statsRepository.ListStudentAssignmentStatRowsAsync(query.StudentId, cancellationToken);
++
++        var nowUtc = timeProvider.GetUtcNow();
++
++        var sentOut = 0;
++        var submitted = 0;
++        var marked = 0;
++        var reviewRequired = 0;
++        var reviewed = 0;
++
++        foreach (var row in rows)
++        {
++            if (!IsSentOut(row, nowUtc))
++            {
++                continue;
++            }
++
++            sentOut++;
++
++            // The review axis's own denominator: only a SENT, mandatory-review assignment is gated, so
++            // ReviewRequired can never exceed SentOut.
++            if (row.MandatoryReview)
++            {
++                reviewRequired++;
++                if (row.HasReviewedGate)
++                {
++                    reviewed++;
++                }
++            }
++
++            if (row.HasFinalizedSubmission)
++            {
++                submitted++;
++                if (row.ReviewState == ReviewState.Graded)
++                {
++                    marked++;
++                }
++            }
++        }
++
++        return new StudentAssignmentStatsDto(
++            Assigned: rows.Count,
++            SentOut: sentOut,
++            Submitted: submitted,
++            Marked: marked,
++            ReviewRequired: reviewRequired,
++            Reviewed: reviewed);
++    }
++
++    /// <summary>Q126 — "sent out" is <c>Published</c>, or <c>Scheduled</c> whose publish moment has passed.
++    /// The same predicate the ward read applies in SQL, restated here because this read must NOT filter
++    /// statuses in SQL.</summary>
++    private static bool IsSentOut(StudentAssignmentStatRow row, DateTimeOffset nowUtc)
++        => row.Status switch
++        {
++            AssignmentStatus.Published => true,
++            AssignmentStatus.Scheduled => row.AvailableFromUtc is not null && row.AvailableFromUtc <= nowUtc,
++            _ => false,
++        };
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/GetStudentAssignmentStatsHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/GetStudentAssignmentStatsHandlerTests.cs
+new file mode 100644
+index 00000000..7e461bc7
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/GetStudentAssignmentStatsHandlerTests.cs
+@@ -0,0 +1,209 @@
++using FluentAssertions;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetStudentAssignmentStats;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// Issue #444 (layer L2a) — the count rules of
++/// <see cref="GetStudentAssignmentStatsQueryHandler"/>, folded over an explicit per-assignment fixture
++/// (decision A(ii): the arithmetic is C#, so each rule is a plain assertion rather than SQL no test can
++/// reach). The fixture rows are the read's own projection, so these tests pin the FOLD; the read's WHERE
++/// clause is pinned by <see cref="StudentAssignmentStatsRepositoryTenantTests"/>.
++/// </summary>
++[TestClass]
++public class GetStudentAssignmentStatsHandlerTests
++{
++    private static readonly Guid StudentId = Guid.Parse("00000000-0000-0000-0000-00000000a001");
++
++    /// <summary>The read's only job under test: hand back the rows and count how often it was asked.</summary>
++    private sealed class FakeStatsRepository(List<StudentAssignmentStatRow> rows) : IStudentAssignmentStatsRepository
++    {
++        public int Calls { get; private set; }
++
++        public Task<List<StudentAssignmentStatRow>> ListStudentAssignmentStatRowsAsync(Guid studentId, CancellationToken ct = default)
++        {
++            Calls++;
++            return Task.FromResult(rows);
++        }
++    }
++
++    private static Task<StudentAssignmentStatsDto> HandleAsync(
++        FakeTimeProvider clock,
++        params StudentAssignmentStatRow[] rows)
++        => new GetStudentAssignmentStatsQueryHandler(new FakeStatsRepository([.. rows]), clock)
++            .HandleAsync(new GetStudentAssignmentStats(StudentId));
++
++    /// <summary>One recipient-linked assignment. Every flag defaults to "nothing has happened to it".</summary>
++    private static StudentAssignmentStatRow Row(
++        AssignmentStatus status = AssignmentStatus.Published,
++        DateTimeOffset? availableFromUtc = null,
++        bool mandatoryReview = false,
++        bool hasFinalizedSubmission = false,
++        ReviewState? reviewState = null,
++        bool hasReviewedGate = false)
++        => new(status, availableFromUtc, mandatoryReview, hasFinalizedSubmission, reviewState, hasReviewedGate);
++
++    [TestMethod]
++    public async Task HandleAsync_FoldsTheSixCounts_FromAPerAssignmentFixture()
++    {
++        var clock = new FakeTimeProvider();
++        var now = clock.GetUtcNow();
++
++        var stats = await HandleAsync(clock,
++            // never sent — counted as assigned and nothing else
++            Row(AssignmentStatus.Draft),
++            // sent, no submission
++            Row(),
++            // sent, mandatory review, submitted but unmarked, gate not reviewed
++            Row(mandatoryReview: true, hasFinalizedSubmission: true, reviewState: ReviewState.Pending),
++            // sent, mandatory review, submitted AND marked, gate reviewed
++            Row(mandatoryReview: true, hasFinalizedSubmission: true, reviewState: ReviewState.Graded, hasReviewedGate: true),
++            // Q126: scheduled with its publish time passed counts as sent
++            Row(AssignmentStatus.Scheduled, availableFromUtc: now.AddHours(-1)),
++            // Q126: scheduled in the future has not been sent
++            Row(AssignmentStatus.Scheduled, availableFromUtc: now.AddHours(1)),
++            // sent, mandatory review, held by the guardian gate — awaiting review, not awaiting submission
++            Row(mandatoryReview: true));
++
++        stats.Assigned.Should().Be(7, "every recipient-linked row counts as assigned, including the Draft");
++        stats.SentOut.Should().Be(5, "the Draft and the future Scheduled row have not been sent");
++        stats.Submitted.Should().Be(2, "only the two finalized submissions count");
++        stats.Marked.Should().Be(1, "only the finalized AND graded submission is marked");
++        stats.ReviewRequired.Should().Be(3, "three SENT assignments carry MandatoryReview (the unsent Draft is not one)");
++        stats.Reviewed.Should().Be(1, "only one guardian gate was reviewed");
++
++        // The two derived invariants the panel reads (they are not transmitted — they are arithmetic the
++        // caller performs, so they are asserted here as the caller would compute them).
++        (stats.Submitted - stats.Marked).Should().Be(1, "AwaitingMarking = Submitted − Marked");
++        (stats.ReviewRequired - stats.Reviewed).Should().Be(2, "AwaitingReview = ReviewRequired − Reviewed");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_Marked_RequiresTheSameSubmissionFinalizedAndGraded()
++    {
++        var clock = new FakeTimeProvider();
++
++        var stats = await HandleAsync(clock,
++            // Case 1: submitted but not yet marked — the teacher has not graded it.
++            Row(hasFinalizedSubmission: true, reviewState: ReviewState.Pending),
++            // Case 2: graded without a finalization — the domain permits it (ApplyReview is independent of
++            // the sign-off chain), and it must NOT be marked: marking is a post-finalization outcome.
++            Row(hasFinalizedSubmission: false, reviewState: ReviewState.Graded));
++
++        stats.Submitted.Should().Be(1, "only case 1 carries FinalizedAt");
++        stats.Marked.Should().Be(0,
++            "grading alone never counts as marked — the fold ANDs HasFinalizedSubmission with ReviewState.Graded");
++        stats.Marked.Should().BeLessThanOrEqualTo(stats.Submitted,
++            "every marked assignment is also a submitted one — a Graded-only row would break this");
++        (stats.Submitted - stats.Marked).Should().Be(1, "case 1 lands in awaiting marking");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_GateHeldAssignment_LandsInAwaitingReview_NeverAwaitingSubmission()
++    {
++        var clock = new FakeTimeProvider();
++
++        var stats = await HandleAsync(clock, Row(mandatoryReview: true, hasReviewedGate: false));
++
++        stats.SentOut.Should().Be(1, "the assignment has been sent to the student");
++        stats.ReviewRequired.Should().Be(1, "it is gated on guardian review");
++        stats.Reviewed.Should().Be(0, "the gate has not been reviewed");
++        stats.Submitted.Should().Be(0, "a gate-held assignment is not an awaiting-submission one");
++        stats.Marked.Should().Be(0);
++        (stats.ReviewRequired - stats.Reviewed).Should().Be(1, "it lands in awaiting review");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_ReviewRequired_CountsOnlyMandatoryReviewAmongSentAssignments()
++    {
++        var clock = new FakeTimeProvider();
++
++        var stats = await HandleAsync(clock,
++            // mandatory review, but never sent — cannot be gated
++            Row(AssignmentStatus.Draft, mandatoryReview: true),
++            // sent, but not gated
++            Row(mandatoryReview: false),
++            // sent and gated
++            Row(mandatoryReview: true));
++
++        stats.ReviewRequired.Should().Be(1,
++            "a Draft cannot be gated and a non-mandatory assignment is not part of the review axis");
++        stats.SentOut.Should().Be(2);
++        stats.ReviewRequired.Should().BeLessThanOrEqualTo(stats.SentOut,
++            "ReviewRequired ≤ SentOut — an unsent draft can never be gated");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_Scheduled_CountsAsSentOnlyOnceItsPublishTimeHasPassed()
++    {
++        var clock = new FakeTimeProvider();
++        var now = clock.GetUtcNow();
++
++        var repository = new FakeStatsRepository(
++        [
++            Row(AssignmentStatus.Scheduled, availableFromUtc: now.AddMinutes(-1)),
++            Row(AssignmentStatus.Scheduled, availableFromUtc: now.AddMinutes(1)),
++            // A Scheduled row with no publish moment at all is never "sent".
++            Row(AssignmentStatus.Scheduled),
++        ]);
++        var handler = new GetStudentAssignmentStatsQueryHandler(repository, clock);
++
++        var before = await handler.HandleAsync(new GetStudentAssignmentStats(StudentId));
++
++        before.SentOut.Should().Be(1, "only the Scheduled row whose publish moment has already passed");
++        before.Assigned.Should().Be(3, "all three are recipient-linked regardless of status");
++
++        clock.Advance(TimeSpan.FromMinutes(2));
++
++        var after = await handler.HandleAsync(new GetStudentAssignmentStats(StudentId));
++
++        after.SentOut.Should().Be(2,
++            "the clock is the injected TimeProvider, so advancing it — and only it — flips the second row to sent");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_IsDrivenOnlyByTheStudent_TheSignatureCarriesNoPeriod()
++    {
++        // C6 / Q139: the counts join on the student, so there is no period parameter a caller could narrow
++        // into an empty result set. The signature is the proof, and it is asserted rather than described —
++        // a future "add a period filter" edit fails here.
++        typeof(GetStudentAssignmentStats).GetProperties()
++            .Should().ContainSingle("the query carries the student and nothing else")
++            .Which.Name.Should().Be(nameof(GetStudentAssignmentStats.StudentId));
++
++        var clock = new FakeTimeProvider();
++        var repository = new FakeStatsRepository([Row(), Row(mandatoryReview: true), Row(AssignmentStatus.Draft)]);
++        var handler = new GetStudentAssignmentStatsQueryHandler(repository, clock);
++
++        var shortPlacement = await handler.HandleAsync(new GetStudentAssignmentStats(StudentId));
++        var academicYear = await handler.HandleAsync(new GetStudentAssignmentStats(Guid.NewGuid()));
++
++        shortPlacement.Should().Be(academicYear,
++            "a student whose placement is a sub-period must yield the same counts as one on the academic "
++            + "year for the same recipient-linked set — nothing but the student reaches the fold");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_IssuesAConstantNumberOfRepositoryCalls_NoNPlusOne()
++    {
++        // C8 is an honest guard, not a discriminator: with a single repository call the criterion is
++        // structurally true today, so this test protects the shape against a future per-row rewrite.
++        var clock = new FakeTimeProvider();
++
++        var one = new FakeStatsRepository([Row()]);
++        await new GetStudentAssignmentStatsQueryHandler(one, clock)
++            .HandleAsync(new GetStudentAssignmentStats(StudentId));
++
++        var many = new FakeStatsRepository([.. Enumerable.Range(0, 25).Select(_ => Row())]);
++        await new GetStudentAssignmentStatsQueryHandler(many, clock)
++            .HandleAsync(new GetStudentAssignmentStats(StudentId));
++
++        many.Calls.Should().Be(one.Calls,
++            "a 25-assignment student must cost the same number of repository reads as a 1-assignment student");
++        one.Calls.Should().Be(1, "the six counts come out of ONE round trip");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/StudentAssignmentStatsRepositoryTenantTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/StudentAssignmentStatsRepositoryTenantTests.cs
+new file mode 100644
+index 00000000..7215077f
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/StudentAssignmentStatsRepositoryTenantTests.cs
+@@ -0,0 +1,136 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Students.Core.Domain;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// Issue #444 (layer L2a) — <see cref="StudentAssignmentStatsRepository"/> at the EF layer, where the
++/// global <c>"Tenant"</c> query filter lives (C7), and where the read's <b>status-independent</b> WHERE
++/// clause is observable (decision B: the stats read must see a <c>Draft</c> and a not-yet-active
++/// <c>Scheduled</c> row, or the handler's status rules pass vacuously).
++/// <para>
++/// The filter is EF-global and model-build validated (<c>AssignmentsDbContext.ValidateTenantFilters</c>),
++/// so the isolation assertion here pins that the read does not escape it — not that the filter exists.
++/// </para>
++/// </summary>
++[TestClass]
++public class StudentAssignmentStatsRepositoryTenantTests
++{
++    private static readonly Guid TenantA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid TenantB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
++    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
++    private static readonly Guid ContactId = Guid.Parse("00000000-0000-0000-0000-0000000000c1");
++
++    /// <summary>The SAME student id in both tenants: the worst case for a leaking read.</summary>
++    private static readonly Guid StudentId = Guid.Parse("00000000-0000-0000-0000-0000000000c2");
++
++    private static async Task<ServiceProvider> BuildProviderAsync(string dbName)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(opts => opts.UseInMemoryDatabase(dbName));
++        var provider = services.BuildServiceProvider();
++
++        using (var bootScope = provider.CreateScope())
++        {
++            var bootCtx = bootScope.ServiceProvider.GetRequiredService<AssignmentsDbContext>();
++            await bootCtx.Database.EnsureCreatedAsync();
++        }
++
++        return provider;
++    }
++
++    private static void AsTenant(ServiceProvider provider, Guid tenantId)
++    {
++        var tenants = provider.GetRequiredService<ITenantProvider>();
++        ((TenantProvider)tenants).SetTenant(new TenantContext(tenantId, tenantId.ToString(), TenantType.School));
++    }
++
++    /// <summary>Adds one assignment of the caller's tenant plus the recipient link that makes it
++    /// recipient-linked to <see cref="StudentId"/>.</summary>
++    private static async Task AddLinkedAssignmentAsync(ServiceProvider provider, Guid tenantId, Assignment assignment, bool link)
++    {
++        AsTenant(provider, tenantId);
++        using var scope = provider.CreateScope();
++        var db = scope.ServiceProvider.GetRequiredService<AssignmentsDbContext>();
++
++        db.Assignments.Add(assignment);
++        if (link)
++        {
++            db.AssignmentRecipients.Add(AssignmentRecipient.Create(
++                tenantId, assignment.Id, ContactOwnerType.Guardian, StudentId, StudentId,
++                ContactId, ContactChannel.Email, role: null,
++                notifyOnBroadcast: true, subscriptionActive: true));
++        }
++
++        await db.SaveChangesAsync();
++    }
++
++    private static Assignment NewAssignment(Guid tenantId) =>
++        Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId)
++            .WithTenant(tenantId);
++
++    private static async Task<List<StudentAssignmentStatRow>> ReadAsAsync(
++        ServiceProvider provider, Guid tenantId, Guid studentId)
++    {
++        AsTenant(provider, tenantId);
++        using var scope = provider.CreateScope();
++        var db = scope.ServiceProvider.GetRequiredService<AssignmentsDbContext>();
++        return await new StudentAssignmentStatsRepository(db).ListStudentAssignmentStatRowsAsync(studentId);
++    }
++
++    [TestMethod]
++    public async Task ListStudentAssignmentStatRowsAsync_ExcludesAnotherTenantsRows()
++    {
++        using var provider = await BuildProviderAsync(nameof(ListStudentAssignmentStatRowsAsync_ExcludesAnotherTenantsRows));
++
++        await AddLinkedAssignmentAsync(provider, TenantA, NewAssignment(TenantA), link: true);
++        await AddLinkedAssignmentAsync(provider, TenantB, NewAssignment(TenantB), link: true);
++        await AddLinkedAssignmentAsync(provider, TenantB, NewAssignment(TenantB), link: true);
++
++        var rowsA = await ReadAsAsync(provider, TenantA, StudentId);
++        var rowsB = await ReadAsAsync(provider, TenantB, StudentId);
++
++        rowsA.Should().HaveCount(1, "tenant A is linked to exactly one assignment — tenant B's two never appear");
++        rowsB.Should().HaveCount(2, "tenant B sees its own two, never tenant A's");
++    }
++
++    [TestMethod]
++    public async Task ListStudentAssignmentStatRowsAsync_AppliesTheRecipientLinkAndNoStatusPredicate()
++    {
++        using var provider = await BuildProviderAsync(
++            nameof(ListStudentAssignmentStatRowsAsync_AppliesTheRecipientLinkAndNoStatusPredicate));
++
++        var published = NewAssignment(TenantA);
++        published.Publish(approvalRequired: false);
++        var draft = NewAssignment(TenantA);
++        var scheduledAhead = NewAssignment(TenantA);
++        scheduledAhead.Schedule(DateTimeOffset.UtcNow.AddDays(7), approvalRequired: false);
++
++        await AddLinkedAssignmentAsync(provider, TenantA, published, link: true);
++        await AddLinkedAssignmentAsync(provider, TenantA, draft, link: true);
++        await AddLinkedAssignmentAsync(provider, TenantA, scheduledAhead, link: true);
++        // Published but NOT recipient-linked: the one predicate the WHERE clause does carry.
++        await AddLinkedAssignmentAsync(provider, TenantA, NewAssignment(TenantA), link: false);
++
++        var rows = await ReadAsAsync(provider, TenantA, StudentId);
++
++        rows.Should().HaveCount(3,
++            "a Draft and a not-yet-active Scheduled row MUST reach the fold — filtering statuses in SQL would "
++            + "collapse Assigned into SentOut and make the handler's status rules untestable");
++        rows.Select(r => r.Status).Should().BeEquivalentTo(
++            [AssignmentStatus.Published, AssignmentStatus.Draft, AssignmentStatus.Scheduled],
++            "all three linked statuses arrive, unsent ones included");
++        rows.Should().OnlyContain(r => !r.HasFinalizedSubmission && r.ReviewState == null && !r.HasReviewedGate,
++            "no submission or gate was created, so every flag reads as absent rather than defaulting to a count");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/StudentStatsRouteCompositionTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/StudentStatsRouteCompositionTests.cs
+new file mode 100644
+index 00000000..86dc3fd6
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/StudentStatsRouteCompositionTests.cs
+@@ -0,0 +1,103 @@
++using FluentAssertions;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// Issue #444 (layer L2a) — how the stats route is composed: chained from the <c>/assignments</c>
++/// orchestrator group, so it inherits that group's prefix and its <c>RequireAuthIfOidc</c> policy, and
++/// declared over the <c>GetStudentAssignmentStats</c> query with a typed result.
++/// <para>
++/// Asserted against the two source files rather than a started host: this test project references
++/// <c>Assignments.Core</c>, <c>Contracts</c>, <c>Application</c> and <c>Worker</c> but NOT
++/// <c>Assignments.Api</c>, and has no <c>TestServer</c> package, so the orchestrator cannot be mapped
++/// in-process here — the host-level guard for this route is
++/// <c>ArchitectureTests.Unit.MinimalApiCompositionArchitectureTests</c>, and the wire check lands in L2b
++/// where the client exists. The source is the contract either way: a route that drifts out of the group,
++/// onto an absolute path, or back onto the <c>Results</c> factory fails here.
++/// </para>
++/// </summary>
++[TestClass]
++public class StudentStatsRouteCompositionTests
++{
++    private const string RouteFile = "src/Assignments/SchoolCollab.Assignments.Api/Endpoints/StudentStatsRoutes.cs";
++    private const string OrchestratorFile = "src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs";
++    private const string RelativeRoute = "\"/{studentId:guid}/assignment-stats\"";
++
++    private static readonly string RepoRoot = FindRepoRoot();
++
++    private static string Read(string relativePath)
++    {
++        var path = Path.Combine(RepoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
++        File.Exists(path).Should().BeTrue($"{relativePath} is the route's single declaration site");
++        return File.ReadAllText(path);
++    }
++
++    /// <summary>The file without its comment lines: the prose may name a symbol freely, the code is what is
++    /// asserted on.</summary>
++    private static string Code(string source) => string.Join('\n', source
++        .Split('\n')
++        .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
++
++    [TestMethod]
++    public void StatsRoute_IsMappedRelative_WithATypedResult_AndNoAuthorizationOfItsOwn()
++    {
++        var source = Code(Read(RouteFile));
++
++        source.Should().Contain("MapStudentStatsRoutes(this RouteGroupBuilder group)",
++            "a specialty mapper takes the orchestrator's group, so it cannot escape the group's prefix or policy");
++        source.Should().Contain("group.MapGet(" + RelativeRoute,
++            "the path is RELATIVE — an absolute '/assignments/…' here would bypass the group and could drift "
++            + "from its authorization policy");
++        source.Should().Contain("IQueryHandler<GetStudentAssignmentStats, StudentAssignmentStatsDto>",
++            "the route serves the stats query, not a bespoke read");
++        source.Should().Contain("TypedResults",
++            "typed results give the generated document a real response schema");
++        source.Should().NotContain("return Results.",
++            "the Results factory loses the response schema — TypedResults is the route-level rule: the typed "
++            + "return makes the schema inferable without a hand-written Produces<T>()");
++        source.Should().NotContain("RequireAuthorization",
++            "the policy belongs to the orchestrator group; a route-level gate silently diverges from it");
++        source.Should().NotContain("RequireAuthIfOidc",
++            "same rule, the group's helper form");
++        source.Should().NotContain("FeatureFlagKeys",
++            "no hand-rolled feature-flag branch — the group's RequireAuthIfOidc already owns that decision");
++    }
++
++    [TestMethod]
++    public void StatsRoute_IsChainedFromTheAssignmentsGroup_NotFromAppOrTheWardGroup()
++    {
++        var source = Code(Read(OrchestratorFile));
++
++        var groupDeclaration = source.IndexOf("app.MapGroup(\"/assignments\")", StringComparison.Ordinal);
++        var chained = source.IndexOf("group.MapStudentStatsRoutes();", StringComparison.Ordinal);
++        var wardGroup = source.IndexOf("app.MapGroup(\"/students\")", StringComparison.Ordinal);
++
++        groupDeclaration.Should().BeGreaterThan(-1, "the orchestrator must still declare the /assignments group");
++        chained.Should().BeGreaterThan(-1,
++            "AssignmentEndpoints must chain the stats route — a mapper nobody calls leaves the route unmapped");
++        wardGroup.Should().BeGreaterThan(-1,
++            "the /students group is the neighbouring ward surface and must still exist for this ordering pin");
++        chained.Should().BeGreaterThan(groupDeclaration,
++            "the stats route is chained AFTER the /assignments group exists");
++        chained.Should().BeLessThan(wardGroup,
++            "…and from `group.` (the /assignments group) — chaining it after the /students group means it was "
++            + "mounted on the ward group instead, which is a different prefix and a different audience");
++
++        source.Should().Contain("group.MapStudentStatsRoutes();",
++            "the call site is spelled on the /assignments group variable, so the route inherits its prefix "
++            + "and RequireAuthIfOidc policy");
++    }
++
++    private static string FindRepoRoot()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost")))
++        {
++            dir = dir.Parent;
++        }
++
++        return dir?.FullName
++            ?? throw new InvalidOperationException(
++                "Could not locate the repository root from " + AppContext.BaseDirectory);
++    }
++}
