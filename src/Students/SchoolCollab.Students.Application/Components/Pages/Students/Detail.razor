@@ -347,6 +347,101 @@
                                     @* ── Rail: relationships and the audit trail ─────────────────────── *@
                                     <div class="region-grid__rail">
 
+                                        @* ── Assignments: the student's six counts (issue #444, layer L2b). FIRST in the
+                                           rail (owner Q124) — it is what a form tutor opens this page to check. A
+                                           DERIVED panel, admissible in the rail by §5: it presents counts over other
+                                           aggregates. The funnel is computed here from the six counts (Q155), and a
+                                           payload that contradicts itself renders unavailable — never a clamped chart. *@
+                                        <PanelSection Id="student-view-assignments"
+                                                      Title="Assignments"
+                                                      TitleId="student-view-assignments-title"
+                                                      Count="@AssignmentStatsCount">
+                                            <ChildContent>
+                                                @if (_assignmentStatsUnavailable || (_assignmentStats is not null && Funnel is null))
+                                                {
+                                                    @* A failed hop, or a payload whose counts contradict each other, states the
+                                                       FACT and shows no numbers at all: zeros are a claim, unavailable is a fact
+                                                       (Q153). No count chip either — AssignmentStatsCount is null here. *@
+                                                    <p class="muted-note" id="student-view-assignments-unavailable">
+                                                        Assignment stats are unavailable right now.
+                                                    </p>
+                                                }
+                                                else if (_assignmentStats is not { } stats)
+                                                {
+                                                    <div class="spinner-container">
+                                                        <FluentSpinner />
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="stat-grid">
+                                                        <div class="stat">
+                                                            <div class="stat__value">@stats.Assigned</div>
+                                                            <div class="stat__label">Assigned</div>
+                                                        </div>
+                                                        <div class="stat">
+                                                            <div class="stat__value">@stats.SentOut</div>
+                                                            <div class="stat__label">Sent out</div>
+                                                        </div>
+                                                        <div class="stat">
+                                                            <div class="stat__value">@stats.Submitted</div>
+                                                            <div class="stat__label">Submitted</div>
+                                                        </div>
+                                                        <div class="stat stat--marked">
+                                                            <div class="stat__value">@stats.Marked</div>
+                                                            <div class="stat__label">Marked</div>
+                                                        </div>
+                                                    </div>
+
+                                                    @if (stats.Assigned == 0)
+                                                    {
+                                                        @* No bars at zero (Q154): a bar at 0% implies "0% of something", and
+                                                           the counts above already say the whole truth. *@
+                                                        <p class="muted-note" id="student-view-assignments-empty">
+                                                            No assignments for this student yet.
+                                                        </p>
+                                                    }
+                                                    else
+                                                    {
+                                                        var funnel = Funnel!.Value;
+
+                                                        @* Axis 1 — the work's progress, totalling Assigned. *@
+                                                        <div class="stat-bar" role="img" aria-label="@FunnelLabel(stats, funnel)">
+                                                            <span class="stat-bar__seg stat-bar__seg--not-sent" style="@SegmentFlex(funnel.NotSent)"></span>
+                                                            <span class="stat-bar__seg stat-bar__seg--awaiting-submission" style="@SegmentFlex(funnel.AwaitingSubmission)"></span>
+                                                            <span class="stat-bar__seg stat-bar__seg--awaiting-marking" style="@SegmentFlex(funnel.AwaitingMarking)"></span>
+                                                            <span class="stat-bar__seg stat-bar__seg--marked" style="@SegmentFlex(funnel.Marked)"></span>
+                                                        </div>
+
+                                                        @* Every segment is named in text as well as coloured (Q141 of the page
+                                                           round): the swatch is the only decoration it owns. *@
+                                                        <div class="stat-legend">
+                                                            <span class="stat-legend__item"><i class="stat-bar__seg stat-bar__seg--not-sent" aria-hidden="true"></i><b>@funnel.NotSent</b> not sent</span>
+                                                            <span class="stat-legend__item"><i class="stat-bar__seg stat-bar__seg--awaiting-submission" aria-hidden="true"></i><b>@funnel.AwaitingSubmission</b> awaiting submission</span>
+                                                            <span class="stat-legend__item"><i class="stat-bar__seg stat-bar__seg--awaiting-marking" aria-hidden="true"></i><b>@funnel.AwaitingMarking</b> awaiting marking</span>
+                                                            <span class="stat-legend__item"><i class="stat-bar__seg stat-bar__seg--marked" aria-hidden="true"></i><b>@funnel.Marked</b> marked</span>
+                                                        </div>
+
+                                                        @* Axis 2 — the guardian-review gate, over its OWN denominator. It is an overlay on
+                                                           the sent set, not the next step after marking, so it never reads "of Assigned".
+                                                           Rendering nothing when nothing requires review follows Q154: a bar at 0% implies
+                                                           "0% of something". *@
+                                                        @if (stats.ReviewRequired > 0)
+                                                        {
+                                                            <div class="stat-caption">Guardian review</div>
+                                                            <div class="stat-bar" role="img" aria-label="@ReviewBarLabel(stats, funnel)">
+                                                                <span class="stat-bar__seg stat-bar__seg--reviewed" style="@SegmentFlex(funnel.Reviewed)"></span>
+                                                                <span class="stat-bar__seg stat-bar__seg--awaiting-review" style="@SegmentFlex(funnel.AwaitingReview)"></span>
+                                                            </div>
+                                                            <p class="stat-foot" id="student-view-assignments-review-foot">
+                                                                <b>@funnel.Reviewed of @stats.ReviewRequired</b> reviewed · <b>@funnel.AwaitingReview</b> awaiting — required on @stats.ReviewRequired of the @stats.SentOut sent.
+                                                            </p>
+                                                        }
+                                                    }
+                                                }
+                                            </ChildContent>
+                                        </PanelSection>
+
                                         <PanelSection Id="student-view-groups"
                                                       Title="Activity groups"
                                                       TitleId="student-view-groups-title"
@@ -622,6 +717,73 @@
     private ActivityGroupDto[]? _studentGroups;
     private string? _activityGroupsError;
     private bool _savingGroupAction;
+
+    // ── Assignment stats state (issue #444, layer L2b) ──
+    // A TRI-STATE, and it needs two fields: `null` alone means both "not loaded yet" and "the hop failed",
+    // so it cannot drive three render states. `null` + this flag false = spinner; `null` + true = the
+    // unavailable line; non-null = the panel. Without the flag the panel either flashes "unavailable"
+    // during every load or never shows it at all.
+    private SchoolCollab.Students.Core.DTOs.StudentAssignmentStats? _assignmentStats;
+    private bool _assignmentStatsUnavailable;
+
+    /// <summary>
+    /// The funnel segments, derived HERE from the six counts (owner Q155) — never sent pre-computed, because a
+    /// <c>Draft</c> field on the wire could disagree with <c>Assigned − SentOut</c>. <c>null</c> means either
+    /// "not loaded" or "the payload contradicts itself": a negative difference (<c>Marked &gt; Submitted</c>,
+    /// <c>SentOut &gt; Assigned</c>, <c>Reviewed &gt; ReviewRequired</c>) is inconsistent data, and the panel
+    /// renders the unavailable state instead of a chart that lies. Never clamped.
+    /// </summary>
+    private AssignmentFunnel? Funnel
+    {
+        get
+        {
+            if (_assignmentStats is not { } stats) return null;
+
+            var notSent = stats.Assigned - stats.SentOut;
+            var awaitingSubmission = stats.SentOut - stats.Submitted;
+            var awaitingMarking = stats.Submitted - stats.Marked;
+            var awaitingReview = stats.ReviewRequired - stats.Reviewed;
+
+            if (notSent < 0 || awaitingSubmission < 0 || awaitingMarking < 0 || awaitingReview < 0)
+                return null;
+
+            return new AssignmentFunnel(
+                notSent, awaitingSubmission, awaitingMarking, stats.Marked,
+                stats.Reviewed, awaitingReview);
+        }
+    }
+
+    /// <summary>
+    /// The panel's header count — <c>Assigned</c> while the count set is coherent, otherwise nothing at all:
+    /// the unavailable state carries NO numbers, not even in the header (Q153).
+    /// </summary>
+    private int? AssignmentStatsCount =>
+        !_assignmentStatsUnavailable && Funnel is not null ? _assignmentStats?.Assigned : null;
+
+    /// <summary>The four funnel segments plus the two review-axis ones, all derived (see <see cref="Funnel"/>).</summary>
+    private readonly record struct AssignmentFunnel(
+        int NotSent,
+        int AwaitingSubmission,
+        int AwaitingMarking,
+        int Marked,
+        int Reviewed,
+        int AwaitingReview);
+
+    /// <summary>A segment's share of its bar: the count IS the weight, so the bar is proportional without any
+    /// percentage arithmetic a reader cannot check against the legend.</summary>
+    private static string SegmentFlex(int count) => $"flex: {count} 1 0;";
+
+    /// <summary>The funnel bar's accessible label, naming the four counts rather than relying on colour.</summary>
+    private static string FunnelLabel(
+        SchoolCollab.Students.Core.DTOs.StudentAssignmentStats stats, AssignmentFunnel funnel) =>
+        $"{stats.Assigned} assigned: {funnel.NotSent} not sent, {funnel.AwaitingSubmission} awaiting submission, "
+        + $"{funnel.AwaitingMarking} awaiting marking, {funnel.Marked} marked";
+
+    /// <summary>The review bar's accessible label, stated over its own denominator."</summary>
+    private static string ReviewBarLabel(
+        SchoolCollab.Students.Core.DTOs.StudentAssignmentStats stats, AssignmentFunnel funnel) =>
+        $"Guardian review: {funnel.Reviewed} reviewed, {funnel.AwaitingReview} awaiting review, "
+        + $"required on {stats.ReviewRequired} of the {stats.SentOut} sent";
 
     /// <summary>
     /// The student's currently-active enrollment. Active = no exit date AND
@@ -981,6 +1143,13 @@
             //    §3.6 FR-28). Loaded alongside the guardians list; the section
             //    grid + Leave/Join actions live below Enrollments.
             await LoadStudentGroupsAsync(ct);
+
+            // 5. Assignment stats (issue #444, layer L2b) — the rail's FIRST panel (Q124). Its own
+            //    SEQUENTIAL await, deliberately NOT folded into the fan-out above: folded in, a failed
+            //    hop rejects before `_student` is assigned, and the page collapses to a spinner plus an
+            //    error bar instead of losing one panel. Sequenced here, the worst case is one
+            //    "unavailable" panel and every other block still renders.
+            await LoadAssignmentStatsAsync(ct);
         }
         catch (OperationCanceledException)
         {
@@ -1413,6 +1582,29 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load activity groups for student {StudentId}", Id);
             _activityGroupsError = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Loads the assignment counts. <see cref="StudentsApiClient.GetAssignmentStatsAsync"/> returns
+    /// <c>null</c> rather than throwing when the hop fails, so <c>null</c> here means "unavailable" — the
+    /// flag is what separates that from "not loaded yet".
+    /// </summary>
+    private async Task LoadAssignmentStatsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var stats = await Api.GetAssignmentStatsAsync(Id, ct);
+            _assignmentStatsUnavailable = stats is null;
+            _assignmentStats = stats;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load assignment stats for student {StudentId}", Id);
+            _assignmentStatsUnavailable = true;
         }
         await InvokeAsync(StateHasChanged);
     }

@@ -154,9 +154,33 @@ public class StudentViewRendersTests : BunitContext
         ]
         """;
 
+    /// <summary>
+    /// The six assignment counts (issue #444, layer L2b). Chosen so the DERIVED funnel is auditable and its
+    /// four segments all differ: not sent 3, awaiting submission 9, awaiting marking 5, marked 7 — which sum to
+    /// Assigned 24. <c>Assigned</c> and <c>SentOut</c> also differ, so the review axis's "of the 21 sent" cannot
+    /// pass as "of 24" (criterion C4).
+    /// </summary>
+    private const string AssignmentStatsJson = """
+        { "assigned": 24, "sentOut": 21, "submitted": 12, "marked": 7,
+          "reviewRequired": 12, "reviewed": 10 }
+        """;
+
+    /// <summary>No assignments at all — tiles at 0 and NO bars (Q154).</summary>
+    private const string ZeroAssignmentStatsJson = """
+        { "assigned": 0, "sentOut": 0, "submitted": 0, "marked": 0, "reviewRequired": 0, "reviewed": 0 }
+        """;
+
+    /// <summary>A payload that contradicts itself: <c>Marked 25 &gt; Submitted 18</c>. The panel must say
+    /// unavailable rather than draw a negative "awaiting marking" segment (Q155 — never clamped).</summary>
+    private const string InconsistentAssignmentStatsJson = """
+        { "assigned": 24, "sentOut": 21, "submitted": 18, "marked": 25, "reviewRequired": 12, "reviewed": 10 }
+        """;
+
     // ── The harness ─────────────────────────────────────────────────────────
 
-    private sealed class ScriptedHandler : HttpMessageHandler
+    private sealed class ScriptedHandler(
+        string assignmentStatsJson = AssignmentStatsJson,
+        HttpStatusCode assignmentStatsStatus = HttpStatusCode.OK) : HttpMessageHandler
     {
         public readonly List<string> Calls = new();
 
@@ -165,6 +189,16 @@ public class StudentViewRendersTests : BunitContext
         {
             var url = request.RequestUri!.PathAndQuery;
             Calls.Add($"{request.Method.Method} {url}");
+
+            // The stats read is scripted apart from the list-shaped reads below: it is the one hop whose
+            // FAILURE the panel has to survive, so a test must be able to fail it and nothing else.
+            if (url.StartsWith($"/students/{StudentId}/assignment-stats", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(assignmentStatsStatus)
+                {
+                    Content = new StringContent(assignmentStatsJson, Encoding.UTF8, "application/json"),
+                });
+            }
 
             var body = url switch
             {
@@ -208,8 +242,12 @@ public class StudentViewRendersTests : BunitContext
             Task.FromResult(new AuthenticationState(_user));
     }
 
-    /// <summary>Registers the page's collaborators against the scripted API, then renders the page.</summary>
-    private (IRenderedComponent<Detail> Cut, ScriptedHandler Handler) RenderPage()
+    /// <summary>Registers the page's collaborators against the scripted API, then renders the page. The
+    /// assignment-stats answer is a parameter because three of its states are their own assertions: loaded,
+    /// zero, and failed.</summary>
+    private (IRenderedComponent<Detail> Cut, ScriptedHandler Handler) RenderPage(
+        string assignmentStatsJson = AssignmentStatsJson,
+        HttpStatusCode assignmentStatsStatus = HttpStatusCode.OK)
     {
         var claims = new[]
         {
@@ -221,7 +259,7 @@ public class StudentViewRendersTests : BunitContext
             User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestScheme")),
         };
 
-        var handler = new ScriptedHandler();
+        var handler = new ScriptedHandler(assignmentStatsJson, assignmentStatsStatus);
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
         var codedValues = new CodedValuesApiClient(http);
         var api = new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValues);
@@ -255,7 +293,8 @@ public class StudentViewRendersTests : BunitContext
 
         // Every block, in one page — no tabs, and the rail comes last.
         cut.FindAll(".region-grid__main > *").Count.Should().Be(4, "Details, Enrollment, Contacts, Guardians");
-        cut.FindAll(".region-grid__rail > *").Count.Should().Be(3, "Activity groups, Subjects, Contact history");
+        cut.FindAll(".region-grid__rail > *").Count.Should().Be(4,
+            "Assignments (first — Q124), Activity groups, Subjects, Contact history");
         cut.FindAll("fluent-tabs").Should().BeEmpty("the view is a single page (StudentDetailSectionsTests pins it)");
 
         // The reads the blocks depend on actually happened.
@@ -265,6 +304,8 @@ public class StudentViewRendersTests : BunitContext
         handler.Calls.Should().Contain($"GET /contacts?ownerType=Student&ownerId={StudentId}");
         handler.Calls.Should().Contain($"GET /students/{StudentId}/subjects");
         handler.Calls.Should().Contain($"GET /students/{StudentId}/activity-groups");
+        handler.Calls.Should().Contain($"GET /students/{StudentId}/assignment-stats",
+            "the Assignments panel's own read must actually have happened — scripted is not the same as called");
     }
 
     [TestMethod]
@@ -358,6 +399,124 @@ public class StudentViewRendersTests : BunitContext
         var groups = cut.Find("#student-view-groups");
         groups.TextContent.Should().Contain("Chess Club");
         groups.TextContent.Should().Contain("Academic", "Category is optional free text and renders when set");
+    }
+
+    // ── Assignments panel (issue #444, layer L2b) ────────────────────────
+
+    [TestMethod]
+    public void The_Assignments_Block_Is_The_First_Rail_Panel_And_Shows_The_Four_Progress_Tiles()
+    {
+        var (cut, _) = RenderPage();
+        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments-title").Should().ContainSingle());
+
+        // First in the rail (Q124): asserted on the rendered DOM, not on the source order.
+        cut.FindAll(".region-grid__rail > *")[0].Id.Should().Be("student-view-assignments",
+            "the panel is what a form tutor opens this page to check, so it leads the rail");
+        cut.Find("#student-view-assignments-title").TextContent.Trim().Should().Be("Assignments");
+
+        // The header count IS Assigned — one number, the panel's own denominator.
+        cut.Find("#student-view-assignments .panel-section__count").TextContent.Trim().Should().Be("24");
+
+        var tiles = cut.FindAll("#student-view-assignments .stat")
+            .Select(tile => (
+                Value: tile.QuerySelector(".stat__value")!.TextContent.Trim(),
+                Label: tile.QuerySelector(".stat__label")!.TextContent.Trim()))
+            .ToArray();
+
+        tiles.Should().BeEquivalentTo(
+            new[] { ("24", "Assigned"), ("21", "Sent out"), ("12", "Submitted"), ("7", "Marked") },
+            options => options.WithStrictOrdering(),
+            "the four tiles are the DTO's four progress counts, verbatim");
+    }
+
+    [TestMethod]
+    public void The_Funnel_Bar_Totals_Assigned_And_The_Review_Bar_Totals_ReviewRequired()
+    {
+        var (cut, _) = RenderPage();
+        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments .stat-bar").Should().HaveCount(2));
+
+        // One bar per axis — never one bar carrying both, which is the defect the mock's second bar fixed.
+        var bars = cut.FindAll("#student-view-assignments .stat-bar");
+
+        // Axis 1: 3 + 9 + 5 + 7 = 24 = Assigned. The label states every derived segment, so a wrong
+        // difference cannot hide behind a plausible-looking width.
+        bars[0].GetAttribute("aria-label").Should().Be(
+            "24 assigned: 3 not sent, 9 awaiting submission, 5 awaiting marking, 7 marked",
+            "the four derived segments sum to Assigned");
+
+        // Axis 2: its OWN denominator — 12 required on 21 sent, never "of 24".
+        bars[1].GetAttribute("aria-label").Should().Be(
+            "Guardian review: 10 reviewed, 2 awaiting review, required on 12 of the 21 sent");
+
+        var foot = cut.Find("#student-view-assignments-review-foot").TextContent;
+        foot.Should().Contain("required on 12 of the 21 sent",
+            "the review axis names its own denominator: a draft cannot be gated for review");
+        foot.Should().NotContain("of 24", "'of Assigned' is the wrong denominator for this bar");
+
+        // Every segment is named in text as well as coloured.
+        var legend = cut.FindAll("#student-view-assignments .stat-legend__item")
+            .Select(item => item.TextContent.Trim())
+            .ToArray();
+
+        legend.Should().BeEquivalentTo(
+            new[] { "3 not sent", "9 awaiting submission", "5 awaiting marking", "7 marked" },
+            options => options.WithStrictOrdering());
+    }
+
+    [TestMethod]
+    public void Zero_Assigned_Renders_The_Tiles_But_No_Bars()
+    {
+        var (cut, _) = RenderPage(ZeroAssignmentStatsJson);
+        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments-empty").Should().ContainSingle());
+
+        cut.Find("#student-view-assignments .panel-section__count").TextContent.Trim().Should().Be("0");
+        cut.FindAll("#student-view-assignments .stat .stat__value")
+            .Select(value => value.TextContent.Trim())
+            .Should().AllBe("0", "a zero count is a fact, so the tiles still render");
+
+        cut.FindAll("#student-view-assignments .stat-bar").Should().BeEmpty(
+            "a bar at 0% implies '0% of something' (Q154)");
+        cut.Find("#student-view-assignments-empty").TextContent.Trim()
+            .Should().Be("No assignments for this student yet.");
+        cut.FindAll("#student-view-assignments .stat-legend").Should().BeEmpty("no segments, so nothing to name");
+    }
+
+    [TestMethod]
+    public void A_Failed_Hop_Renders_No_Numbers_And_The_Rest_Of_The_Page_Still_Renders()
+    {
+        var (cut, handler) = RenderPage(assignmentStatsStatus: HttpStatusCode.InternalServerError);
+        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments-unavailable").Should().ContainSingle());
+
+        // The read was attempted — otherwise this test would pass on a panel that never loaded.
+        handler.Calls.Should().Contain($"GET /students/{StudentId}/assignment-stats");
+
+        var panel = cut.Find("#student-view-assignments");
+        panel.TextContent.Trim().Should().Contain("Assignment stats are unavailable right now.");
+
+        // NO numbers at all, not even the header count: zeros are a claim, unavailable is a fact (Q153).
+        panel.QuerySelectorAll(".stat").Should().BeEmpty();
+        panel.QuerySelectorAll(".stat-bar").Should().BeEmpty();
+        panel.QuerySelectorAll(".panel-section__count").Should().BeEmpty();
+
+        // …and the failure costs one panel, not the page (the load is sequenced after _student is set).
+        cut.FindAll("#student-view-details-title").Should().ContainSingle();
+        cut.Find("#student-view-groups").TextContent.Should().Contain("Chess Club");
+        cut.Find("#student-view-placement").TextContent.Should().Contain("Year 8 (8A)");
+    }
+
+    [TestMethod]
+    public void An_Inconsistent_Payload_Renders_Unavailable_Rather_Than_A_Negative_Segment()
+    {
+        // Marked (25) > Submitted (18): the funnel would have to draw a negative "awaiting marking".
+        // The panel says the truth is unavailable instead of clamping a chart (Q155).
+        var (cut, _) = RenderPage(InconsistentAssignmentStatsJson);
+        cut.WaitForAssertion(() => cut.FindAll("#student-view-assignments-unavailable").Should().ContainSingle());
+
+        var panel = cut.Find("#student-view-assignments");
+        panel.QuerySelectorAll(".stat").Should().BeEmpty();
+        panel.QuerySelectorAll(".stat-bar").Should().BeEmpty();
+        panel.QuerySelectorAll(".panel-section__count").Should().BeEmpty(
+            "the header count is a number too, and this panel presents no numbers while the data contradicts itself");
     }
 
     [TestMethod]

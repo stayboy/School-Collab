@@ -325,6 +325,130 @@
     white-space: nowrap;
 }
 
+/* ── Assignments: the six counts (issue #444, layer L2b) ────────────────────────────────
+   Two axes, two bars: the work's progress (totalling Assigned) and the guardian-review gate
+   (totalling ReviewRequired). Colour reinforces, never carries the meaning — every segment is
+   named in the legend or the foot line, and each bar carries an accessible label. */
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.stat {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+    background: var(--neutral-layer-1, #ffffff);
+}
+
+.stat__value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.stat__label {
+    margin-top: 2px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* The tile holding work that is actually finished — the one state the eye should catch first. */
+.stat--marked {
+    background: var(--status-success-bg, #e7f4ec);
+    border-color: var(--status-success-border, #b7dfc6);
+}
+
+.stat--marked .stat__value {
+    color: var(--status-success-fg, #14532d);
+}
+
+/* One bar per axis; the segments are weighted by their count (SegmentFlex in the code-behind). */
+.stat-bar {
+    display: flex;
+    gap: 2px;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.stat-bar__seg {
+    display: block;
+    height: 8px;
+    border-radius: 2px;
+}
+
+.stat-bar__seg--not-sent {
+    background: var(--status-neutral-dot, #8a8a8a);
+    opacity: 0.45;
+}
+
+.stat-bar__seg--awaiting-submission {
+    background: var(--accent-fill-rest, #0f6cbd);
+}
+
+.stat-bar__seg--awaiting-marking {
+    background: var(--status-warning-dot, #b8760a);
+}
+
+.stat-bar__seg--marked {
+    background: var(--status-success-dot, #107c41);
+}
+
+.stat-bar__seg--reviewed {
+    background: var(--band-groups-fg, #523aa0);
+    opacity: 0.75;
+}
+
+.stat-bar__seg--awaiting-review {
+    background: var(--status-warning-dot, #b8760a);
+}
+
+.stat-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-size: 0.7rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.stat-legend__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* The legend's swatch reuses the segment classes at a fixed size — one palette, no second copy. */
+.stat-legend__item .stat-bar__seg {
+    width: 8px;
+    flex: 0 0 auto;
+}
+
+.stat-legend__item b {
+    font-weight: 700;
+    color: var(--neutral-foreground-1, #242424);
+}
+
+/* A labelled sub-section INSIDE the panel — never a nested box (§3). */
+.stat-caption {
+    margin-top: 2px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.stat-foot {
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
 /* ── Notes and muted text ───────────────────────────────────────────────────────────────── */
 .muted-note {
     margin: 0;

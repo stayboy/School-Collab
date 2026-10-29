@@ -738,6 +738,35 @@ public sealed class StudentsApiClient : IContactsClient
         return await EnrichSingleAsync(await response.Content.ReadFromJsonAsync<StudentDto>(ct), ct);
     }
 
+    /// <summary>
+    /// Issue #444 (layer L2b) — the student's six assignment counts, or <c>null</c> when they cannot be read.
+    /// <b>This catch is new behaviour, not an inherited convention</b>: every other read on this class lets
+    /// <c>GetFromJsonAsync</c> throw, and this is the one read whose failure must not reach the page. A
+    /// non-success response (the Students endpoint answers a 502 when its Assignments hop fails), an
+    /// unreachable host and a malformed body all degrade the rail panel to its "unavailable" state while the
+    /// rest of the page renders.
+    /// </summary>
+    public async Task<StudentAssignmentStats?> GetAssignmentStatsAsync(Guid id, CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<StudentAssignmentStats>(
+                $"/students/{id}/assignment-stats", ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex,
+                "Assignment stats for student {StudentId} are unavailable; the panel will say so", id);
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex,
+                "Assignment stats for student {StudentId} answered a body that could not be read", id);
+            return null;
+        }
+    }
+
     // ── DTO enrichment (client service) ──────────────────────────────────────
     // Age + GenderName are computed here (not in the UI, not in Students.Core)
     // so the Students module stays decoupled from the CodedValues module. The

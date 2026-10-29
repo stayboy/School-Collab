@@ -696,3 +696,78 @@ is not the theme.
 
 **Still not live-verified:** the guardian **cards** and the per-card contact chips — none of the three seeded
 students has a guardian, so that markup is covered by `StudentViewRendersTests` only.
+
+### 8.7 Layer 2 (L2b) — the assignment-stats panel, shipped as its own stacked layer
+
+**Scope.** Step 9 of §5 — the one block on this page that is not reuse (§1.7). It shipped in two layers
+because the Assignments side is a contract of its own: **L2a** (merged) added the grouped-count query and
+`GET /assignments/{studentId}/assignment-stats`; **L2b** (this record) adds the Students port, the Students
+endpoint, the client method, the rail panel and the probe fixtures. Nothing under `src/Assignments/**` moved.
+
+#### Findings that shaped the implementation
+
+| Finding | Where it bites |
+|---|---|
+| The counts can only cross as **JSON**, because `Students.Core` and `Students.Application` may not reference an Assignments assembly (AGENTS.md § "Cross-context access", Q152). So the six counts are **mirrored** in `Students.Core/DTOs/StudentAssignmentStats.cs` | A mirror binds by property NAME: a renamed member deserializes to `0`, silently. Pinned by a `ReadFromJsonAsync` round trip asserting all six values (`StudentAssignmentStatsReaderHttpClientTests`) |
+| The existing `assignments-api` named client's base address is the **host root** (`https+http://assignments-api`), and L2a's route lives on the `/assignments` group | The hop path must be `assignments/{studentId}/assignment-stats`, **with** that segment. Without it the call 404s and the panel reports "unavailable" against a healthy endpoint — and a test that asserted the wrong path would have agreed with it |
+| The client class's other reads use `GetFromJsonAsync` and therefore **throw**; `_logger` was injected and unused | The panel's degradation is **new code**, not an inherited convention: `GetAssignmentStatsAsync` catches `HttpRequestException` and `JsonException`, logs a warning and returns `null` |
+| `null` from that client means both "not loaded" and "failed" | The page carries a separate `_assignmentStatsUnavailable` flag. Without it the panel either flashes "unavailable" on every load or never shows it at all |
+| A failed stats hop, folded into the first `Task.WhenAll`, rejects **before** `_student` is assigned | The load is its own sequential `await` after `_student` is set. Folded in, the whole page collapses to a spinner plus an error bar; sequenced, the cost is one muted panel |
+
+#### What shipped
+
+| File | Change |
+|---|---|
+| `Students.Core/DTOs/StudentAssignmentStats.cs` | **new** — the six-int mirror (`Assigned, SentOut, Submitted, Marked, ReviewRequired, Reviewed`), documented derived invariants |
+| `Students.Core/Services/IStudentAssignmentStatsReader.cs` | **new** — the port; **throws** on failure (the `IActivityGroupAssignmentQuery` precedent), the caller decides |
+| `Students.Api/Services/StudentAssignmentStatsReaderHttpClient.cs` | **new** — the port over the existing `assignments-api` client, `GET assignments/{id}/assignment-stats` |
+| `Students.Api/Program.cs` | **one registration** beside the activity-group query. **No** new `AddCrossModuleHttpClient`: that pipeline already carries the tenant and bearer handlers (Q151) |
+| `Students.Api/Endpoints/StudentStatsRoutes.cs` | **new** — `MapStudentStatsRoutes`, relative `/{id:guid}/assignment-stats`, typed `Ok<StudentAssignmentStats>`; a hop failure is logged and answered `502` problem |
+| `Students.Api/StudentEndpoints.cs` | **one chained call**; still five `RequireAuthIfOidc` groups and zero inline `MapGet` |
+| `Students.Application/Services/StudentsApiClient.cs` | **one method** — `GetAssignmentStatsAsync`, `try/catch` → `null` + `LogWarning` |
+| `.../Pages/Students/Detail.razor` (+ `.razor.css`) | the rail's **first** panel, its load, and the three render states |
+| Tests | `StudentViewRendersTests` (4 new renders), `StudentDetailSectionsTests` (rail list + section identity), new `StudentAssignmentStatsReaderHttpClientTests`, new `StudentStatsRoutesTests`, new `StudentAssignmentStatsPortPlacementTests`, `OpenApiSurfaceArchitectureTests` pin `3 → 4` |
+| `documents/runbooks/student-view-probe-seed.{md,students.sql,assignments.sql}` | **new** — dev-only fixtures (Q145; never `MigrationService`) |
+
+#### Display semantics as implemented
+
+- **Header count** = `Assigned`. **Tiles** = the four progress counts, verbatim.
+- **Funnel bar** derives its four segments in the UI (Q155): `Assigned − SentOut` (*not sent*),
+  `SentOut − Submitted` (*awaiting submission*), `Submitted − Marked` (*awaiting marking*), `Marked`. It
+  totals **Assigned**, and each segment is also named in a legend beside the bar.
+- **Review bar** totals **`ReviewRequired`** — its own denominator — and its foot line reads
+  "N of M reviewed · K awaiting — required on M of the S sent", never "of Assigned". A draft cannot be gated,
+  so dividing by Assigned would overstate the work left.
+- **Three states, not two.** A failed or self-contradicting payload renders one muted line with **no numbers**
+  (not even the header count); `Assigned = 0` renders tiles at 0 and **no bars** (Q154); a coherent non-zero
+  set renders the panel. A negative derived difference (`Marked > Submitted`, `SentOut > Assigned`,
+  `Reviewed > ReviewRequired`) is inconsistent data, not a chart to clamp.
+
+#### Deviations from §5 / the mock, and why
+
+1. **The review axis's two tiles are not rendered.** §1.7's axis-2 table defines `Requires guardian review` /
+   `Reviewed` / `Awaiting review`, and the owner's steer for this block was **one bar plus a footnote** — "not a
+   caption plus two tiles plus a second bar". The round's control table lists the two review counts in the foot
+   line, so the tiles would have been a third copy of the same two numbers.
+2. **No percentage on the review bar.** The owner's steer names "… 83%"; the round's control table does not, and
+   a rounded percentage is a claim nothing pins. The exact counts (`10 of 12`) carry the same information.
+3. **The review bar is omitted when `ReviewRequired = 0`.** Q154's rule — a bar at zero implies "0% of
+   something" — applies to this axis with `ReviewRequired` as its denominator, so a panel with no mandatory-review
+   assignments shows the progress axis only. This is derived from Q154 rather than separately ruled.
+4. **Two seed scripts, not one.** The fixtures span two databases (`students-db` and `assignments-db`); one file
+   cannot run against both without a `\connect` that re-prompts for a password.
+5. **The panel is not collapsible.** Collapsibility is a per-panel opt-in the mock's consent table does not grant
+   this panel (`panel-layout-pattern.md` §6), so it renders no chevron.
+
+#### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build SchoolCollab.slnx -c Release` | **0 errors** (41 pre-existing warnings, none from this change) |
+| `SchoolCollab.Admin.Tests.Unit` | **870** passed / 0 failed (this diff adds 5 renders and 1 source-level test) |
+| `SchoolCollab.Students.Api.Tests.Unit` | **37** passed / 0 failed (4 new client tests, 2 new route tests) |
+| `SchoolCollab.Students.Tests.Unit` | **695** passed / 0 failed (unchanged by this diff) |
+| `SchoolCollab.ArchitectureTests.Unit` | **160** passed / 0 failed (2 new port-placement tests, OpenAPI pin `3 → 4`) |
+| Runbook router | the new runbook carries a `## Symptom` block, which `RunbookSymptomRouterTests` requires of every file in `documents/runbooks/` |
+| The negative render assertions were **watched failing** | a `.stat-bar` injected into the zero branch turns `Zero_Assigned_Renders_The_Tiles_But_No_Bars` red, then was reverted — the Q154 pin is a real assertion, not a comment |
+| Live browser probe (AppHost + `student-view-probe-seed.*.sql`) | **run by the parent after implementation** — six counts, funnel and review wording correct (6 assigned / 5 sent / 2 submitted / 1 marked / 2 required / 1 reviewed, foot reading "required on 2 of the 5 sent"); with `assignments-api` stopped the panel reads "Assignment stats are unavailable right now." with no numbers while both grids still render. Transcript: `documents/rounds/round-student-stats-l2b.md` § "Live probe (C11)". It also found two defects in the seed fixtures the implementer never executed — recorded there |
