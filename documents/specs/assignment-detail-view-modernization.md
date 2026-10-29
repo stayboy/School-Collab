@@ -48,10 +48,11 @@ One page, one header, no tabs — the assignment view adopts the student view's 
   assignment the primary is ***Open progress***, with Unpublish and Close in the kebab: the view page's job is
   running the assignment, not authoring it (Q141, settled — §11 carries the view-surface exception so the page is
   not read as drifting from the matrix).
-- **Main column:** Details · Questions & AI.
-- **Rail:** **Targets & Audience** (settled name, not collapsible) · **Content & Resources** (settled name, collapsible
-  — materials with a preview per row) · **Delivery** (new, post-publish only: the resolved cohort with per-contact
-  delivery state) · Progress · Guardian sign-off · Notifications · Rules.
+- **Main column:** Details · Questions & AI · the **aggregate** panels (Progress, Guardian sign-off when published;
+  Approval when a decision is outstanding) · **Rules** stays in the rail.
+- **Rail:** **Content & Resources** (settled name, collapsible — materials with a preview per row) · **Delivery** (new,
+  post-publish: the resolved cohort with per-contact delivery state) · Notifications · Rules; before publish,
+  **Targets & Audience** (settled name, not collapsible) replaces Delivery.
 - **Delivery** answers question 1 in one place: one group per **student**, each contact with channel, guardian role,
   subscription and **delivery state**, plus explicit *not reached — no subscribed contact* rows. Before publish the
   same fact is a count, which is what **Targets & Audience** already shows.
@@ -99,6 +100,21 @@ One page, one header, no tabs — the assignment view adopts the student view's 
 30. As a teacher, I want the guardian sign-off summary — signed, outstanding, reassigned — so that I know whether the assignment can be finalized.
 31. As a teacher, I want progress tiles (cohort, reached, started, submitted, graded, signed), so that I read the funnel without arithmetic.
 32. As a teacher, I want to open a full progress page, so that I can work the cohort student by student.
+33. As a teacher, I want one row per student with contacts, submission state, score, sign-off and last activity, so that I can triage in one place.
+34. As a teacher, I want to filter progress by state, so that "not started" or "submitted, ungraded" is findable.
+35. As a teacher, I want to open a student's submission from progress, so that marking starts from the queue that produced it.
+36. As a teacher, I want to review and grade from progress, so that I keep my place in the cohort.
+37. As a teacher, I want to submit on behalf of a student, so that paper or offline work is not stranded.
+38. As a teacher, I want to reassign a sign-off to another guardian, so that a separated family is not blocked.
+39. As a teacher, I want a breadcrumb back to the list, so that navigation sits where I expect it.
+40. As a teacher in dark theme, I want every status colour legible, so that state stays distinguishable.
+41. As a teacher on a narrow host, I want the rail to collapse under the main column, so that fields stay first and nothing clips.
+42. As a teacher, when one read fails I want that panel to say so and the page to keep working, so that one hop outage does not blank the surface.
+43. As an administrator with no tenant selected, I want a tenant-required message rather than an empty assignment, so that the state is unambiguous.
+44. As a teacher, I want the page to say when the cohort is capped, so that I never mistake a truncated list for the whole audience.
+45. As a guardian, in a later layer, I want a helper grounded on the materials the teacher attached, so that help matches the lesson.
+
+---
 
 ## 4. Implementation Decisions
 
@@ -193,6 +209,39 @@ One page, one header, no tabs — the assignment view adopts the student view's 
 
 - The subscription badge passing the identical appearance for both branches.
 - Failure labels resolving guardian-owned contacts only.
+- The nested page chrome.
+
+### 4.7 AI and prompts (Q132 — designed, not built)
+
+- The page states the grounding contract truthfully: URL-derived text + attachment extracted text, five slots,
+  20 000 characters each, teacher-written instructions **excluded** (`instructional-materials.md` INS-3). It lists
+  each material's extraction status and whether it grounds.
+- **Portal prompt seam, fixed by decision:** Assignments assembles an **entitlement-checked, titled material
+  digest** and posts it to a **new AI endpoint with its own prompt provider** — never an overload of
+  `/api/ai/chat`, whose single `ISystemPromptProvider` is already occupied. The guardian/student host never
+  fetches a URL and never composes a prompt; it stays a thin client like the admin chat panel. Tenant org prompt
+  and lock reuse the existing resolver.
+- Widening the grounding contract so instructions ground too is a **separate additive layer**: it changes what the
+  model sees for every generation.
+
+### 4.8 Panel placement — aggregates and decisions in main, row collections in the rail
+
+The ownership test in `panel-layout-pattern.md` §5 asks whether a panel presents **other rows** or the entity's own
+fields. It has no clause for a panel that presents **no rows at all**, and this surface has three of them
+(owner direction, 2026-10-29).
+
+- **The rule.** A panel presenting a **collection of rows** belongs in the rail — Content & Resources, Delivery,
+  Notifications, Rules, Targets & Audience. A panel presenting an **aggregate** (Progress tiles, Guardian sign-off
+  counts) or a **decision** (Approval) owns no rows, so it is not a rail panel: it sits in **main, beneath the
+  content it summarises**.
+- **Measured, not aesthetic.** With every panel in the rail the mock stood **4 991 px**, a ~1 900 px rail beside
+  ~500 px of main: two columns of wildly different length and a reader scrolling a mostly empty main. Applying the
+  rule brought it to **4 354 px** with the columns ending ~300 px apart.
+- **What did not move.** Targets & Audience, Content & Resources and Rules stay in the rail: §5 names them and each
+  is a row collection. Moving one of those would re-open a settled table for a layout preference.
+- **Consequence for the pattern doc.** §5's table has no aggregate/decision clause; this rule is the missing half.
+  It is **proposed** for `panel-layout-pattern.md` §5, not asserted here.
+
 
 ## 5. Testing Decisions
 
@@ -268,6 +317,10 @@ are both handler-level assertions, because both are decided server-side and neit
 | Q145 | Delivery authority | **The notification log is authoritative** for the status pill; recipient stamps supply "opened" only. |
 | Q146 | Cohort cap | **Fixed 200**, a shared constant, truncation always stated. |
 | Q147 | Where submission review lives | **A new page** `/assignments/{id}/students/{studentId}/submission`, mirroring `/…/sign-off` — the tab's review UI moves there. |
+| Q148 | Dispatch now or park | **Park.** A light round starts with a plan gate; it deserves a fresh start, not the tail of a long session. |
+| Q149 | One round or two | **Two:** (a) the view page + audience read, (b) the progress and submission pages. Recorded on #453. |
+| Q150 | Merge #454 before branching | **Merge first, then branch from `main`** — a docs-only PR, and an implementation branch without its spec is a branch that cannot be reviewed against it. |
+| Q151 | Panel placement | **Aggregates and decisions in main, row collections in the rail** (§4.8). Rail: Content & Resources · Delivery · Notifications · Rules (pre-publish: Targets & Audience replaces Delivery). Main: Details · Questions · Progress · Sign-off · Approval. |
 
   |---|---|---|---|
   | 1 | §2 re-decided lifecycle primaries (Published → *Open progress*) while claiming the §11 matrix could not fork; the matrix reads Published → Unpublish, Closed → Archive | **P1** | Applied — header follows §11; Q141 later settled the view exception, so §11 now records it explicitly and the decision takes `surface` as an input (pass 2, finding 1) |
@@ -294,36 +347,7 @@ are both handler-level assertions, because both are decided server-side and neit
   subscriber read, not `IStudentDirectory` per student — the first draft implied N+1 and was corrected.
 - **Mock is not evidence** (L4): the PNGs settle the look; only the tests settle the behaviour.
 
-- The nested page chrome.
-
-### 4.7 AI and prompts (Q132 — designed, not built)
-
-- The page states the grounding contract truthfully: URL-derived text + attachment extracted text, five slots,
-  20 000 characters each, teacher-written instructions **excluded** (`instructional-materials.md` INS-3). It lists
-  each material's extraction status and whether it grounds.
-- **Portal prompt seam, fixed by decision:** Assignments assembles an **entitlement-checked, titled material
-  digest** and posts it to a **new AI endpoint with its own prompt provider** — never an overload of
-  `/api/ai/chat`, whose single `ISystemPromptProvider` is already occupied. The guardian/student host never
-  fetches a URL and never composes a prompt; it stays a thin client like the admin chat panel. Tenant org prompt
-  and lock reuse the existing resolver.
-- Widening the grounding contract so instructions ground too is a **separate additive layer**: it changes what the
-  model sees for every generation.
-
 ---
-
-33. As a teacher, I want one row per student with contacts, submission state, score, sign-off and last activity, so that I can triage in one place.
-34. As a teacher, I want to filter progress by state, so that "not started" or "submitted, ungraded" is findable.
-35. As a teacher, I want to open a student's submission from progress, so that marking starts from the queue that produced it.
-36. As a teacher, I want to review and grade from progress, so that I keep my place in the cohort.
-37. As a teacher, I want to submit on behalf of a student, so that paper or offline work is not stranded.
-38. As a teacher, I want to reassign a sign-off to another guardian, so that a separated family is not blocked.
-39. As a teacher, I want a breadcrumb back to the list, so that navigation sits where I expect it.
-40. As a teacher in dark theme, I want every status colour legible, so that state stays distinguishable.
-41. As a teacher on a narrow host, I want the rail to collapse under the main column, so that fields stay first and nothing clips.
-42. As a teacher, when one read fails I want that panel to say so and the page to keep working, so that one hop outage does not blank the surface.
-43. As an administrator with no tenant selected, I want a tenant-required message rather than an empty assignment, so that the state is unambiguous.
-44. As a teacher, I want the page to say when the cohort is capped, so that I never mistake a truncated list for the whole audience.
-45. As a guardian, in a later layer, I want a helper grounded on the materials the teacher attached, so that help matches the lesson.
 
 ---
 

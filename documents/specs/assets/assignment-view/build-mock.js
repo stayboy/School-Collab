@@ -42,8 +42,12 @@ const secA = `
     ${OPEN}${main(
       details([['Type', 'Digital'], ['Grading', 'Auto-graded'], ['Maximum score', '20 <span class="muted">· pass at 12</span>'],
         ['Due', '12 Nov 2026, 16:00'], ['Attempts', '2'], ['Published', '4 Nov 2026, 09:14']]) +
-      questionsPanel(false))}${rail(
-      contentPanel(false) + deliveryPanel() + progressPanel() + signOffPanel() + notificationsPanel() +
+      questionsPanel(false) +
+      // Progress and Guardian sign-off sit in MAIN, below Questions (owner, 2026-10-29): the rail was
+      // six panels and the main column was two, so the page stretched ~1900px of rail beside ~500px
+      // of content. Both are cohort summaries — they read next to the questions, not beside the materials.
+      progressPanel() + signOffPanel())}${rail(
+      contentPanel(false) + deliveryPanel() + notificationsPanel() +
       rulesPanel('Not required'))}${closeGrid}
   </div></div>
 </section>`;
@@ -60,8 +64,12 @@ const secB = `
     ${OPEN}${main(
       details([['Type', 'Digital'], ['Grading', 'Auto-graded'], ['Maximum score', '20'], ['Due', '12 Nov 2026, 16:00'],
         ['Attempts', '2'], ['Last saved', '28 Oct 2026, 17:41']]) +
-      questionsPanel(true))}${rail(
-      audienceExpected() + contentPanel(true) + approvalPanel() + rulesPanel('Required — grade policy'))}${closeGrid}
+      questionsPanel(true) +
+      // Approval is a decision ABOUT this content, so it sits under Questions in MAIN rather than alone in
+      // the rail (owner, 2026-10-29). Same rule as Progress/Sign-off in A: state and decisions in main,
+      // relationships (targets, materials, rules) in the rail.
+      approvalPanel())}${rail(
+      audienceExpected() + contentPanel(true) + rulesPanel('Required — grade policy'))}${closeGrid}
   </div></div>
 </section>`;
 
