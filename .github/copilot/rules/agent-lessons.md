@@ -14,6 +14,50 @@ entry here shrinks to a pointer at that check.
 
 ---
 
+## A new read must not become a second, weaker door to data another module guards (2026-10-29)
+
+**Rule.** Before projecting a field into a new DTO, ask which context **owns** that field and what its own read
+already enforces. A new read that surfaces another module's protected data is not a display decision — it is a
+permission decision taken by whoever wrote the projection. Prefer **omitting the field from the contract** to
+masking it in the view: a value that never enters the payload cannot leak through devtools, a screenshot, a log
+line or a future export, and a mask is cosmetic control that one DOM inspection undoes.
+
+**Evidence.** The assignment view spec proposed an audience table showing each student's guardians and contacts.
+The mock rendered masked values (`n.okafor@…`, `+44 7700 900…`) and the owner stopped it: a local-part plus domain
+and a partial phone number still identify a household, and masking is not a control. The values would have come from
+`NotificationLog.ToAddress` and the Students contact read — data the Students module already guards with its own
+scope. The replacement rule ("show a guardian name only if the caller could already list that student's guardians in
+the Students module") then turned out to have **no mechanism**: `TeacherScope` answers "can you see this
+assignment", not "may you list this student's guardians", and a per-student authorization hop would fan a single
+read into N hops. Dropping names entirely was both the safest and the simplest answer.
+
+**Trigger.** You are adding a field to a list read and the field belongs to another context — contact details,
+guardian identity, addresses, dates of birth, medical or SEN flags. Also when the plan says "masked" or "shown only
+to authorised users": name the check that already exists, or drop the field.
+
+---
+
+## Never round-trip a UTF-8 file through `Get-Content` / `Set-Content` (2026-10-29)
+
+**Rule.** On this platform, `Get-Content` decodes UTF-8 as the system ANSI code page and `Set-Content -Encoding
+utf8`
+writes that mis-decoded text back as UTF-8, **doubly encoding every non-ASCII character** — silently, with exit
+code 0. Use the editor tool for in-place edits, or open and write with an explicit encoding on both sides, and then
+**check non-ASCII output** before treating the edit as done.
+
+**Evidence.** A one-line PowerShell replace on the mock generator (`(Get-Content f) -replace … | Set-Content
+-Encoding utf8`) corrupted **289 sequences** in `build-mock.js` — every em dash, quote, box-drawing character and
+arrow in comments and copy. Nothing failed: node ran, the build succeeded, and the generated HTML was valid. It
+surfaced only when a rendered PNG showed `Published â€” the view page` and a mangled `▾` chevron. Repair needed six
+explicit byte-sequence mappings rather than a blanket re-decode, because later editor writes had added correctly
+encoded characters to the same file — a naive `latin1 → utf8` round-trip would have broken those instead.
+
+**Trigger.** Any scripted in-place edit of a file that may contain non-ASCII: `.ps1`, `Get-Content`/`Set-Content`
+pipelines, `Out-File`, or a shell redirection. After the edit, grep or render for `â€`, `Â`, `Ã` — and look at one
+rendered output, because tests will not catch an encoding defect in a string that only a human reads.
+
+---
+
 ## A script that has never run is not a deliverable (2026-10-28)
 
 **Rule.** A seed, fixture, migration or one-off helper script is delivered only once it has **executed against a

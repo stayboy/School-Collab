@@ -46,14 +46,14 @@ const deliveryPanel = () =>
     `<p class="subtle-note" style="margin:0">28 students · 31 contacts · 19 primary · 12 other ·
        <b>23 reached</b></p>
      <table class="grid"><thead><tr>
-       <th style="width:250px">Student</th><th style="width:250px">Guardian(s)</th>
+       <th style="width:250px">Student</th><th style="width:250px">Guardians</th>
        <th style="width:150px">Contacts</th><th>Delivery</th></tr></thead><tbody>
        <tr><td><b>Amara Okafor</b> <span class="muted">G7-0142</span></td>
-         <td>N. Okafor ${pill('success', 'primary')}<br>J. Okafor ${pill('neutral', 'CC')}</td>
+         <td>2 <span class="muted">· primary, CC</span></td>
          <td>3 <span class="muted">· email, SMS</span></td>
          <td>${pill('success', 'opened')} <span class="muted">6 Nov, 14:02</span></td></tr>
        <tr><td><b>Daniel Whitfield</b> <span class="muted">G7-0157</span></td>
-         <td>D. Whitfield ${pill('success', 'primary')}</td>
+         <td>1 <span class="muted">· primary</span></td>
          <td>2 <span class="muted">· email, SMS</span></td>
          <td>${pill('danger', 'failed')} <span class="muted">hard bounce · retry 16:20</span></td></tr>
        <tr><td><b>Priya Raman</b> <span class="muted">G7-0163</span></td>
@@ -61,17 +61,17 @@ const deliveryPanel = () =>
          <td><span class="muted">none subscribed</span></td>
          <td>${pill('neutral', 'not reached')}</td></tr>
        <tr><td><b>Sofia Marchetti</b> <span class="muted">G7-0191</span></td>
-         <td>L. Marchetti ${pill('success', 'primary')}</td>
+         <td>1 <span class="muted">· primary</span></td>
          <td>1 <span class="muted">· WhatsApp</span></td>
          <td>${pill('warning', 'skipped')} <span class="muted">channel blocked by policy</span></td></tr>
        <tr><td><b>Marcus Bell</b> <span class="muted">G7-0188</span></td>
-         <td>M. Bell ${pill('success', 'primary')}</td>
+         <td>1 <span class="muted">· primary</span></td>
          <td>1 <span class="muted">· email</span></td>
          <td>${pill('danger', 'no more retries')}</td></tr>
      </tbody></table>
-     ${pager(1, 15, 28, true, true)}
+     ${pager(1, 15, 28, true)}
      <p class="subtle-note" style="margin:0">Delivery state comes from the notification log; "opened" from the
-       recipient's deep-link stamp. Addresses are not shown — see the privacy note in the spec.</p>`);
+       recipient's deep-link stamp. <b>No name, address or phone number is shown</b> — role, channel and state only.</p>`);
 
 const progressPanel = () =>
   panel('Progress', spacer + '<span class="chevron">▾</span>',
@@ -102,14 +102,14 @@ const audiencePreview = () =>
        <span class="chip">Grade 7</span><span class="chip">Stream A</span><span class="chip">+ 2 named students</span>
        <span class="muted">28 students matched · 19 primary guardians · 12 other contacts</span></div>
      <table class="grid"><thead><tr>
-       <th style="width:250px">Student</th><th style="width:270px">Guardian(s)</th>
+       <th style="width:250px">Student</th><th style="width:270px">Guardians</th>
        <th style="width:150px">Contacts</th><th style="width:140px">At publish</th></tr></thead><tbody>
        <tr><td><b>Amara Okafor</b> <span class="muted">G7-0142</span></td>
-         <td>N. Okafor ${pill('success', 'primary')}<br>J. Okafor ${pill('neutral', 'CC')}</td>
+         <td>2 <span class="muted">· primary, CC</span></td>
          <td>2 <span class="muted">· email, SMS</span></td>
          <td>${pill('success', 'will notify')}</td></tr>
        <tr><td><b>Daniel Whitfield</b> <span class="muted">G7-0157</span></td>
-         <td>D. Whitfield ${pill('success', 'primary')}</td>
+         <td>1 <span class="muted">· primary</span></td>
          <td>1 <span class="muted">· email</span></td>
          <td>${pill('success', 'will notify')}</td></tr>
        <tr><td><b>Priya Raman</b> <span class="muted">G7-0163</span></td>
@@ -117,19 +117,19 @@ const audiencePreview = () =>
          <td><span class="muted">none subscribed</span></td>
          <td>${pill('neutral', 'no contact')}</td></tr>
        <tr><td><b>Sofia Marchetti</b> <span class="muted">G7-0191</span></td>
-         <td>L. Marchetti ${pill('success', 'primary')}</td>
+         <td>1 <span class="muted">· primary</span></td>
          <td>1 <span class="muted">· WhatsApp</span></td>
          <td>${pill('warning', 'blocked by policy')}</td></tr>
        <tr><td><b>Marcus Bell</b> <span class="muted">G7-0188</span></td>
-         <td>M. Bell ${pill('success', 'primary')}</td>
+         <td>1 <span class="muted">· primary</span></td>
          <td>1 <span class="muted">· email</span></td>
          <td>${pill('success', 'will notify')}</td></tr>
      </tbody></table>
-     ${pager(1, 15, 28, true, true)}
+     ${pager(1, 15, 28, true)}
      <p class="subtle-note" style="margin:0"><b>Recomputed at publish.</b> This list is a resolved preview of who
        would be notified — it is not a record and it changes with the targets, the guardians' contacts and the
-       notification policy. <b>Channel kind and count only: the page never renders an address or a phone number</b>
-       (Q154).</p>
+       notification policy. <b>Role, channel kind and count only — the page renders no guardian name, address or
+       phone number</b> (Q154, Q158).</p>
      <div style="display:flex; gap:6px">${btn('Refresh list')}${btn('Publish…', 'primary')}</div>`);
 
 // Status strip (owner, 2026-10-29): Progress, Guardian sign-off and Notifications were three separate rail
