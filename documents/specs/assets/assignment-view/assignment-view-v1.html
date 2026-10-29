@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Assignment view — modernization v1</title><style>
+  /* ── Repo tokens, lifted from SchoolCollab.Admin.Shared/wwwroot/app.css ─────────────────── */
+  :root {
+    --neutral-layer-1: #ffffff;  --neutral-layer-2: #faf9f8;  --neutral-layer-3: #f5f5f5;
+    --neutral-stroke-rest: #d1d1d1; --neutral-stroke-divider-rest: #e1e1e1;
+    --neutral-foreground-1: #242424; --neutral-foreground-hint: #616161;
+    --accent-fill-rest: #0f6cbd;  --accent-foreground-rest: #ffffff;
+    --colorBrandBackground: #0f6cbd; --colorNeutralForegroundOnBrand: #ffffff;
+
+    /* semantic status palette (the student-view redesign added these to :root) */
+    --status-success-bg:#e7f4ec; --status-success-fg:#14532d; --status-success-dot:#107c41; --status-success-border:#b7dfc6;
+    --status-warning-bg:#fdf3e2; --status-warning-fg:#7a5314; --status-warning-dot:#b8760a; --status-warning-border:#eccf9b;
+    --status-danger-bg:#fdecec;  --status-danger-fg:#7d1c1c;  --status-danger-dot:#c42b1c;  --status-danger-border:#f3bcbc;
+    --status-neutral-bg:#f0f0f0; --status-neutral-fg:#424242; --status-neutral-dot:#8a8a8a; --status-neutral-border:#dcdcdc;
+    --status-info-bg:#eaf2fd;    --status-info-fg:#0f4a8a;    --status-info-dot:#0f6cbd;    --status-info-border:#bcd6f2;
+
+    /* rail-band palette (Admin.Shared app.css :root) */
+    --band-groups-bg:#f3efff; --band-groups-accent:#d6c9fb; --band-groups-fg:#523aa0;
+    --band-required-bg:#fdf3e2; --band-required-accent:#eccf9b; --band-required-fg:#7a5314;
+    --band-assumed-bg:#e9f6f3; --band-assumed-accent:#b7ded6; --band-assumed-fg:#1d5c52;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:26px 30px 60px; font-family:'Segoe UI',-apple-system,'Helvetica Neue',Arial,sans-serif;
+         font-size:13.5px; color:var(--neutral-foreground-1); background:#eceff1; }
+
+  /* ── doc chrome ────────────────────────────────────────────────────────── */
+  h1.doc { font-size:19px; margin:0 0 5px; font-weight:600; }
+  .docsub { color:#4a4a4a; font-size:13px; margin:0 0 20px; max-width:1180px; line-height:1.55; }
+  section { margin:0 0 34px; }
+  .sec-h { display:flex; align-items:baseline; gap:10px; margin:0 0 10px; }
+  .sec-h .tag { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+                color:#fff; background:#242424; padding:2px 7px; border-radius:4px; }
+  .sec-h h2 { font-size:14.5px; margin:0; font-weight:600; }
+  .sec-h .note { font-size:12.5px; color:#5c5c5c; }
+  .legend { background:#fff8e6; border:1px solid #e8d08a; border-radius:8px; padding:13px 16px; max-width:1180px;
+            font-size:12.5px; line-height:1.6; margin-bottom:26px; }
+  .legend h3 { margin:0 0 6px; font-size:12.5px; }
+  .legend ul { margin:6px 0 0; padding-left:20px; }
+  .legend code { background:#fdf1cf; padding:1px 4px; border-radius:3px; font-size:11.5px; }
+
+  /* ── app canvas ────────────────────────────────────────────────────────── */
+  .app { background:var(--neutral-layer-2); border:1px solid var(--neutral-stroke-rest); border-radius:10px;
+         overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .app-bar { height:42px; background:var(--accent-fill-rest); display:flex; align-items:center; gap:8px;
+             padding:0 16px; color:var(--colorNeutralForegroundOnBrand); font-size:12.5px; }
+  .app-bar .brand { font-weight:600; } .app-bar .sep { opacity:.5; } .app-bar .page { opacity:.95; }
+  .content { padding:14px 20px 24px; }
+
+  /* page header (AuthoringShell) — one title, one breadcrumb trail, one action row */
+  .crumbs { font-size:12px; color:var(--neutral-foreground-hint); margin:0 0 8px; }
+  .crumbs b { color:#242424; font-weight:600; }
+  .head { display:flex; align-items:flex-start; gap:16px; margin:0 0 4px; }
+  .head__id { flex:1 1 auto; min-width:0; }
+  .head__title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .head__title h1 { font-size:18px; margin:0; font-weight:600; }
+  .meta { margin:6px 0 0; font-size:12.5px; color:var(--neutral-foreground-hint); }
+  .meta code { background:var(--neutral-layer-3); padding:1px 5px; border-radius:3px; font-size:11.5px; color:#242424; }
+  .head__act { display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+
+  /* ── primitives ─────────────────────────────────────────────────────────── */
+  .panel { background:var(--neutral-layer-1); border:1px solid var(--neutral-stroke-divider-rest); border-radius:8px;
+           padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+  .panel--borderless { border-color:transparent; background:transparent; padding-left:0; padding-right:0; }
+  .panel__head { display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--neutral-stroke-divider-rest);
+                 padding-bottom:8px; }
+  .panel__title { font-size:13.5px; font-weight:600; margin:0; }
+  .panel__count { font-size:11px; font-weight:700; color:var(--neutral-foreground-hint); background:var(--neutral-layer-3);
+                  border-radius:999px; padding:1px 7px; }
+  .panel__spacer { flex:1; }
+
+  .pill { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:2px 10px 2px 8px;
+          font-size:11.5px; font-weight:600; border:1px solid transparent; white-space:nowrap; }
+  .pill i { width:7px; height:7px; border-radius:50%; display:inline-block; }
+  .pill--success { background:var(--status-success-bg); color:var(--status-success-fg); border-color:var(--status-success-border); }
+  .pill--success i { background:var(--status-success-dot); }
+  .pill--warning { background:var(--status-warning-bg); color:var(--status-warning-fg); border-color:var(--status-warning-border); }
+  .pill--warning i { background:var(--status-warning-dot); }
+  .pill--danger { background:var(--status-danger-bg); color:var(--status-danger-fg); border-color:var(--status-danger-border); }
+  .pill--danger i { background:var(--status-danger-dot); }
+  .pill--neutral { background:var(--status-neutral-bg); color:var(--status-neutral-fg); border-color:var(--status-neutral-border); }
+  .pill--neutral i { background:var(--status-neutral-dot); }
+  .pill--info { background:var(--status-info-bg); color:var(--status-info-fg); border-color:var(--status-info-border); }
+  .pill--info i { background:var(--status-info-dot); }
+  .pill--sm { font-size:10.5px; padding:1px 8px 1px 7px; }
+
+  .chip { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--neutral-stroke-rest);
+          border-radius:999px; padding:1px 9px; font-size:11.5px; color:#3d3d3d; background:#fff; }
+  .chip--muted { background:var(--neutral-layer-3); border-color:transparent; color:#4a4a4a; }
+
+  .btn { border:1px solid var(--neutral-stroke-rest); background:#fff; color:var(--neutral-foreground-1); border-radius:4px;
+         padding:5px 12px; font-size:12.5px; font-family:inherit; cursor:pointer; white-space:nowrap; }
+  .btn--primary { background:var(--accent-fill-rest); border-color:var(--accent-fill-rest); color:#fff; font-weight:600; }
+  .btn--ghost { border-color:transparent; background:transparent; color:var(--accent-fill-rest); padding:3px 6px; }
+  .btn--sm { padding:3px 9px; font-size:12px; }
+  .btn[disabled] { opacity:.55; cursor:not-allowed; filter:saturate(.35); }
+  .kebab { width:30px; height:30px; border:1px solid transparent; border-radius:5px; background:transparent;
+           color:var(--neutral-foreground-1); font-size:15px; line-height:1; cursor:pointer; }
+
+  /* ── the skeleton: regions draw nothing; collapse on the container's own width ─────────── */
+  .region-grid-host { container-type:inline-size; }
+  .region-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(320px,420px); gap:16px; align-items:start; margin-top:12px; }
+  .region-grid__main, .region-grid__rail { display:flex; flex-direction:column; gap:14px; }
+  @container (max-width: 1080px) { .region-grid { grid-template-columns:minmax(0,1fr); } }
+
+  .fact-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px 18px; margin:0; }
+  .fact-grid dt { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--neutral-foreground-hint); margin:0 0 2px; }
+  .fact-grid dd { margin:0; font-size:13px; }
+
+  /* material row */
+  .mat { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--neutral-layer-3); }
+  .mat:last-child { border-bottom:none; }
+  .mat__ico { width:26px; height:26px; border-radius:6px; background:var(--neutral-layer-3); display:inline-flex;
+              align-items:center; justify-content:center; font-size:12px; flex:0 0 auto; }
+  .mat__t { flex:1 1 auto; min-width:0; }
+  .mat__t b { display:block; font-weight:600; font-size:13px; }
+  .mat__t span { font-size:11.5px; color:var(--neutral-foreground-hint); }
+  .mat__act { flex:0 0 auto; display:flex; gap:4px; align-items:center; }
+  /* ── audience groups, tiles, tables, filters ─────────────────────────────── */
+  .grp { border:1px solid var(--neutral-stroke-divider-rest); border-radius:7px; padding:8px 10px; background:#fff; }
+  .grp__h { display:flex; align-items:center; gap:7px; margin:0 0 5px; }
+  .grp__h b { font-size:12.5px; font-weight:600; }
+  .grp__h .code { font-size:11px; color:var(--neutral-foreground-hint); }
+  .grp--unreached { border-style:dashed; background:#fcfcfc; }
+  .ct { display:flex; align-items:center; gap:7px; font-size:12px; padding:2px 0; }
+  .ct__val { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#333; }
+  .ct__ch { font-size:10.5px; color:var(--neutral-foreground-hint); text-transform:uppercase; letter-spacing:.05em; width:52px; }
+  .ct__role { font-size:10.5px; color:var(--neutral-foreground-hint); width:48px; }
+
+  .tiles { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+  .tile { border:1px solid var(--neutral-stroke-divider-rest); border-radius:7px; padding:7px 9px; background:#fff; }
+  .tile b { display:block; font-size:17px; font-weight:600; line-height:1.15; }
+  .tile span { font-size:10.5px; color:var(--neutral-foreground-hint); text-transform:uppercase; letter-spacing:.05em; }
+  .funnel { display:flex; height:9px; border-radius:999px; overflow:hidden; background:var(--neutral-layer-3); }
+  .funnel i { display:block; height:100%; }
+  .f-legend { display:flex; gap:10px; flex-wrap:wrap; font-size:10.5px; color:var(--neutral-foreground-hint); }
+  .f-legend em { font-style:normal; display:inline-block; width:7px; height:7px; border-radius:2px; margin-right:4px; }
+
+  table.grid { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.grid th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+                  color:var(--neutral-foreground-hint); font-weight:600; padding:6px 8px;
+                  border-bottom:1px solid var(--neutral-stroke-rest); white-space:nowrap; }
+  table.grid td { padding:7px 8px; border-bottom:1px solid var(--neutral-layer-3); vertical-align:middle; }
+  table.grid tr:last-child td { border-bottom:none; }
+
+  .filters { display:flex; gap:6px; flex-wrap:wrap; }
+  .filter { border:1px solid var(--neutral-stroke-rest); background:#fff; border-radius:999px; padding:2px 10px;
+            font-size:11.5px; color:#3d3d3d; }
+  .filter--on { background:#242424; border-color:#242424; color:#fff; }
+  .muted { color:var(--neutral-foreground-hint); font-size:11.5px; }
+  .subtle-note { font-size:11.5px; color:var(--neutral-foreground-hint); margin:0; }
+  /* dark scope — the theme flips the tokens; the markup does not change */
+  .dark-scope {
+    --neutral-layer-1:#1b1b1b; --neutral-layer-2:#141414; --neutral-layer-3:#2a2a2a;
+    --neutral-stroke-rest:#3d3d3d; --neutral-stroke-divider-rest:#333; --neutral-foreground-1:#f2f2f2;
+    --neutral-foreground-hint:#b3b3b3; --accent-fill-rest:#4ca0e0; --colorBrandBackground:#4ca0e0;
+    --status-success-bg:#12301f; --status-success-fg:#9fe0b8; --status-success-dot:#2ea864; --status-success-border:#245c3c;
+    --status-warning-bg:#33260f; --status-warning-fg:#f3ce92; --status-warning-dot:#d99b23; --status-warning-border:#5e4517;
+    --status-danger-bg:#3a1717;  --status-danger-fg:#f5b3b3;  --status-danger-dot:#e8564a;  --status-danger-border:#67302b;
+    --status-neutral-bg:#2a2a2a; --status-neutral-fg:#d6d6d6; --status-neutral-dot:#9a9a9a; --status-neutral-border:#404040;
+    --status-info-bg:#12263d;    --status-info-fg:#a9cdf0;    --status-info-dot:#4ca0e0;    --status-info-border:#26456b;
+  }
+  /* the scope root must RE-RESOLVE its own colour: descendants inherit a computed value,
+     not the token, so flipping a token on an ancestor alone leaves dark text on dark. */
+  .dark-scope { color: var(--neutral-foreground-1); }
+  .dark-scope .btn, .dark-scope .chip, .dark-scope .grp, .dark-scope .tile, .dark-scope .filter { background:#1f1f1f; color:#f2f2f2; }
+  .dark-scope .grp--unreached { background:#181818; }
+  .dark-scope .meta code, .dark-scope .crumbs b { color:#e8e8e8; background:#2a2a2a; }
+  .dark-scope .mat__t b, .dark-scope .grp__h b, .dark-scope .tile b, .dark-scope .panel__title { color:var(--neutral-foreground-1); }
+  .dark-scope .ct__val { color:#dcdcdc; }
+  .dark-scope .btn--primary, .dark-scope .filter--on { background:var(--accent-fill-rest); border-color:var(--accent-fill-rest); color:#0b0b0b; }
+  .dark-scope .ct__val { color:#dcdcdc; }
+  .dark-scope table.grid th { color:#b3b3b3; }
+  .dark-scope .mat__ico { background:#232323; }
+</style></head>
+<body>
+<h1 class="doc">Assignment view — modernization (v1 mock, post-review)</h1>
+<p class="docsub">Four states. Every state renders <b>one</b> page header (no tab strip), a main region and a rail
+region per <code>panel-layout-pattern.md</code>: regions draw nothing, each block is one <code>PanelSection</code>,
+collapse is a container query with the rail last, colours are tokens only. Structure reflects the
+<code>deepseek-v4-pro:0813</code> review: materials sit in the rail as <b>Content &amp; Resources</b>, the panel name
+<b>Targets &amp; Audience</b> is kept, and the primary action follows the settled §11 matrix.</p>
+<div class="legend"><h3>What to check</h3><ul>
+  <li><b>One title, one action pair.</b> Published → primary <i>Open progress</i>, with Unpublish and Close in the
+      kebab (§11 view-surface exception, Q141). Draft → primary <i>Publish</i>, gated by approval.</li>
+  <li><b>Delivery</b> is the new panel: cohort by student, delivery pill per contact, a dashed <i>not reached</i> row.</li>
+  <li><b>Content &amp; Resources</b> lives in the rail and carries the grounding readout — no separate AI panel.</li>
+</ul></div>
+<section>
+  <div class="sec-h"><span class="tag">A</span><h2>Published — the view page</h2>
+    <span class="note">one header · main + rail · primary follows the §11 matrix</span></div>
+  <div class="app"><div class="app-bar"><span class="brand">SchoolCollab</span><span class="sep">/</span><span class="page">Assignments</span></div><div class="content">
+    <div class="crumbs">Assignments › Grade 7 Mathematics › <b>Fractions — Unit 3 checkpoint</b></div>
+    <div class="head"><div class="head__id"><div class="head__title"><h1>Fractions, decimals &amp; percentages — Unit 3 checkpoint</h1><span class="pill pill--info"><i></i>Published</span><span class="chip">Guardian review required</span></div><p class="meta"><code>ASG-2026-0412</code> · Grade 7 Mathematics · Digital · Auto-graded · out of 20 · due 12 Nov 2026</p></div>
+   <div class="head__act"><button class="btn btn--sm btn--primary">Open progress</button><button class="kebab" title="More actions">⋯</button></div></div>
+    <div class="region-grid-host"><div class="region-grid"><div class="region-grid__main"><div class="panel panel--borderless"><div class="panel__head"><h3 class="panel__title">Details</h3></div><dl class="fact-grid"><div><dt>Type</dt><dd>Digital</dd></div><div><dt>Grading</dt><dd>Auto-graded</dd></div><div><dt>Maximum score</dt><dd>20 <span class="muted">· pass at 12</span></dd></div><div><dt>Due</dt><dd>12 Nov 2026, 16:00</dd></div><div><dt>Attempts</dt><dd>2</dd></div><div><dt>Published</dt><dd>4 Nov 2026, 09:14</dd></div></dl></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Questions</h3><span class="panel__count">8</span><span class="panel__spacer"></span><button class="btn btn--sm">Manage questions</button></div><div style="display:flex; gap:6px; flex-wrap:wrap"><span class="chip chip--muted">5 multiple choice</span>
+       <span class="chip chip--muted">2 short answer</span><span class="chip chip--muted">1 true / false</span></div>
+     <table class="grid"><thead><tr><th style="width:34px">#</th><th>Question</th><th style="width:120px">Type</th>
+       <th style="width:70px">Options</th></tr></thead><tbody>
+       <tr><td>1</td><td>Which fraction is equivalent to 0.75?</td><td>Multiple choice</td><td>4</td></tr>
+       <tr><td>2</td><td>Convert 3⁄8 to a percentage.</td><td>Short answer</td><td>—</td></tr>
+       <tr><td>3</td><td>0.6 is greater than 2⁄3.</td><td>True / false</td><td>2</td></tr>
+       <tr><td colspan="4" class="muted">5 more — the whole set renders here; no paging under 12 rows</td></tr>
+     </tbody></table></div></div><div class="region-grid__rail"><div class="panel"><div class="panel__head"><h3 class="panel__title">Content &amp; Resources</h3><span class="panel__count">5</span><span class="panel__spacer"></span><button class="btn btn--sm">Manage</button></div><div class="mat"><span class="mat__ico">¶</span><div class="mat__t"><b>Starter prompts</b><span>Text · 1,240 characters</span></div>
+   <div class="mat__act"><span class="pill pill--success pill--sm"><i></i>grounds AI</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div class="mat"><span class="mat__ico">▸</span><div class="mat__t"><b>BBC Bitesize — fractions</b><span>Link · bbc.co.uk/bitesize/…</span></div>
+   <div class="mat__act"><span class="pill pill--neutral pill--sm"><i></i>not indexed</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div class="mat"><span class="mat__ico">▶</span><div class="mat__t"><b>Worked example — thirds and quarters</b><span>Video · 4:12 · 38 MB</span></div>
+   <div class="mat__act"><span class="pill pill--neutral pill--sm"><i></i>no text</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div class="mat"><span class="mat__ico">▣</span><div class="mat__t"><b>Number line poster</b><span>Image · PNG · 1.4 MB</span></div>
+   <div class="mat__act"><span class="pill pill--neutral pill--sm"><i></i>no text</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div class="mat"><span class="mat__ico">♪</span><div class="mat__t"><b>Teacher introduction</b><span>Audio · 1:38</span></div>
+   <div class="mat__act"><span class="pill pill--neutral pill--sm"><i></i>no text</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div style="display:flex; align-items:center; gap:10px"><div class="funnel" style="flex:1">
+       <i style="width:40%; background:var(--status-info-dot)"></i></div>
+       <span class="muted">2 of 5 grounding slots</span></div>
+     <p class="subtle-note" style="margin:0">Grounding is URL-derived text plus extracted attachment text — five slots,
+       20,000 characters each. Instructions and teacher notes are <b>not</b> sent to the model. Preview opens a
+       read-only dialog by kind; edits deep-link to the edit surface.</p></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Delivery</h3><span class="panel__count">28</span><span class="panel__spacer"></span><span class="pill pill--info pill--sm"><i></i>published 4 Nov, 09:14</span></div><p class="subtle-note" style="margin:0">28 students · 31 contacts · 19 primary · 12 other ·
+       <b>23 reached</b></p><div class="grp"><div class="grp__h"><b>Amara Okafor</b><span class="code">G7-0142</span>
+   <span class="panel__spacer"></span><span class="pill pill--success pill--sm"><i></i>reached</span></div><div class="ct"><span class="ct__ch">Email</span><span class="ct__val">amara.okafor@…</span>
+   <span class="ct__role">student</span><span class="pill pill--success pill--sm"><i></i>opened</span></div><div class="ct"><span class="ct__ch">Email</span><span class="ct__val">n.okafor@…</span>
+   <span class="ct__role">primary</span><span class="pill pill--success pill--sm"><i></i>sent</span></div><div class="ct"><span class="ct__ch">SMS</span><span class="ct__val">+44 7700 900…</span>
+   <span class="ct__role">CC</span><span class="pill pill--neutral pill--sm"><i></i>queued</span></div></div><div class="grp"><div class="grp__h"><b>Daniel Whitfield</b><span class="code">G7-0157</span>
+   <span class="panel__spacer"></span><span class="pill pill--warning pill--sm"><i></i>partly reached</span></div><div class="ct"><span class="ct__ch">Email</span><span class="ct__val">d.whitfield.parent@…</span>
+   <span class="ct__role">primary</span><span class="pill pill--danger pill--sm"><i></i>failed</span></div><div class="ct"><span class="ct__ch">SMS</span><span class="ct__val">+44 7700 900…</span>
+   <span class="ct__role">primary</span><span class="pill pill--warning pill--sm"><i></i>retry 16:20</span></div><p class="muted" style="margin:2px 0 0">Reason: mailbox rejected the address (hard bounce).</p></div><div class="grp grp--unreached"><div class="grp__h"><b>Priya Raman</b><span class="code">G7-0163</span>
+   <span class="panel__spacer"></span><span class="pill pill--neutral pill--sm"><i></i>not reached</span></div><p class="muted" style="margin:2px 0 0">No subscribed contact. She has the assignment in the ward app; nobody was notified.</p></div><button class="btn btn--sm">View all 28 students</button></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Progress</h3><span class="panel__spacer"></span><span class="chevron">▾</span></div><div class="tiles"><div class="tile"><b>28</b><span>cohort</span></div><div class="tile"><b>27</b><span>reached</span></div><div class="tile"><b>21</b><span>started</span></div><div class="tile"><b>18</b><span>submitted</span></div><div class="tile"><b>12</b><span>graded</span></div><div class="tile"><b>9</b><span>signed</span></div></div><div class="funnel"><i style="width:43%; background:var(--status-success-dot)"></i>
+       <i style="width:21%; background:var(--status-info-dot)"></i>
+       <i style="width:36%; background:var(--neutral-stroke-rest)"></i></div>
+     <div class="f-legend"><span><em style="background:var(--status-success-dot)"></em>graded 12</span>
+       <span><em style="background:var(--status-info-dot)"></em>submitted, ungraded 6</span>
+       <span><em style="background:var(--neutral-stroke-rest)"></em>not submitted 10</span></div><button class="btn btn--sm">Open progress</button></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Guardian sign-off</h3><span class="panel__spacer"></span><span class="chevron">▾</span></div><div class="ct"><span class="ct__val">Signed</span><span class="pill pill--success pill--sm"><i></i>9</span></div>
+   <div class="ct"><span class="ct__val">Awaiting signature</span><span class="pill pill--warning pill--sm"><i></i>3</span></div>
+   <div class="ct"><span class="ct__val">Reassigned guardian</span><span class="pill pill--neutral pill--sm"><i></i>2</span></div>
+   <p class="subtle-note" style="margin:0">Applies to the 14 students whose guardian review is required.</p></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Notifications</h3><span class="panel__spacer"></span><span class="chevron">▾</span></div><div class="ct"><span class="ct__val">Failed</span><span class="pill pill--danger pill--sm"><i></i>3</span></div>
+   <div class="ct"><span class="ct__val">Retry scheduled</span><span class="pill pill--warning pill--sm"><i></i>1</span></div>
+   <div class="ct"><span class="ct__val">Skipped by policy</span><span class="pill pill--neutral pill--sm"><i></i>2</span></div>
+   <p class="subtle-note" style="margin:0">Read-only. Each failure also appears on its contact row in Delivery.</p></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Rules &amp; policy</h3><span class="panel__spacer"></span><span class="chevron">▾</span></div><table class="grid"><tbody>
+     <tr><td>Approval before publish</td><td class="muted">Not required</td></tr>
+     <tr><td>Notification policy</td><td class="muted">Resolved per recipient grade</td></tr>
+     <tr><td>Archive window</td><td class="muted">30 days after the due date</td></tr>
+   </tbody></table></div></div></div></div>
+  </div></div>
+</section>
+<section>
+  <div class="sec-h"><span class="tag">B</span><h2>Draft — approval outstanding</h2>
+    <span class="note">same skeleton · publish is gated by the matrix, not by the page</span></div>
+  <div class="app"><div class="app-bar"><span class="brand">SchoolCollab</span><span class="sep">/</span><span class="page">Assignments</span></div><div class="content">
+    <div class="crumbs">Assignments › Grade 7 Mathematics › <b>Fractions — Unit 3 checkpoint</b></div>
+    <div class="head"><div class="head__id"><div class="head__title"><h1>Fractions, decimals &amp; percentages — Unit 3 checkpoint</h1><span class="pill pill--neutral"><i></i>Draft</span><span class="pill pill--warning pill--sm"><i></i>Approval pending</span><span class="chip">expires in 22h 14m</span></div><p class="meta"><code>ASG-2026-0412</code> · Grade 7 Mathematics · Digital · Auto-graded · out of 20 · due 12 Nov 2026</p></div>
+   <div class="head__act"><button class="btn btn--sm btn--primary" disabled title="Approval is required before this assignment can be published">Publish</button><button class="kebab" title="More actions">⋯</button></div></div>
+    <div class="region-grid-host"><div class="region-grid"><div class="region-grid__main"><div class="panel panel--borderless"><div class="panel__head"><h3 class="panel__title">Details</h3></div><dl class="fact-grid"><div><dt>Type</dt><dd>Digital</dd></div><div><dt>Grading</dt><dd>Auto-graded</dd></div><div><dt>Maximum score</dt><dd>20</dd></div><div><dt>Due</dt><dd>12 Nov 2026, 16:00</dd></div><div><dt>Attempts</dt><dd>2</dd></div><div><dt>Last saved</dt><dd>28 Oct 2026, 17:41</dd></div></dl></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Questions</h3><span class="panel__count">8</span><span class="panel__spacer"></span><button class="btn btn--sm btn--primary">Edit questions</button></div><div style="display:flex; gap:6px; flex-wrap:wrap"><span class="chip chip--muted">5 multiple choice</span>
+       <span class="chip chip--muted">2 short answer</span><span class="chip chip--muted">1 true / false</span></div>
+     <table class="grid"><thead><tr><th style="width:34px">#</th><th>Question</th><th style="width:120px">Type</th>
+       <th style="width:70px">Options</th></tr></thead><tbody>
+       <tr><td>1</td><td>Which fraction is equivalent to 0.75?</td><td>Multiple choice</td><td>4</td></tr>
+       <tr><td>2</td><td>Convert 3⁄8 to a percentage.</td><td>Short answer</td><td>—</td></tr>
+       <tr><td>3</td><td>0.6 is greater than 2⁄3.</td><td>True / false</td><td>2</td></tr>
+       <tr><td colspan="4" class="muted">5 more — the whole set renders here; no paging under 12 rows</td></tr>
+     </tbody></table></div></div><div class="region-grid__rail"><div class="panel"><div class="panel__head"><h3 class="panel__title">Targets &amp; Audience</h3><span class="panel__spacer"></span><span class="chip chip--muted">not yet published</span></div><div style="display:flex; gap:6px; flex-wrap:wrap"><span class="chip">Grade 7</span>
+       <span class="chip">Stream A</span><span class="chip">+ 2 named students</span></div><div class="tiles"><div class="tile"><b>28</b><span>students matched</span></div><div class="tile"><b>19</b><span>primary guardians</span></div><div class="tile"><b>12</b><span>other contacts</span></div></div><p class="subtle-note" style="margin:0"><b>Expected</b>, not yet a record — resolved live from policy and
+       re-resolved at publish. Names appear once the assignment is published.</p>
+     <div style="display:flex; gap:6px"><button class="btn btn--sm">Preview cohort</button><button class="btn btn--sm btn--primary">Publish…</button></div></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Content &amp; Resources</h3><span class="panel__count">5</span><span class="panel__spacer"></span><button class="btn btn--sm btn--primary">Edit materials</button></div><div class="mat"><span class="mat__ico">¶</span><div class="mat__t"><b>Starter prompts</b><span>Text · 1,240 characters</span></div>
+   <div class="mat__act"><span class="pill pill--success pill--sm"><i></i>grounds AI</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div class="mat"><span class="mat__ico">▸</span><div class="mat__t"><b>BBC Bitesize — fractions</b><span>Link · bbc.co.uk/bitesize/…</span></div>
+   <div class="mat__act"><span class="pill pill--neutral pill--sm"><i></i>not indexed</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div class="mat"><span class="mat__ico">▶</span><div class="mat__t"><b>Worked example — thirds and quarters</b><span>Video · 4:12 · 38 MB</span></div>
+   <div class="mat__act"><span class="pill pill--neutral pill--sm"><i></i>no text</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div class="mat"><span class="mat__ico">▣</span><div class="mat__t"><b>Number line poster</b><span>Image · PNG · 1.4 MB</span></div>
+   <div class="mat__act"><span class="pill pill--neutral pill--sm"><i></i>no text</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div class="mat"><span class="mat__ico">♪</span><div class="mat__t"><b>Teacher introduction</b><span>Audio · 1:38</span></div>
+   <div class="mat__act"><span class="pill pill--neutral pill--sm"><i></i>no text</span><button class="btn btn--sm btn--ghost">Preview</button></div></div><div style="display:flex; align-items:center; gap:10px"><div class="funnel" style="flex:1">
+       <i style="width:40%; background:var(--status-info-dot)"></i></div>
+       <span class="muted">2 of 5 grounding slots</span></div>
+     <p class="subtle-note" style="margin:0">Grounding is URL-derived text plus extracted attachment text — five slots,
+       20,000 characters each. Instructions and teacher notes are <b>not</b> sent to the model. Preview opens a
+       read-only dialog by kind; edits deep-link to the edit surface.</p></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Approval</h3><span class="panel__spacer"></span><span class="pill pill--warning pill--sm"><i></i>pending</span></div><p class="subtle-note" style="margin:0">Submitted by J. Mensah on 28 Oct 2026, 17:45. The window closes
+     automatically and returns the assignment to the author.</p>
+   <div style="display:flex; gap:6px; flex-wrap:wrap"><button class="btn btn--sm btn--primary">Approve</button><button class="btn btn--sm">Reject</button>
+     <button class="btn btn--sm" title="Terminal — the author must duplicate the assignment to continue">Deny</button></div>
+   <p class="muted" style="margin:0">Deny is terminal; Reject lets the author resubmit.</p></div><div class="panel"><div class="panel__head"><h3 class="panel__title">Rules &amp; policy</h3><span class="panel__spacer"></span><span class="chevron">▾</span></div><table class="grid"><tbody>
+     <tr><td>Approval before publish</td><td class="muted">Required — grade policy</td></tr>
+     <tr><td>Notification policy</td><td class="muted">Resolved per recipient grade</td></tr>
+     <tr><td>Archive window</td><td class="muted">30 days after the due date</td></tr>
+   </tbody></table></div></div></div></div>
+  </div></div>
+</section>
+<section>
+  <div class="sec-h"><span class="tag">C</span><h2>Delivery — zoomed</h2>
+    <span class="note">the one panel that answers “published to whom, and did they get it?”</span></div>
+  <div class="app"><div class="app-bar"><span class="brand">SchoolCollab</span><span class="sep">/</span><span class="page">Assignments</span></div><div class="content"><div style="max-width:820px">
+    <div class="panel"><div class="panel__head"><h3 class="panel__title">Delivery</h3><span class="panel__count">28</span><span class="panel__spacer"></span><span class="pill pill--info pill--sm"><i></i>published 4 Nov, 09:14</span></div><p class="subtle-note" style="margin:0">28 students · 31 contacts · 19 primary · 12 other ·
+       <b>23 reached</b></p><div class="grp"><div class="grp__h"><b>Amara Okafor</b><span class="code">G7-0142</span>
+   <span class="panel__spacer"></span><span class="pill pill--success pill--sm"><i></i>reached</span></div><div class="ct"><span class="ct__ch">Email</span><span class="ct__val">amara.okafor@…</span>
+   <span class="ct__role">student</span><span class="pill pill--success pill--sm"><i></i>opened</span></div><div class="ct"><span class="ct__ch">Email</span><span class="ct__val">n.okafor@…</span>
+   <span class="ct__role">primary</span><span class="pill pill--success pill--sm"><i></i>sent</span></div><div class="ct"><span class="ct__ch">SMS</span><span class="ct__val">+44 7700 900…</span>
+   <span class="ct__role">CC</span><span class="pill pill--neutral pill--sm"><i></i>queued</span></div></div><div class="grp"><div class="grp__h"><b>Daniel Whitfield</b><span class="code">G7-0157</span>
+   <span class="panel__spacer"></span><span class="pill pill--warning pill--sm"><i></i>partly reached</span></div><div class="ct"><span class="ct__ch">Email</span><span class="ct__val">d.whitfield.parent@…</span>
+   <span class="ct__role">primary</span><span class="pill pill--danger pill--sm"><i></i>failed</span></div><div class="ct"><span class="ct__ch">SMS</span><span class="ct__val">+44 7700 900…</span>
+   <span class="ct__role">primary</span><span class="pill pill--warning pill--sm"><i></i>retry 16:20</span></div><p class="muted" style="margin:2px 0 0">Reason: mailbox rejected the address (hard bounce).</p></div><div class="grp grp--unreached"><div class="grp__h"><b>Priya Raman</b><span class="code">G7-0163</span>
+   <span class="panel__spacer"></span><span class="pill pill--neutral pill--sm"><i></i>not reached</span></div><p class="muted" style="margin:2px 0 0">No subscribed contact. She has the assignment in the ward app; nobody was notified.</p></div><button class="btn btn--sm">View all 28 students</button></div>
+    <div class="legend" style="margin:16px 0 0; max-width:none">
+      <h3>Delivery vocabulary — one rule set, five variants</h3>
+      <ul>
+        <li><span class="pill pill--success pill--sm"><i></i>sent</span> handed to the channel · <span class="pill pill--success pill--sm"><i></i>opened</span> the recipient followed the deep link</li>
+        <li><span class="pill pill--neutral pill--sm"><i></i>queued</span> due now or waiting on a retry · <span class="pill pill--warning pill--sm"><i></i>retry 16:20</span> failed, retry scheduled</li>
+        <li><span class="pill pill--danger pill--sm"><i></i>no more retries</span> terminal failure · <span class="pill pill--warning pill--sm"><i></i>skipped</span> suppressed by policy, not an error</li>
+        <li><span class="pill pill--neutral pill--sm"><i></i>not reached</span> a student with no subscribed contact — the row the current tabs cannot show</li>
+      </ul>
+    </div>
+  </div></div></div>
+</section>
+<section>
+  <div class="sec-h"><span class="tag">D</span><h2>Progress page — <code>/assignments/{id}/progress</code></h2>
+    <span class="note">new page · existing reads · one row per student in the cohort</span></div>
+  <div class="app"><div class="app-bar"><span class="brand">SchoolCollab</span><span class="sep">/</span><span class="page">Assignments</span></div><div class="content">
+    <div class="crumbs">Assignments › Fractions — Unit 3 checkpoint › <b>Progress</b></div>
+    <div class="head"><div class="head__id">
+      <div class="head__title"><h1>Progress</h1><span class="pill pill--info"><i></i>Published</span>
+        <span class="chip">due 12 Nov 2026</span></div>
+      <p class="meta">28 students · 27 reached · 18 submitted · 12 graded</p>
+    </div><div class="head__act"><button class="btn btn--sm">Back to assignment</button></div></div>
+    <div style="margin:14px 0"><div class="tiles" style="grid-template-columns:repeat(6,minmax(0,1fr))"><div class="tile"><b>28</b><span>cohort</span></div><div class="tile"><b>27</b><span>reached</span></div><div class="tile"><b>21</b><span>started</span></div><div class="tile"><b>18</b><span>submitted</span></div><div class="tile"><b>12</b><span>graded</span></div><div class="tile"><b>9</b><span>signed</span></div></div></div>
+    <div class="panel"><div class="panel__head"><h3 class="panel__title">Students</h3><span class="panel__count">28</span><span class="panel__spacer"></span>
+      <div class="filters"><span class="filter filter--on">All 28</span><span class="filter">Not started 10</span>
+        <span class="filter">Submitted, ungraded 6</span><span class="filter">Graded 12</span>
+        <span class="filter">Not reached 1</span></div></div>
+      <table class="grid"><thead><tr><th>Student</th><th style="width:150px">Contacts</th><th style="width:130px">Submission</th>
+        <th style="width:70px">Score</th><th style="width:120px">Sign-off</th><th style="width:120px">Last activity</th>
+        <th style="width:80px"></th></tr></thead><tbody>
+        <tr><td><b>Amara Okafor</b> <span class="muted">G7-0142</span></td><td>3 <span class="muted">· 1 opened</span></td>
+   <td><span class="pill pill--success pill--sm"><i></i>graded</span></td><td><b>17</b> <span class="muted">/ 20</span></td><td><span class="pill pill--success pill--sm"><i></i>signed</span></td>
+   <td class="muted">6 Nov, 14:02</td><td><button class="btn btn--sm btn--ghost">Open</button></td></tr>
+        <tr><td><b>Daniel Whitfield</b> <span class="muted">G7-0157</span></td><td>2 <span class="muted">· 1 failed</span></td>
+   <td><span class="pill pill--info pill--sm"><i></i>submitted</span></td><td><span class="muted">—</span></td><td><span class="pill pill--warning pill--sm"><i></i>awaiting</span></td>
+   <td class="muted">7 Nov, 09:31</td><td><button class="btn btn--sm btn--ghost">Mark</button></td></tr>
+        <tr><td><b>Priya Raman</b> <span class="muted">G7-0163</span></td><td><span class="pill pill--neutral pill--sm"><i></i>none</span></td>
+   <td><span class="pill pill--success pill--sm"><i></i>graded</span></td><td><b>15</b> <span class="muted">/ 20</span></td><td><span class="muted">not required</span></td>
+   <td class="muted">5 Nov, 18:40</td><td><button class="btn btn--sm btn--ghost">Open</button></td></tr>
+        <tr><td><b>Sofia Marchetti</b> <span class="muted">G7-0191</span></td><td>1 <span class="muted">· skipped</span></td>
+   <td><span class="pill pill--neutral pill--sm"><i></i>not started</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
+   <td class="muted">—</td><td><button class="btn btn--sm btn--ghost">Submit…</button></td></tr>
+        <tr><td><b>Marcus Bell</b> <span class="muted">G7-0188</span></td><td>1 <span class="muted">· terminal</span></td>
+   <td><span class="pill pill--neutral pill--sm"><i></i>not started</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
+   <td class="muted">—</td><td><button class="btn btn--sm btn--ghost">Submit…</button></td></tr>
+        <tr><td colspan="7" class="muted">22 more · paging arrives only if the cohort cap is reached</td></tr>
+      </tbody></table>
+      <p class="subtle-note" style="margin:0">Score is blank until graded — an ungraded row is a work item, not a
+        missing value. “Submit…” opens the on-behalf path for paper or offline work.</p>
+    </div>
+  </div></div>
+</section>
+</body>
+</html>

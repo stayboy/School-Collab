@@ -90,7 +90,7 @@ authoring.
 | D2 | **Six compartments** (§3); Assignment Type and Grading Format live in **Basics**, not in Submission. |
 | D3 | **Stacked section cards** + sticky compartment jump-nav + sticky action bar (not tabs, not accordion). |
 | D4 | Policy-derived fields render **read-only resolved values** with "Inherited from Grade/Tenant policy" badges. No per-assignment policy overrides in this design. |
-| D5 | **One shared component, three modes**; Edit reaches full parity with Create while `Draft`/`Scheduled`; `Published|Closed|Archived` open read-only. `Detail`'s operational tabs remain. |
+| D5 | **One shared component, three modes**; Edit reaches full parity with Create while `Draft`/`Scheduled`; `Published|Closed|Archived` open read-only. ~~`Detail`'s operational tabs remain.~~ **Superseded 2026-10-29** by `documents/specs/assignment-detail-view-modernization.md` — the view page carries the operational data in rail panels and a progress page, and renders no tabs. |
 | D6 | **Sticky action bar** for the primary status-driven action + **kebab overflow** for secondary actions; publish-time choices captured in a confirm dialog. |
 | D7 | The **AI generation action is a header/kebab shortcut** that anchors to the Questions & AI compartment's generator (single source of form state) — not a duplicate dialog. |
 | D8 | **Full scope** accepted: presentation + `Instructions` + multi-constraint targeting + attachment-grounded AI generation, delivered as the R1–R3 stack (§14). |
@@ -170,11 +170,13 @@ ladder for field sizing, isolated `*.razor.css` (no inline styles).
   resources — closing today's `Edit.razor` gap).
 - **View** — all compartments read-only; for `Published`, `Closed` and `Archived`.
 
-**UX-10** — `Detail.razor`'s operational tabs (**Submissions**, **Guardian
-Sign-off**, **Notifications**) are retained and are not part of the authoring
-compartments; they present per-recipient runtime data, not authoring config. The
-`Detail` Overview tab is superseded by the shared **View** mode (retire or alias
-it during implementation).
+**UX-10** — ~~`Detail.razor`'s operational tabs (**Submissions**, **Guardian
+Sign-off**, **Notifications**) are retained~~ **superseded 2026-10-29** by
+`documents/specs/assignment-detail-view-modernization.md`: this per-recipient runtime
+data is still not authoring config, but the view page now carries it in rail panels
+(Delivery, Progress, Guardian sign-off, Notifications) and a dedicated progress page,
+and renders no tab strip — the tabs were the second page chrome that spec removes.
+`Detail` Overview remains superseded by the shared **View** mode.
 
 **UX-11** — Structural edits are refused server-side outside `Draft|Scheduled`
 (existing `Assignment.Update` guard is unchanged). View mode is the fallback for
@@ -394,6 +396,14 @@ requirement. Inapplicable fields are disabled-with-reason, not hidden (§12).
 | Published | Unpublish | Close | Read-only (View) |
 | Closed | Archive | — | Read-only (View) |
 | Archived | — | — | Read-only (View) + Notifications tab |
+
+**View-surface exception (settled 2026-10-29, Q141).** On the **view page**
+(`documents/specs/assignment-detail-view-modernization.md`) the primary action for a
+`Published` assignment is **Open progress**, with `Unpublish` and `Close` in the kebab.
+The matrix above is unchanged for the authoring surface: the primary there stays
+`Unpublish`, because that surface's job is authoring an assignment, while the view page's
+job is running one. This is the matrix's one surface-dependent row, recorded here so the
+page is not read as drifting from it.
 
 **LIF-1** — Approver actions (Approve/Reject) remain on the Index/Detail surfaces,
 not on the authoring page.

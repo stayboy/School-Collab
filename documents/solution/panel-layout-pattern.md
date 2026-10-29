@@ -13,7 +13,11 @@ change.
 
 Every create / edit surface in the admin app wears **one skeleton**: a wide **main
 region** holding the entity's own fields, and a **rail region** holding one panel per
-**relationship**. The pattern was settled by bringing the notification-template editor
+**relationship**. **View surfaces wear it too** (owner, 2026-10-29): the student view
+(`documents/solution/student-view-redesign.md`) adopted it first and the assignment view
+(`documents/specs/assignment-detail-view-modernization.md`) follows, because a view page
+answers the same question — what is this entity, and what is it related to — with the same
+two regions. The pattern was settled by bringing the notification-template editor
 and the assignment authoring surface onto one chrome (owner, 2026-10-23) after they had
 drifted into two incompatible box languages.
 
