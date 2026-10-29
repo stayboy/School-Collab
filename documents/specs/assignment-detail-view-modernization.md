@@ -48,10 +48,10 @@ One page, one header, no tabs — the assignment view adopts the student view's 
   assignment the primary is ***Open progress***, with Unpublish and Close in the kebab: the view page's job is
   running the assignment, not authoring it (Q141, settled — §11 carries the view-surface exception so the page is
   not read as drifting from the matrix).
-- **Main column:** Details · Questions & AI · the **aggregate** panels (Progress, Guardian sign-off when published) ·
-  **Targets & Audience as a per-student table while the assignment is a draft** (Q152).
-- **Rail:** **Content & Resources** · **Delivery** (post-publish: the resolved cohort with per-contact delivery state) ·
-  Notifications · Rules. Before publish, **Approval** takes Delivery's slot and Targets & Audience sits in main.
+- **Main column:** Details · Questions & AI · **the audience table** — Targets & Audience while the assignment is a
+  draft (Q152), Delivery once published (Q153).
+- **Rail:** **Content & Resources** · the aggregates (Progress, Guardian sign-off) · Notifications · Rules; before
+  publish, **Approval** takes Notifications' slot.
 - **Delivery** answers question 1 in one place: one group per **student**, each contact with channel, guardian role,
   subscription and **delivery state**, plus explicit *not reached — no subscribed contact* rows. Before publish the
   same fact is a count, which is what **Targets & Audience** already shows.
@@ -112,6 +112,8 @@ One page, one header, no tabs — the assignment view adopts the student view's 
 43. As an administrator with no tenant selected, I want a tenant-required message rather than an empty assignment, so that the state is unambiguous.
 44. As a teacher, I want the page to say when the cohort is capped, so that I never mistake a truncated list for the whole audience.
 45. As a guardian, in a later layer, I want a helper grounded on the materials the teacher attached, so that help matches the lesson.
+46. As a teacher, I want the audience table to show a channel and a count but never an address or a phone number, so that reviewing a sendout cannot expose a family's contact details.
+47. As a data-protection owner, I want the assignment page to carry no contact value in its payload at all, so that masking cannot be undone by inspecting the page.
 
 ---
 
@@ -228,32 +230,59 @@ One page, one header, no tabs — the assignment view adopts the student view's 
 - Widening the grounding contract so instructions ground too is a **separate additive layer**: it changes what the
   model sees for every generation.
 
-### 4.8 Panel placement — aggregates and decisions in main, row collections in the rail
+### 4.8 Panel placement — the audience table in main, read-outs in the rail
 
 The ownership test in `panel-layout-pattern.md` §5 asks whether a panel presents **other rows** or the entity's own
-fields. It has no clause for a panel that presents **no rows at all**, and this surface has three of them
-(owner direction, 2026-10-29).
+fields. It has no clause for a panel that presents **no rows at all** (Progress, Guardian sign-off), and none for a
+panel that must be **wide** (the audience table). Both cases landed here (owner direction, 2026-10-29).
 
-- **The rule.** A panel presenting a **collection of rows** belongs in the rail — Content & Resources, Delivery,
-  Notifications, Rules. A panel presenting an **aggregate** (Progress tiles, Guardian sign-off counts) owns no rows,
-  so it is not a rail panel: it sits in **main, beneath the content it summarises**. A panel presenting a
-  **multi-column table** also goes to main, because the rail track cannot hold it (the width clause below).
-  **Approval is the near-miss:** it is a decision, but it is a compact three-button block that renders fine in the
-  rail, and the draft's main column needs its width for the audience table (Q152).
+- **The rule.** **Main** carries the assignment's own content (Details, Questions) and **the audience table** — the
+  panel that answers "who gets this, and did they get it". **Rail** carries one panel per relationship and per
+  read-out: Content & Resources, Progress, Guardian sign-off, Notifications, Rules; **Approval** replaces
+  Notifications before publish.
+- **Why the audience table and not the aggregates.** It is both the widest panel (a four-column student × guardian ×
+  contact grid cannot render in the 320–460 px rail track) **and** the tallest, so moving it to main is what stops
+  the rail from outrunning the main column — an aggregate is compact and costs the rail little.
+- **One shape in both states.** Targets & Audience (draft) and Delivery (published) are the **same panel** at
+  different states of the same fact — one table, one column set, `At publish` reading `will notify` / `no contact` /
+  `blocked by policy` and then `sent` / `opened` / `failed` / `skipped`. Two shapes for one fact is the drift this
+  spec exists to remove (Q152, Q153).
 - **Measured, not aesthetic.** With every panel in the rail the mock stood **4 991 px**, a ~1 900 px rail beside
-  ~500 px of main: two columns of wildly different length and a reader scrolling a mostly empty main. After the
-  moves it is **4 288 px**, with both columns ending within ~150 px of each other on the draft and ~300 px on the
-  published view.
-- **What did not move.** Content & Resources, Rules, Notifications and Delivery stay in the rail: §5 names the
-  first two and each presents a row collection. Moving one of those would re-open a settled table for a layout
-  preference.
-- **Width clause (Q152) — the case the ownership test cannot settle alone.** The rail track is **320–460 px**, so a
-  panel whose content is a multi-column table cannot render there at all. Targets & Audience is that case: as chips
-  and counts it fits the rail, but as a per-student table (student · guardians · contacts · verdict) it needs the
-  main column. Moving it is a **layout consequence** of the ownership test, which is the reading §5 itself gives
-  when it says swapping two panels is a layout consequence — not an override of it.
-- **Consequence for the pattern doc.** §5's table has no aggregate/decision clause; this rule is the missing half.
-  It is **proposed** for `panel-layout-pattern.md` §5, not asserted here.
+  ~500 px of main. With the audience table in main it is **4 330 px** and the columns end within a few hundred
+  pixels of each other in both states.
+- **What did not move.** Content & Resources and Rules stay in the rail: § 5 names both. Moving either would
+  re-open a settled table for a layout preference.
+- **Consequence for the pattern doc.** §5's table has no clause for either case; this rule is the missing half. It
+  is **proposed** for `panel-layout-pattern.md` §5, not asserted here.
+
+
+### 4.9 Contact exposure — this page carries no contact value (Q154, owner 2026-10-29)
+
+**A contact value is personal data, and this page does not need it.** A teacher answering "did this go out?" needs
+channel, count, role and delivery state — not an address. The mock briefly rendered masked values
+(`n.okafor@…`, `+44 7700 900…`); a masked local-part plus domain and a partial phone number still identify a
+person, so masking is not a control.
+
+- **Enforced at the contract, not the view.** The audience/delivery DTO carries **no address field at all** — channel
+  kind, contact count, guardian role, delivery state, timestamps. A value that never enters the payload cannot leak
+  through devtools, a screenshot, a log line or a future export. Rejected: rendering `ToAddress` masked, which is
+  cosmetic and one DOM inspection away from exposure.
+- **Where the values would have come from.** `NotificationLog.ToAddress` (persisted rendered address) and the
+  Students contact read. Projecting either into a list read creates a **second, broader door** to data the Students
+  module already guards with its own scope — the failure mode is a new read widening an old permission, not a
+  missing check in the new read.
+- **Names are exposure too, and gentler.** Guardian display names come from the same batched subscriber read. They
+  may be shown **only when the caller could already list that student's guardians in the Students module**; when
+  that check is absent the cell degrades to role-only ("2 primary guardians, 1 CC"). The page never names a guardian
+  it would not otherwise expose.
+- **Scope.** The read is scoped to the assignment's teacher scope *and* may not exceed the Students module's
+  exposure for each student in the cohort. Two scopes, the narrower wins.
+- **If an operator needs the address** (a bounce, a support call): a separate, permission-gated, **audited**,
+  single-address action — never a column in a list.
+- **Test posture.** Assert on the **serialized payload**: no rendered payload contains an `@` or a phone-shaped
+  string. That is checkable in a handler test and cannot regress silently; asserting on the view would not catch a
+  field that a later template starts rendering.
+
 
 
 ## 5. Testing Decisions
@@ -335,6 +364,8 @@ are both handler-level assertions, because both are decided server-side and neit
 | Q150 | Merge #454 before branching | **Merge first, then branch from `main`** — a docs-only PR, and an implementation branch without its spec is a branch that cannot be reviewed against it. |
 | Q151 | Panel placement | **Aggregates and decisions in main, row collections in the rail** (§4.8). Rail: Content & Resources · Delivery · Notifications · Rules (pre-publish: Targets & Audience replaces Delivery). Main: Details · Questions · Progress · Sign-off · Approval. |
 | Q152 | Draft audience as a table | **Targets & Audience moves to main on a draft and renders a per-student table** (student · guardian(s) · contacts · verdict); Approval takes its rail slot. Backed by a **rows variant of the preview read, called once per load** — never on the authoring surface's 500 ms debounce. Supersedes Q151's draft row. |
+| Q153 | Published: Delivery as a table in main | **Yes** — Delivery moves rail → main as a table, and Progress + Guardian sign-off move back to the rail, so A and B show one audience surface in one shape. Supersedes Q151's published row. |
+| Q154 | Contact exposure | **The page carries no contact value.** No address or phone number in the DTO, not merely masked; channel kind + count + role + delivery state only. Guardian names only where the caller could already list them in the Students module. Any address need is a separate audited action (§4.9). |
 
   |---|---|---|---|
   | 1 | §2 re-decided lifecycle primaries (Published → *Open progress*) while claiming the §11 matrix could not fork; the matrix reads Published → Unpublish, Closed → Archive | **P1** | Applied — header follows §11; Q141 later settled the view exception, so §11 now records it explicitly and the decision takes `surface` as an input (pass 2, finding 1) |

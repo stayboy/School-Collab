@@ -43,11 +43,11 @@ const secA = `
       details([['Type', 'Digital'], ['Grading', 'Auto-graded'], ['Maximum score', '20 <span class="muted">· pass at 12</span>'],
         ['Due', '12 Nov 2026, 16:00'], ['Attempts', '2'], ['Published', '4 Nov 2026, 09:14']]) +
       questionsPanel(false) +
-      // Progress and Guardian sign-off sit in MAIN, below Questions (owner, 2026-10-29): the rail was
-      // six panels and the main column was two, so the page stretched ~1900px of rail beside ~500px
-      // of content. Both are cohort summaries — they read next to the questions, not beside the materials.
-      progressPanel() + signOffPanel())}${rail(
-      contentPanel(false) + deliveryPanel() + notificationsPanel() +
+      // Delivery moves into MAIN as a table (owner, 2026-10-29) — the audience fact belongs beside the work,
+      // and it is the tallest panel, so the rail stops outrunning the main column. Progress and Guardian
+      // sign-off are aggregates and go back to the rail.
+      deliveryPanel())}${rail(
+      contentPanel(false) + progressPanel() + signOffPanel() + notificationsPanel() +
       rulesPanel('Not required'))}${closeGrid}
   </div></div>
 </section>`;
