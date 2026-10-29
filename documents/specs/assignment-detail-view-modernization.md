@@ -49,9 +49,9 @@ One page, one header, no tabs — the assignment view adopts the student view's 
   running the assignment, not authoring it (Q141, settled — §11 carries the view-surface exception so the page is
   not read as drifting from the matrix).
 - **Main column:** Details · Questions & AI · **the audience table** — Targets & Audience while the assignment is a
-  draft (Q152), Delivery once published (Q153).
-- **Rail:** **Content & Resources** · the aggregates (Progress, Guardian sign-off) · Notifications · Rules; before
-  publish, **Approval** takes Notifications' slot.
+  draft (Q152), Delivery once published (Q153) · **one Status panel** holding Progress, Guardian sign-off and
+  Notifications as three segments divided by coloured vertical rules (Q155).
+- **Rail:** **Content & Resources** · Rules; before publish, **Approval** joins them.
 - **Delivery** answers question 1 in one place: one group per **student**, each contact with channel, guardian role,
   subscription and **delivery state**, plus explicit *not reached — no subscribed contact* rows. Before publish the
   same fact is a count, which is what **Targets & Audience** already shows.
@@ -247,9 +247,14 @@ panel that must be **wide** (the audience table). Both cases landed here (owner 
   different states of the same fact — one table, one column set, `At publish` reading `will notify` / `no contact` /
   `blocked by policy` and then `sent` / `opened` / `failed` / `skipped`. Two shapes for one fact is the drift this
   spec exists to remove (Q152, Q153).
+- **The read-outs are one panel, not three (Q155).** Progress, Guardian sign-off and Notifications are three
+  **segments of a single Status panel** below Delivery, divided by **coloured vertical rules** (info / success /
+  warning). Three separate panels each cost their own header, border and gap — roughly 90 px of chrome apiece — and
+  three short panels stacked in a rail read as one fact cut into three. As segments they cost one header and read as
+  the cohort's state in a single glance.
 - **Measured, not aesthetic.** With every panel in the rail the mock stood **4 991 px**, a ~1 900 px rail beside
-  ~500 px of main. With the audience table in main it is **4 330 px** and the columns end within a few hundred
-  pixels of each other in both states.
+  ~500 px of main. With the audience table and the status strip in main, and the rail down to Content & Resources
+  plus Rules, the page is **4 089 px** — a full 900 px shorter than the first arrangement.
 - **What did not move.** Content & Resources and Rules stay in the rail: § 5 names both. Moving either would
   re-open a settled table for a layout preference.
 - **Consequence for the pattern doc.** §5's table has no clause for either case; this rule is the missing half. It
@@ -366,6 +371,7 @@ are both handler-level assertions, because both are decided server-side and neit
 | Q152 | Draft audience as a table | **Targets & Audience moves to main on a draft and renders a per-student table** (student · guardian(s) · contacts · verdict); Approval takes its rail slot. Backed by a **rows variant of the preview read, called once per load** — never on the authoring surface's 500 ms debounce. Supersedes Q151's draft row. |
 | Q153 | Published: Delivery as a table in main | **Yes** — Delivery moves rail → main as a table, and Progress + Guardian sign-off move back to the rail, so A and B show one audience surface in one shape. Supersedes Q151's published row. |
 | Q154 | Contact exposure | **The page carries no contact value.** No address or phone number in the DTO, not merely masked; channel kind + count + role + delivery state only. Guardian names only where the caller could already list them in the Students module. Any address need is a separate audited action (§4.9). |
+| Q155 | Status read-outs as one panel | **One Status panel in main, below Delivery**, holding Progress · Guardian sign-off · Notifications as three segments divided by coloured vertical rules. The rail drops to Content & Resources + Rules (Approval pre-publish). Page height 4 991 → 4 089 px. |
 
   |---|---|---|---|
   | 1 | §2 re-decided lifecycle primaries (Published → *Open progress*) while claiming the §11 matrix could not fork; the matrix reads Published → Unpublish, Closed → Archive | **P1** | Applied — header follows §11; Q141 later settled the view exception, so §11 now records it explicitly and the decision takes `surface` as an input (pass 2, finding 1) |

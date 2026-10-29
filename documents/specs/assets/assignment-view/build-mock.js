@@ -1,7 +1,7 @@
 const fs = require('fs');
 const B = require('./build-panels.js');
 const { OPEN, closeGrid, main, rail, details, contentPanel, questionsPanel, deliveryPanel,
-  progressPanel, audienceExpected, audiencePreview, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head,
+  progressPanel, audienceExpected, audiencePreview, glancePanel, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head,
   style } = B;
 
 const signOffPanel = () => panel('Guardian sign-off', spacer + '<span class="chevron">▾</span>',
@@ -43,12 +43,10 @@ const secA = `
       details([['Type', 'Digital'], ['Grading', 'Auto-graded'], ['Maximum score', '20 <span class="muted">· pass at 12</span>'],
         ['Due', '12 Nov 2026, 16:00'], ['Attempts', '2'], ['Published', '4 Nov 2026, 09:14']]) +
       questionsPanel(false) +
-      // Delivery moves into MAIN as a table (owner, 2026-10-29) — the audience fact belongs beside the work,
-      // and it is the tallest panel, so the rail stops outrunning the main column. Progress and Guardian
-      // sign-off are aggregates and go back to the rail.
-      deliveryPanel())}${rail(
-      contentPanel(false) + progressPanel() + signOffPanel() + notificationsPanel() +
-      rulesPanel('Not required'))}${closeGrid}
+      // Delivery is a table in main; the three read-outs that used to be separate rail panels follow it as ONE
+      // panel of coloured segments (owner, 2026-10-29).
+      deliveryPanel() + glancePanel())}${rail(
+      contentPanel(false) + rulesPanel('Not required'))}${closeGrid}
   </div></div>
 </section>`;
 
@@ -79,7 +77,7 @@ const secC = `
 <section>
   <div class="sec-h"><span class="tag">C</span><h2>Delivery — zoomed</h2>
     <span class="note">the one panel that answers “published to whom, and did they get it?”</span></div>
-  <div class="app">${appBar}<div class="content"><div style="max-width:820px">
+  <div class="app">${appBar}<div class="content"><div style="max-width:1140px">
     ${deliveryPanel()}
     <div class="legend" style="margin:16px 0 0; max-width:none">
       <h3>Delivery vocabulary — one rule set, five variants</h3>

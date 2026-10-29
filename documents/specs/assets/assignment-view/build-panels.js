@@ -133,5 +133,38 @@ const audiencePreview = () =>
        (Q154).</p>
      <div style="display:flex; gap:6px">${btn('Refresh list')}${btn('Publish…', 'primary')}</div>`);
 
+// Status strip (owner, 2026-10-29): Progress, Guardian sign-off and Notifications were three separate rail
+// panels and each one dragged the page down. They are read-outs of the same cohort, so they become THREE
+// SEGMENTS OF ONE PanelSection in main, divided by coloured vertical rules, sitting below Delivery.
+const kv = (label, value) => `<div class="glance__kv"><span>${label}</span><b>${value}</b></div>`;
+
+const glancePanel = () =>
+  panel('Status', spacer + btn('Open progress'),
+    `<div class="glance">
+       <div class="glance__seg glance__seg--info">
+         <h4>Progress</h4>
+         ${kv('Cohort', 28)}${kv('Reached', 27)}${kv('Started', 21)}${kv('Submitted', 18)}
+         ${kv('Graded', 12)}${kv('Signed', 9)}
+         <div class="funnel"><i style="width:43%; background:var(--status-success-dot)"></i>
+           <i style="width:21%; background:var(--status-info-dot)"></i>
+           <i style="width:36%; background:var(--neutral-stroke-rest)"></i></div>
+         <div class="f-legend"><span><em style="background:var(--status-success-dot)"></em>graded 12</span>
+           <span><em style="background:var(--status-info-dot)"></em>ungraded 6</span>
+           <span><em style="background:var(--neutral-stroke-rest)"></em>not submitted 10</span></div>
+       </div>
+       <div class="glance__seg glance__seg--success">
+         <h4>Guardian sign-off</h4>
+         ${kv('Signed', 9)}${kv('Awaiting signature', 3)}${kv('Reassigned', 2)}
+         <p class="subtle-note" style="margin:6px 0 0">Applies to the 14 students whose guardian review is
+           required.</p>
+       </div>
+       <div class="glance__seg glance__seg--warning">
+         <h4>Notifications</h4>
+         ${kv('Failed', 3)}${kv('Retry scheduled', 1)}${kv('Skipped by policy', 2)}
+         <p class="subtle-note" style="margin:6px 0 0">Read-only. Each failure also appears on its row in
+           Delivery.</p>
+       </div>
+     </div>`);
+
 module.exports = { OPEN, closeGrid, main, rail, details, contentPanel, questionsPanel, deliveryPanel,
-  progressPanel, audienceExpected, audiencePreview, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head, style };
+  progressPanel, audienceExpected, audiencePreview, glancePanel, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head, style };
