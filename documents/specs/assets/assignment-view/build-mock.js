@@ -1,7 +1,7 @@
 const fs = require('fs');
 const B = require('./build-panels.js');
 const { OPEN, closeGrid, main, rail, details, contentPanel, questionsPanel, deliveryPanel,
-  progressPanel, audienceExpected, audiencePreview, glancePanel, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head,
+  progressPanel, audienceExpected, audiencePreview, glancePanel, pager, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head,
   style } = B;
 
 const signOffPanel = () => panel('Guardian sign-off', spacer + '<span class="chevron">▾</span>',
@@ -121,8 +121,8 @@ const secD = `
         ${row('Priya Raman', 'G7-0163', pill('neutral', 'none'), ['success', 'graded'], '<b>15</b> <span class="muted">/ 20</span>', '<span class="muted">not required</span>', '5 Nov, 18:40', 'Open')}
         ${row('Sofia Marchetti', 'G7-0191', '1 <span class="muted">· skipped</span>', ['neutral', 'not started'], '<span class="muted">—</span>', '<span class="muted">—</span>', '—', 'Submit…')}
         ${row('Marcus Bell', 'G7-0188', '1 <span class="muted">· terminal</span>', ['neutral', 'not started'], '<span class="muted">—</span>', '<span class="muted">—</span>', '—', 'Submit…')}
-        <tr><td colspan="7" class="muted">22 more · paging arrives only if the cohort cap is reached</td></tr>
       </tbody></table>
+      ${pager(1, 15, 28, true, true)}
       <p class="subtle-note" style="margin:0">Score is blank until graded — an ungraded row is a work item, not a
         missing value. “Submit…” opens the on-behalf path for paper or offline work.</p>
     </div>

@@ -282,7 +282,31 @@ Before adopting one of these components, check its `P:` members in the installed
 above) — a parameter you pass that it does not declare is either swallowed or, with child markup,
 silently deleted.
 
-## ShouldRender optimisation
+## Grids are paged by default — 15 items, per-grid configurable
+
+Every grid or table that renders a **data-driven collection** is **paged** (owner, 2026-10-29). Default page size
+**15**.
+
+- **Default 15.** `LandingGridSettings.ItemsPerPage` currently defaults to **10** and must be raised to **15** in the
+  round that applies this rule. Until then, a page that sets it explicitly to 15 is compliant; one that inherits 10
+  is not, and the difference is visible to a reader.
+- **Page size is per grid, not a global constant.** A grid declares its own `ItemsPerPage`, because density differs:
+  a question list reads well at 15, a wide student × guardian × contact row may want 10, a compact 4-column list can
+  take 25. The default is a starting point, not a policy.
+- **Expose the control where a collection is genuinely long.** Questions and the delivery/audience student list are
+  the two named cases: they must offer a rows-per-page choice (15 / 25 / 50) so a reader can trade height for
+  scrolling, instead of the page silently growing with the data.
+- **Why.** An unbounded grid lets data decide the page's height. A 300-student cohort or a 40-question assignment
+  must not produce a 6 000 px page, and a reader must not need to scroll past 120 rows to reach the panel below.
+- **Use the existing mechanism.** `EntityGrid` owns a `FluentPaginator` and is the default; a table that cannot use
+  `EntityGrid` renders `FluentPaginator` directly with its own `PaginationState`. Do not hand-roll prev/next.
+- **A list is not a grid.** A short structural list — materials, targets, contacts inside a panel — is not paged.
+  The rule is for collections whose **length is data-driven**, which is exactly the set that can grow without
+  warning.
+- **Paging composes with a server-side cap.** A read bounded at N rows still pages, and the page still states the
+  truncation: "1–15 of 200 (capped)".
+
+
 
 Override `ShouldRender()` on components that receive frequent external events but only
 need to update their DOM when their own data changes:

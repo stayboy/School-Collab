@@ -1,6 +1,6 @@
 const fs = require('fs');
 const P = require('./build-parts.js');
-const { style, pill, btn, panel, count, spacer, mat, ct, grp, tiles, appBar, facts, head } = P;
+const { style, pill, btn, panel, count, spacer, mat, ct, grp, tiles, appBar, facts, head, pager } = P;
 
 const OPEN = '<div class="region-grid-host"><div class="region-grid">';
 const closeGrid = '</div></div>';
@@ -34,8 +34,8 @@ const questionsPanel = (editable) =>
        <tr><td>1</td><td>Which fraction is equivalent to 0.75?</td><td>Multiple choice</td><td>4</td></tr>
        <tr><td>2</td><td>Convert 3⁄8 to a percentage.</td><td>Short answer</td><td>—</td></tr>
        <tr><td>3</td><td>0.6 is greater than 2⁄3.</td><td>True / false</td><td>2</td></tr>
-       <tr><td colspan="4" class="muted">5 more — the whole set renders here; no paging under 12 rows</td></tr>
-     </tbody></table>`);
+     </tbody></table>
+     ${pager(1, 8, 8, true)}`);
 
 // ── Delivery: the new post-publish panel (the answer to "published to whom, and did they get it?") ──
 // Delivery (post-publish) — a TABLE in main, same shape as the draft's Targets & Audience (owner, 2026-10-29).
@@ -68,11 +68,10 @@ const deliveryPanel = () =>
          <td>M. Bell ${pill('success', 'primary')}</td>
          <td>1 <span class="muted">· email</span></td>
          <td>${pill('danger', 'no more retries')}</td></tr>
-       <tr><td colspan="4" class="muted">5 of 28 shown · capped at 200; truncation is always stated</td></tr>
      </tbody></table>
+     ${pager(1, 15, 28, true, true)}
      <p class="subtle-note" style="margin:0">Delivery state comes from the notification log; "opened" from the
-       recipient's deep-link stamp. Addresses are not shown — see the privacy note in the spec.</p>
-     <div style="display:flex; gap:6px">${btn('View all 28 students')}</div>`);
+       recipient's deep-link stamp. Addresses are not shown — see the privacy note in the spec.</p>`);
 
 const progressPanel = () =>
   panel('Progress', spacer + '<span class="chevron">▾</span>',
@@ -125,8 +124,8 @@ const audiencePreview = () =>
          <td>M. Bell ${pill('success', 'primary')}</td>
          <td>1 <span class="muted">· email</span></td>
          <td>${pill('success', 'will notify')}</td></tr>
-       <tr><td colspan="4" class="muted">5 of 28 shown · capped at 200; truncation is always stated</td></tr>
      </tbody></table>
+     ${pager(1, 15, 28, true, true)}
      <p class="subtle-note" style="margin:0"><b>Recomputed at publish.</b> This list is a resolved preview of who
        would be notified — it is not a record and it changes with the targets, the guardians' contacts and the
        notification policy. <b>Channel kind and count only: the page never renders an address or a phone number</b>
@@ -167,4 +166,4 @@ const glancePanel = () =>
      </div>`);
 
 module.exports = { OPEN, closeGrid, main, rail, details, contentPanel, questionsPanel, deliveryPanel,
-  progressPanel, audienceExpected, audiencePreview, glancePanel, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head, style };
+  progressPanel, audienceExpected, audiencePreview, glancePanel, pager, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head, style };

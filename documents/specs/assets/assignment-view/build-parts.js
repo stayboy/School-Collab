@@ -41,4 +41,12 @@ const head = (badges, primary, secondary = '') =>
   `<div class="head"><div class="head__id"><div class="head__title"><h1>${ASSIGNMENT}</h1>${badges}</div>${meta}</div>
    <div class="head__act">${secondary}${primary}<button class="kebab" title="More actions">⋯</button></div></div>`;
 
-module.exports = { style, pill, btn, panel, count, spacer, mat, ct, grp, tile, tiles, appBar, facts, head };
+// Pager footer for a data-driven grid (owner rule, 2026-10-29): default 15 per page, per-grid, and a
+// rows-per-page control where the collection genuinely grows (questions, delivery/audience students).
+const pager = (from, to, total, sizes = false, capped = false) =>
+  `<div class="pager"><span>${from}–${to} of ${total}${capped ? ' (capped at 200)' : ''}</span>
+   <span class="pager__spacer"></span>
+   ${sizes ? '<span>Rows per page</span><span class="pager__size">15 ▾</span>' : ''}
+   <span class="pager__nav pager__nav--off">‹</span><span class="pager__nav">›</span></div>`;
+
+module.exports = { style, pill, btn, panel, count, spacer, mat, ct, grp, tile, tiles, appBar, facts, head, pager };

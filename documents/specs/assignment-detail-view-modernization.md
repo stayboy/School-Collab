@@ -290,6 +290,28 @@ person, so masking is not a control.
 
 
 
+### 4.10 Paging — every data-driven grid, 15 by default (Q156, owner 2026-10-29)
+
+The rule itself lives in `.github/copilot/rules/blazor-components.md` § "Grids are paged by default"; this section
+is how it lands on **this** page.
+
+- **All four tables page**: Questions, Delivery, Targets & Audience (draft), and the progress page's student list.
+  The Status panel's segments and the materials list are **not** grids — they have a fixed, small shape — so they do
+  not page.
+- **Default 15 per page**, and the page size is a **per-grid** property: Questions 15, Delivery/audience 15 (a wide
+  four-column row), progress 15. **Questions and Delivery expose a rows-per-page control (15 / 25 / 50)** — the two
+  named cases, because both grow with data: 40 questions and a 300-student cohort are ordinary.
+- **`EntityGrid` + `FluentPaginator`**, not a hand-rolled pager. The tables here are not `EntityGrid` layouts
+  (they are panel-internal, four columns, no selection or chips), so they carry a `PaginationState` and
+  `FluentPaginator` directly.
+- **Paging composes with the 200 cap (Q146).** The read stays bounded; the grid pages within what arrived and says
+  so: "1–15 of 200 (capped)".
+- **Priced consequence.** `LandingGridSettings.ItemsPerPage` defaults to **10** today. Raising it to **15** touches
+  every landing page that inherits it — **shared chrome, so it carries the full gate** — and is therefore *not*
+  smuggled into this docs-only PR. It belongs to the implementation round that applies the rule.
+
+
+
 ## 5. Testing Decisions
 
 A good test here asserts **external behaviour**: what a user sees, and what the page requests — never component
@@ -372,6 +394,7 @@ are both handler-level assertions, because both are decided server-side and neit
 | Q153 | Published: Delivery as a table in main | **Yes** — Delivery moves rail → main as a table, and Progress + Guardian sign-off move back to the rail, so A and B show one audience surface in one shape. Supersedes Q151's published row. |
 | Q154 | Contact exposure | **The page carries no contact value.** No address or phone number in the DTO, not merely masked; channel kind + count + role + delivery state only. Guardian names only where the caller could already list them in the Students module. Any address need is a separate audited action (§4.9). |
 | Q155 | Status read-outs as one panel | **One Status panel in main, below Delivery**, holding Progress · Guardian sign-off · Notifications as three segments divided by coloured vertical rules. The rail drops to Content & Resources + Rules (Approval pre-publish). Page height 4 991 → 4 089 px. |
+| Q156 | Paging on every grid | **Every data-driven grid pages, default 15, page size per grid.** The rule lives in `.github/copilot/rules/blazor-components.md`; Questions and Delivery/audience also expose a 15/25/50 control. `LandingGridSettings.ItemsPerPage` (10 today → 15) is shared chrome, so it moves in the implementation round under the full gate, not in this docs PR (§4.10). |
 
   |---|---|---|---|
   | 1 | §2 re-decided lifecycle primaries (Published → *Open progress*) while claiming the §11 matrix could not fork; the matrix reads Published → Unpublish, Closed → Archive | **P1** | Applied — header follows §11; Q141 later settled the view exception, so §11 now records it explicitly and the decision takes `surface` as an input (pass 2, finding 1) |
