@@ -48,11 +48,10 @@ One page, one header, no tabs — the assignment view adopts the student view's 
   assignment the primary is ***Open progress***, with Unpublish and Close in the kebab: the view page's job is
   running the assignment, not authoring it (Q141, settled — §11 carries the view-surface exception so the page is
   not read as drifting from the matrix).
-- **Main column:** Details · Questions & AI · the **aggregate** panels (Progress, Guardian sign-off when published;
-  Approval when a decision is outstanding) · **Rules** stays in the rail.
-- **Rail:** **Content & Resources** (settled name, collapsible — materials with a preview per row) · **Delivery** (new,
-  post-publish: the resolved cohort with per-contact delivery state) · Notifications · Rules; before publish,
-  **Targets & Audience** (settled name, not collapsible) replaces Delivery.
+- **Main column:** Details · Questions & AI · the **aggregate** panels (Progress, Guardian sign-off when published) ·
+  **Targets & Audience as a per-student table while the assignment is a draft** (Q152).
+- **Rail:** **Content & Resources** · **Delivery** (post-publish: the resolved cohort with per-contact delivery state) ·
+  Notifications · Rules. Before publish, **Approval** takes Delivery's slot and Targets & Audience sits in main.
 - **Delivery** answers question 1 in one place: one group per **student**, each contact with channel, guardian role,
   subscription and **delivery state**, plus explicit *not reached — no subscribed contact* rows. Before publish the
   same fact is a count, which is what **Targets & Audience** already shows.
@@ -160,6 +159,11 @@ One page, one header, no tabs — the assignment view adopts the student view's 
   than assumed.
 - `GET /{id}/recipients` stays for its current callers; the failures read is superseded once the audience read
   has a call site (retirement decided then, not now).
+- **Pre-publish rows (Q152).** The existing `recipient-preview` read returns **counts only**, and the authoring
+  surface calls it on a **500 ms debounce** — so it must **not** learn to return rosters. The draft view calls a
+  **rows variant once per load** (same target resolution, same policy filter, same 200 cap) and renders the table:
+  student · guardian(s) with role · contact value and channel · `At publish` verdict. Nothing is persisted; publish
+  re-resolves, and the panel says so in words.
 - **Cohort cap (Q146): a fixed 200**, declared as a **shared constant** so the client and server cannot drift,
   with truncation always stated in the panel ("showing the first N of M"). Paging is a later slice, triggered by a
   real cohort rather than by speculation.
@@ -231,14 +235,23 @@ fields. It has no clause for a panel that presents **no rows at all**, and this 
 (owner direction, 2026-10-29).
 
 - **The rule.** A panel presenting a **collection of rows** belongs in the rail — Content & Resources, Delivery,
-  Notifications, Rules, Targets & Audience. A panel presenting an **aggregate** (Progress tiles, Guardian sign-off
-  counts) or a **decision** (Approval) owns no rows, so it is not a rail panel: it sits in **main, beneath the
-  content it summarises**.
+  Notifications, Rules. A panel presenting an **aggregate** (Progress tiles, Guardian sign-off counts) owns no rows,
+  so it is not a rail panel: it sits in **main, beneath the content it summarises**. A panel presenting a
+  **multi-column table** also goes to main, because the rail track cannot hold it (the width clause below).
+  **Approval is the near-miss:** it is a decision, but it is a compact three-button block that renders fine in the
+  rail, and the draft's main column needs its width for the audience table (Q152).
 - **Measured, not aesthetic.** With every panel in the rail the mock stood **4 991 px**, a ~1 900 px rail beside
-  ~500 px of main: two columns of wildly different length and a reader scrolling a mostly empty main. Applying the
-  rule brought it to **4 354 px** with the columns ending ~300 px apart.
-- **What did not move.** Targets & Audience, Content & Resources and Rules stay in the rail: §5 names them and each
-  is a row collection. Moving one of those would re-open a settled table for a layout preference.
+  ~500 px of main: two columns of wildly different length and a reader scrolling a mostly empty main. After the
+  moves it is **4 288 px**, with both columns ending within ~150 px of each other on the draft and ~300 px on the
+  published view.
+- **What did not move.** Content & Resources, Rules, Notifications and Delivery stay in the rail: §5 names the
+  first two and each presents a row collection. Moving one of those would re-open a settled table for a layout
+  preference.
+- **Width clause (Q152) — the case the ownership test cannot settle alone.** The rail track is **320–460 px**, so a
+  panel whose content is a multi-column table cannot render there at all. Targets & Audience is that case: as chips
+  and counts it fits the rail, but as a per-student table (student · guardians · contacts · verdict) it needs the
+  main column. Moving it is a **layout consequence** of the ownership test, which is the reading §5 itself gives
+  when it says swapping two panels is a layout consequence — not an override of it.
 - **Consequence for the pattern doc.** §5's table has no aggregate/decision clause; this rule is the missing half.
   It is **proposed** for `panel-layout-pattern.md` §5, not asserted here.
 
@@ -321,6 +334,7 @@ are both handler-level assertions, because both are decided server-side and neit
 | Q149 | One round or two | **Two:** (a) the view page + audience read, (b) the progress and submission pages. Recorded on #453. |
 | Q150 | Merge #454 before branching | **Merge first, then branch from `main`** — a docs-only PR, and an implementation branch without its spec is a branch that cannot be reviewed against it. |
 | Q151 | Panel placement | **Aggregates and decisions in main, row collections in the rail** (§4.8). Rail: Content & Resources · Delivery · Notifications · Rules (pre-publish: Targets & Audience replaces Delivery). Main: Details · Questions · Progress · Sign-off · Approval. |
+| Q152 | Draft audience as a table | **Targets & Audience moves to main on a draft and renders a per-student table** (student · guardian(s) · contacts · verdict); Approval takes its rail slot. Backed by a **rows variant of the preview read, called once per load** — never on the authoring surface's 500 ms debounce. Supersedes Q151's draft row. |
 
   |---|---|---|---|
   | 1 | §2 re-decided lifecycle primaries (Published → *Open progress*) while claiming the §11 matrix could not fork; the matrix reads Published → Unpublish, Closed → Archive | **P1** | Applied — header follows §11; Q141 later settled the view exception, so §11 now records it explicitly and the decision takes `surface` as an input (pass 2, finding 1) |

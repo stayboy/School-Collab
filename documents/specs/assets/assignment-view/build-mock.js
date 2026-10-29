@@ -1,7 +1,7 @@
 const fs = require('fs');
 const B = require('./build-panels.js');
 const { OPEN, closeGrid, main, rail, details, contentPanel, questionsPanel, deliveryPanel,
-  progressPanel, audienceExpected, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head,
+  progressPanel, audienceExpected, audiencePreview, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head,
   style } = B;
 
 const signOffPanel = () => panel('Guardian sign-off', spacer + '<span class="chevron">▾</span>',
@@ -65,11 +65,11 @@ const secB = `
       details([['Type', 'Digital'], ['Grading', 'Auto-graded'], ['Maximum score', '20'], ['Due', '12 Nov 2026, 16:00'],
         ['Attempts', '2'], ['Last saved', '28 Oct 2026, 17:41']]) +
       questionsPanel(true) +
-      // Approval is a decision ABOUT this content, so it sits under Questions in MAIN rather than alone in
-      // the rail (owner, 2026-10-29). Same rule as Progress/Sign-off in A: state and decisions in main,
-      // relationships (targets, materials, rules) in the rail.
-      approvalPanel())}${rail(
-      audienceExpected() + contentPanel(true) + rulesPanel('Required — grade policy'))}${closeGrid}
+      // Targets & Audience moves to MAIN on a draft and becomes a TABLE (owner, 2026-10-29): the student x
+      // guardian x contact grid needs the main column's width, and Approval goes back to the rail where the
+      // targets panel was. The list is a resolved preview, recomputed at publish.
+      audiencePreview())}${rail(
+      approvalPanel() + contentPanel(true) + rulesPanel('Required — grade policy'))}${closeGrid}
   </div></div>
 </section>`;
 

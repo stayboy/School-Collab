@@ -74,5 +74,43 @@ const audienceExpected = () =>
        re-resolved at publish. Names appear once the assignment is published.</p>
      <div style="display:flex; gap:6px">${btn('Preview cohort')}${btn('Publish…', 'primary')}</div>`);
 
+// Pre-publish audience TABLE (owner, 2026-10-29). Targets & Audience moves into MAIN on a draft because a
+// student x guardian x contact grid cannot render in the 320-460px rail track. The list is a RESOLVED PREVIEW,
+// recomputed at publish — nothing here is a record, and the panel says so.
+const audiencePreview = () =>
+  panel('Targets &amp; Audience', spacer + '<span class="chip chip--muted">not yet published</span>',
+    `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center">
+       <span class="chip">Grade 7</span><span class="chip">Stream A</span><span class="chip">+ 2 named students</span>
+       <span class="muted">28 students matched · 19 primary guardians · 12 other contacts</span></div>
+     <table class="grid"><thead><tr>
+       <th style="width:250px">Student</th><th style="width:270px">Guardian(s)</th>
+       <th>Contacts</th><th style="width:140px">At publish</th></tr></thead><tbody>
+       <tr><td><b>Amara Okafor</b> <span class="muted">G7-0142</span></td>
+         <td>N. Okafor ${pill('success', 'primary')}<br>J. Okafor ${pill('neutral', 'CC')}</td>
+         <td><span class="muted">email</span> n.okafor@…<br><span class="muted">SMS</span> +44 7700 900…</td>
+         <td>${pill('success', 'will notify')}</td></tr>
+       <tr><td><b>Daniel Whitfield</b> <span class="muted">G7-0157</span></td>
+         <td>D. Whitfield ${pill('success', 'primary')}</td>
+         <td><span class="muted">email</span> d.whitfield.parent@…</td>
+         <td>${pill('success', 'will notify')}</td></tr>
+       <tr><td><b>Priya Raman</b> <span class="muted">G7-0163</span></td>
+         <td><span class="muted">no guardian on file</span></td>
+         <td><span class="muted">none subscribed</span></td>
+         <td>${pill('neutral', 'no contact')}</td></tr>
+       <tr><td><b>Sofia Marchetti</b> <span class="muted">G7-0191</span></td>
+         <td>L. Marchetti ${pill('success', 'primary')}</td>
+         <td><span class="muted">WhatsApp</span> +44 7700 900…</td>
+         <td>${pill('warning', 'blocked by policy')}</td></tr>
+       <tr><td><b>Marcus Bell</b> <span class="muted">G7-0188</span></td>
+         <td>M. Bell ${pill('success', 'primary')}</td>
+         <td><span class="muted">email</span> m.bell.guardian@…</td>
+         <td>${pill('success', 'will notify')}</td></tr>
+       <tr><td colspan="4" class="muted">5 of 28 shown · capped at 200; truncation is always stated</td></tr>
+     </tbody></table>
+     <p class="subtle-note" style="margin:0"><b>Recomputed at publish.</b> This list is a resolved preview of who
+       would be notified — it is not a record and it changes with the targets, the guardians' contacts and the
+       notification policy. Names and contacts come from the same batched subscriber read publish uses.</p>
+     <div style="display:flex; gap:6px">${btn('Refresh list')}${btn('Publish…', 'primary')}</div>`);
+
 module.exports = { OPEN, closeGrid, main, rail, details, contentPanel, questionsPanel, deliveryPanel,
-  progressPanel, audienceExpected, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head, style };
+  progressPanel, audienceExpected, audiencePreview, pill, btn, panel, count, spacer, ct, grp, tiles, appBar, facts, head, style };
