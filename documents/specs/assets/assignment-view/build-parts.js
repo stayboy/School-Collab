@@ -43,7 +43,10 @@ const head = (badges, primary, secondary = '') =>
 
 // Pager footer for a data-driven grid (owner rule, 2026-10-29): default 15 per page, per-grid, and a
 // rows-per-page control where the collection genuinely grows (questions, delivery/audience students).
+// Q162: when the whole set fits on one page, render NOTHING — dead arrows saying "that's all of it" are chrome.
+const PAGE_SIZE = 15;
 const pager = (from, to, total, sizes = false, capped = false) =>
+  total <= PAGE_SIZE ? '' :
   `<div class="pager"><span>${from}–${to} of ${total}${capped ? ' (capped at 200)' : ''}</span>
    <span class="pager__spacer"></span>
    ${sizes ? '<span>Rows per page</span><span class="pager__size">15 ▾</span>' : ''}

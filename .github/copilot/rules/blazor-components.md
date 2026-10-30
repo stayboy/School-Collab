@@ -305,6 +305,15 @@ Every grid or table that renders a **data-driven collection** is **paged** (owne
   warning.
 - **Paging composes with a server-side cap.** A read bounded at N rows still pages, and the page still states the
   truncation: "1–15 of 200 (capped)".
+- **No pager when everything fits (Q162).** If `TotalItemCount <= ItemsPerPage`, render **neither** the pager nor the
+  rows-per-page selector. `1–8 of 8` with two dead arrows is 30 px of chrome saying "that's all of it" — which the
+  absence of a pager already says. `EntityGrid` should therefore derive its pager from the item count rather than
+  exposing the choice to the caller.
+- **`EntityGrid.ShowPager` defaults to `false`, and no call site sets it (Q163).** Five grids — `LandingPage`,
+  `GuardianGrid` ×2, `StudentPickerDialog` ×2 — never page today, so this rule is **unmet in the shipped component**
+  while being mandated here. Flip the default to `true` in the round that applies the rule, together with
+  `LandingGridSettings.ItemsPerPage` 10 → 15: both are shared chrome, so both carry the full gate, and the
+  hide-when-it-fits clause above keeps the flip safe for short lists.
 
 
 
