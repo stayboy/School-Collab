@@ -250,9 +250,11 @@ public sealed class AssignmentEditFormModel
         || !_targets.Select(t => (t.Kind, t.RefId))
             .SequenceEqual(_loadedTargets.Select(t => (t.Kind, t.RefId)));
 
-    /// <summary>Fixed question page size for the editor + review paginator
-    /// (spec §0 decision 9 / FR-240).</summary>
-    public const int QuestionPageSize = 5;
+    /// <summary>Question page size for the editor + review paginator. **15**, the repo default
+    /// (`.github/copilot/rules/blazor-components.md` § "Grids are paged by default"; owner Q156) — this
+    /// constant was 5 per the original FR-240, which predates the rule. A question list is a paged grid like
+    /// any other, so it follows the same default rather than carrying its own.</summary>
+    public const int QuestionPageSize = 15;
 
     /// <summary>
     /// Projects an <see cref="AssignmentSummaryDto"/> into a brand-new, fully-

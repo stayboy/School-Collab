@@ -504,7 +504,9 @@ public string? AiPromptOverride { get; set; }
 ### 2.5 Question presentation & paging
 
 - **FR-240** — In Step 2 / Review, questions are listed in `DisplayOrder` order, paginated
-  with `FluentPaginator` at a fixed page size (default 5). Total count is shown.
+  with `FluentPaginator` at a **per-grid page size, default 15** — superseded 2026-10-29: this line said
+  "default 5" before the repo-wide rule landed (`.github/copilot/rules/blazor-components.md` § "Grids are paged by
+  default — 15 items, per-grid configurable"; owner Q156). Total count is shown.
 - **FR-241** — Each question editor row renders by `QuestionType`: `MultipleChoice` →
   options list + correct-option radio; `TrueFalse` → True/False radio; `ShortAnswer` →
   text answer field. Option add/remove and correct-answer toggling MUST be supported.

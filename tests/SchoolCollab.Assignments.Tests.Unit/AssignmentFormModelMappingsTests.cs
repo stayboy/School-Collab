@@ -739,23 +739,25 @@ public class AssignmentFormModelMappingsTests
     // ── GetQuestionPage ────────────────────────────────────────────────
 
     [TestMethod]
-    public void QuestionPageSize_DefaultIsFive()
+    public void QuestionPageSize_DefaultIsFifteen()
     {
-        AssignmentEditFormModel.QuestionPageSize.Should().Be(5, "FR-240: page size is fixed at 5");
+        AssignmentEditFormModel.QuestionPageSize.Should().Be(15,
+            "the repo default is 15 (blazor-components.md § Grids are paged by default; Q156) — FR-240's 5 predates the rule");
     }
 
     [TestMethod]
-    public void GetQuestionPage_TwelveRows_Slices5_5_2()
+    public void GetQuestionPage_TwentyRows_Slices15_5()
     {
         var model = new AssignmentEditFormModel();
-        for (var i = 0; i < 12; i++)
+        for (var i = 0; i < 20; i++)
         {
             model.Questions.Add(new QuestionEditorRow { QuestionText = $"Q{i + 1}" });
         }
 
-        model.GetQuestionPage(0).Select(r => r.QuestionText).Should().Equal("Q1", "Q2", "Q3", "Q4", "Q5");
-        model.GetQuestionPage(1).Select(r => r.QuestionText).Should().Equal("Q6", "Q7", "Q8", "Q9", "Q10");
-        model.GetQuestionPage(2).Select(r => r.QuestionText).Should().Equal("Q11", "Q12");
+        model.GetQuestionPage(0).Select(r => r.QuestionText)
+            .Should().Equal(Enumerable.Range(1, 15).Select(n => $"Q{n}"));
+        model.GetQuestionPage(1).Select(r => r.QuestionText)
+            .Should().Equal("Q16", "Q17", "Q18", "Q19", "Q20");
     }
 
     [TestMethod]
@@ -774,7 +776,8 @@ public class AssignmentFormModelMappingsTests
             model.Questions.Add(new QuestionEditorRow { QuestionText = $"Q{i + 1}" });
         }
 
-        model.GetQuestionPage(99).Should().HaveCount(2, "page 99 clamps to the last page (rows 6–7)");
+        // An explicit page size keeps this a clamping test rather than a default-size test.
+        model.GetQuestionPage(99, pageSize: 5).Should().HaveCount(2, "page 99 clamps to the last page (rows 6–7)");
     }
 
     [TestMethod]
@@ -791,13 +794,14 @@ public class AssignmentFormModelMappingsTests
     public void QuestionPageCount_AlwaysAtLeastOne()
     {
         var model = new AssignmentEditFormModel();
-        model.QuestionPageCount().Should().Be(1, "an empty list still has a single (empty) page so callers can pin CurrentPageIndex=0");
+        model.QuestionPageCount(pageSize: 5).Should().Be(1,
+            "an empty list still has a single (empty) page so callers can pin CurrentPageIndex=0");
         model.Questions.Add(new QuestionEditorRow());
-        model.QuestionPageCount().Should().Be(1);
+        model.QuestionPageCount(pageSize: 5).Should().Be(1);
         for (var i = 0; i < 4; i++) model.Questions.Add(new QuestionEditorRow());
-        model.QuestionPageCount().Should().Be(1);
+        model.QuestionPageCount(pageSize: 5).Should().Be(1);
         model.Questions.Add(new QuestionEditorRow());
-        model.QuestionPageCount().Should().Be(2);
+        model.QuestionPageCount(pageSize: 5).Should().Be(2);
     }
 
     // ── QuestionGenerationGate (FR-220) ────────────────────────────────

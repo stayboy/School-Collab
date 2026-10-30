@@ -71,7 +71,7 @@
             {
                 <FluentMessageBar Intent="MessageBarIntent.Info" class="entity-grid-empty">@EmptyMessage</FluentMessageBar>
             }
-            @if (ShowPager)
+            @if (ShowPagerWhenItFits)
             {
                 <FluentPaginator State="@_paginationState" />
             }
@@ -107,7 +107,26 @@
     [Parameter] public string? Error { get; set; }
 
     /// <summary>Render a <see cref="Pager"/> beneath the grid. Default false.</summary>
-    [Parameter] public bool ShowPager { get; set; }
+    /// <summary>
+    /// Whether the grid may page at all. **Defaults to <see langword="true"/>** — every data-driven grid pages
+    /// (`.github/copilot/rules/blazor-components.md` § "Grids are paged by default"). Set it to <see langword="false"/>
+    /// only for a surface where paging is actively wrong, and say why at the call site.
+    /// <para>The pager is still <b>derived</b>: see <see cref="ShowPagerWhenItFits"/>. A caller does not decide
+    /// whether a pager appears, only whether this grid is allowed to page at all.</para>
+    /// </summary>
+    [Parameter] public bool ShowPager { get; set; } = true;
+
+    /// <summary>
+    /// The pager is rendered only when it can do something: the grid may page (<see cref="ShowPager"/>), the
+    /// pagination state exists, and there is more than one page of rows. A grid whose rows fit on one page renders
+    /// **no** pager — <c>1–8 of 8</c> with two dead arrows is chrome announcing what the absence of a pager already
+    /// says (owner, 2026-10-29: Q162).
+    /// </summary>
+    private bool ShowPagerWhenItFits =>
+        ShowPager
+        && _paginationState is not null
+        && Items is { Length: > 0 }
+        && Items.Length > _paginationState.ItemsPerPage;
 
     // ── Optional search box ──────────────────────────────────────────────
     // When enabled, a debounced search text box is rendered top-right above
