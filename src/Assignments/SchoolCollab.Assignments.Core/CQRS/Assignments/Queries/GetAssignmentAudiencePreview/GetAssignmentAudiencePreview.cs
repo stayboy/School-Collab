@@ -26,7 +26,7 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAu
 public sealed record GetAssignmentAudiencePreview(Guid AssignmentId) : IQuery<AssignmentAudienceDto>;
 
 /// <summary>Handles <see cref="GetAssignmentAudiencePreview"/>.</summary>
-/// <remarks
+/// <remarks>
 /// A contact the publish-time filter would drop is still returned, as
 /// <see cref="AudienceDeliveryStateDto.BlockedByPolicy"/>: the draft panel exists to answer "who will
 /// be told", and an omitted contact answers it with silence. Nothing here writes — no recipient row,

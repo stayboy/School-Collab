@@ -644,6 +644,39 @@ list" promise (P2, gate finding #4), so they were **fixed in pass 2c rather than
 secondary beside the draft primary, because the six pins never covered its placement and the later P5b matrix + AC4c
 pin kebab-only, which supersedes the drawing.
 
+## Delta review — `deepseek-v4-pro:0813`, the part the first review never saw
+
+The first review covered the patch only up to `41e9cc7f`. Everything after it — pass 2d, the fixture SQL and all of
+layer 2, including the round's only cross-context contract change — was reviewed separately over
+`41e9cc7f..8096bda5`. **Verdict: `CLOSED WITH NOTES`**, no blocking finding.
+
+Confirmed clean, each checked rather than assumed: **`withNames` breaks nothing** — the only two consumers of
+`GET /students/by-target` (`AssignmentRoutes.cs:493`, `PublishAssignmentCommandHandler.cs:148`) both go through
+`ResolveStudentIdsAsync`, which never sends the flag, so `bool?` binds `null` and the response stays `Guid[]`; no
+third caller exists in any context. **The name source is coherent** — `"{LastName}, {FirstName}"` is applied in
+exactly one place, both handlers sort `OrderBy(FullName, OrdinalIgnoreCase).ThenBy(Id)`, a contact-less student is
+still named, and `Degraded` now means only what it says. **Pass 2d was correctly removed, not regressed** — its rule
+existed to catch a *swallowed* `contacts/subscribed` failure, and that failure mode is gone now that the name read
+fail-closes on the cohort read. **The Students regression surface holds** — five union legs, tenant filter and dedupe
+intact, and the wire tests still pin the default `Guid[]` contract **unmodified**, which is the assertion that would
+have hidden a break had it been edited. **The fixture SQL** is idempotent by fixed id, carries no cross-database FK
+assumption, keeps the one column that must stay stable (`date_of_birth`) fixed rather than `now()`-derived, and is
+referenced by no `.cs` file, so there is no path into `MigrationService`.
+
+**Notes, and what happened to each:**
+
+1. `GetAssignmentAudiencePreview.cs:29` — the `<remarks>` tag had lost its `>`, malforming the whole doc block, and
+   **no build says so** because `GenerateDocumentationFile` is not set. **Fixed** (one character); a repo-wide sweep
+   for other `/// <remarks` lines found none.
+2. `AssignmentTargetResolverHttpClient.cs:68` — the wire→sort-key join (`"{LastName}, {FirstName}"`, plus the
+   `&withNames=true` URL) has **no direct test**. The handler test proves the *source* changed, not the *format*, so a
+   swap to `"{First} {Last}"` would silently invert the panel's only stated ordering. **Carried to resume**, to be
+   written alongside the probe: the probe exercises this exact glue against real names, so the test and the
+   observation should land together rather than the test pinning a format nobody has seen rendered.
+3. `ResolveStudentsByTargetHandler.cs:36/51/83/104/127` — projecting name columns for the default `Guid[]` caller is a
+   small, documented cost ("one query serves both shapes and the route does the projection"). **Accepted, no action**
+   — the alternative is two queries or a flag threaded through the handler.
+
 ## Named risks
 
 1. **The authoring component is the round's real risk.** Suppressing its shell touches a component with a large
