@@ -7,6 +7,7 @@ using SchoolCollab.Students.Core.CQRS.Students.Commands.RecoverStudent;
 using SchoolCollab.Students.Core.CQRS.Students.Commands.UpdateStudent;
 using SchoolCollab.Students.Core.CQRS.Students.Commands.UpdateStudentWithLinkedData;
 using SchoolCollab.Students.Core.Domain.Exceptions;
+using SchoolCollab.Students.Core.DTOs;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.GetStudentById;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.GetStudentByStudentNumber;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.ListDeletedStudents;
@@ -65,22 +66,33 @@ public static class StudentRoutes
         // `allStudents` leg is explicit (D-6) so the tenant-wide cohort cannot be requested
         // by accident. Mapped on this group, so it inherits its RequireAuthorization +
         // BearerScheme (D-7). Tenant scoping comes from the handler's DbContext query filter.
+        //
+        // `withNames` is additive on the wire: absent (the default) the response is the bare
+        // `Guid[]` every existing caller reads, and `withNames=true` adds the two name columns
+        // the audience panel needs for a student who has no subscribed contact at all.
         group.MapGet("/by-target", async (
+            [FromQuery] bool? withNames,
             [FromQuery] bool allStudents,
             [FromQuery] Guid[] gradeLevelIds,
             [FromQuery] Guid[] streamCodedValueIds,
             [FromQuery] Guid[] studentIds,
             [FromQuery] Guid[] activityGroupIds,
-            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ResolveStudentsByTarget, Guid[]> handler,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ResolveStudentsByTarget, TargetStudentDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(
+        {
+            var students = await handler.HandleAsync(
                 new ResolveStudentsByTarget(
                     allStudents,
                     gradeLevelIds ?? [],
                     streamCodedValueIds ?? [],
                     studentIds ?? [],
                     activityGroupIds ?? []),
-                ct)));
+                ct);
+
+            return withNames == true
+                ? Results.Ok(students)
+                : Results.Ok(students.Select(student => student.Id).ToArray());
+        });
 
         group.MapPost("/", async (
             [FromBody] CreateStudent command,

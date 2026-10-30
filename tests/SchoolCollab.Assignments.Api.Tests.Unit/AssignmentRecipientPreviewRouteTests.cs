@@ -66,6 +66,16 @@ public class AssignmentRecipientPreviewRouteTests
             LastIncludeAllStudents = includeAllStudents;
             return Throw is null ? Task.FromResult(StudentIds) : Task.FromException<Guid[]>(Throw);
         }
+
+        public Task<TargetStudent[]> ResolveStudentsAsync(
+            IReadOnlyList<TargetConstraint> targets, bool includeAllStudents, CancellationToken ct = default)
+        {
+            LastConstraints = targets;
+            LastIncludeAllStudents = includeAllStudents;
+            return Throw is null
+                ? Task.FromResult(StudentIds.Select(id => new TargetStudent(id, string.Empty)).ToArray())
+                : Task.FromException<TargetStudent[]>(Throw);
+        }
     }
 
     private sealed class CapturingContactResolver : IContactResolver

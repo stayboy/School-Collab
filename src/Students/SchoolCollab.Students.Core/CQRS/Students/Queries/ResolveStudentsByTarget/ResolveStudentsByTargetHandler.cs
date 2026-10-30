@@ -2,22 +2,30 @@ using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Domain;
+using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Core.CQRS.Students.Queries.ResolveStudentsByTarget;
 
 /// <summary>
 /// Handles <see cref="ResolveStudentsByTarget"/> — the union of the five targeting legs
 /// (TGT-3…TGT-9, EC-4). One round-trip per leg, then a dedupe; no ordering guarantee is
-/// promised because the consumer (publish recipient resolution) is order-insensitive.
+/// promised because the consumers (publish recipient resolution, the audience name read) are
+/// order-insensitive.
 /// </summary>
+/// <remarks>
+/// Every leg projects the student's id and both name columns: the wire keeps a names-free
+/// <c>Guid[]</c> shape unless the caller passes <c>withNames=true</c>, so one query serves both
+/// shapes and the route does the projection.
+/// </remarks>
 public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
-    : IQueryHandler<ResolveStudentsByTarget, Guid[]>
+    : IQueryHandler<ResolveStudentsByTarget, TargetStudentDto[]>
 {
-    public async Task<Guid[]> HandleAsync(
+    public async Task<TargetStudentDto[]> HandleAsync(
         ResolveStudentsByTarget query,
         CancellationToken cancellationToken = default)
     {
-        var result = new HashSet<Guid>();
+        // Keyed by id: a student matching several legs appears once (TGT-3).
+        var result = new Dictionary<Guid, TargetStudentDto>();
 
         // ── allStudents leg (D-6): tenant-wide, no grade/period/group predicate. ──
         if (query.AllStudents)
@@ -25,9 +33,12 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
             var all = await db.Students
                 .AsNoTracking()
                 .Where(s => !s.IsDeleted)
-                .Select(s => s.Id)
+                .Select(s => new TargetStudentDto(s.Id, s.FirstName, s.LastName))
                 .ToListAsync(cancellationToken);
-            result.UnionWith(all);
+            foreach (var student in all)
+            {
+                result.TryAdd(student.Id, student);
+            }
         }
 
         // ── student leg (TGT-6): the id must exist, be non-soft-deleted and same-tenant. ──
@@ -37,9 +48,12 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
             var students = await db.Students
                 .AsNoTracking()
                 .Where(s => ids.Contains(s.Id) && !s.IsDeleted)
-                .Select(s => s.Id)
+                .Select(s => new TargetStudentDto(s.Id, s.FirstName, s.LastName))
                 .ToListAsync(cancellationToken);
-            result.UnionWith(students);
+            foreach (var student in students)
+            {
+                result.TryAdd(student.Id, student);
+            }
         }
 
         // ── Current period, derived exactly as ListStudentsByGradeHandler does. The
@@ -66,11 +80,15 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
                     .Where(se => gradeIds.Contains(se.GradeLevelId)
                               && se.PeriodId == currentPeriodId
                               && se.Status == EnrollmentStatus.Active)
-                    .Join(db.Students, se => se.StudentId, s => s.Id, (se, s) => new { s.Id, s.IsDeleted })
+                    .Join(db.Students, se => se.StudentId, s => s.Id,
+                        (se, s) => new { s.Id, s.FirstName, s.LastName, s.IsDeleted })
                     .Where(x => !x.IsDeleted)
-                    .Select(x => x.Id)
+                    .Select(x => new TargetStudentDto(x.Id, x.FirstName, x.LastName))
                     .ToListAsync(cancellationToken);
-                result.UnionWith(byGrade);
+                foreach (var student in byGrade)
+                {
+                    result.TryAdd(student.Id, student);
+                }
             }
 
             // ── stream leg (TGT-5): grade-agnostic — the stream is the whole constraint. ──
@@ -83,11 +101,15 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
                               && streamIds.Contains(se.StreamCodedValueId.Value)
                               && se.PeriodId == currentPeriodId
                               && se.Status == EnrollmentStatus.Active)
-                    .Join(db.Students, se => se.StudentId, s => s.Id, (se, s) => new { s.Id, s.IsDeleted })
+                    .Join(db.Students, se => se.StudentId, s => s.Id,
+                        (se, s) => new { s.Id, s.FirstName, s.LastName, s.IsDeleted })
                     .Where(x => !x.IsDeleted)
-                    .Select(x => x.Id)
+                    .Select(x => new TargetStudentDto(x.Id, x.FirstName, x.LastName))
                     .ToListAsync(cancellationToken);
-                result.UnionWith(byStream);
+                foreach (var student in byStream)
+                {
+                    result.TryAdd(student.Id, student);
+                }
             }
         }
 
@@ -102,13 +124,17 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
                 .Where(m => groupIds.Contains(m.ActivityGroupId) && m.Status == MembershipStatus.Active)
                 .Join(db.ActivityGroups, m => m.ActivityGroupId, g => g.Id, (m, g) => new { m.StudentId, g.IsActive })
                 .Where(x => x.IsActive)
-                .Join(db.Students, x => x.StudentId, s => s.Id, (x, s) => new { s.Id, s.IsDeleted })
+                .Join(db.Students, x => x.StudentId, s => s.Id,
+                    (x, s) => new { s.Id, s.FirstName, s.LastName, s.IsDeleted })
                 .Where(x => !x.IsDeleted)
-                .Select(x => x.Id)
+                .Select(x => new TargetStudentDto(x.Id, x.FirstName, x.LastName))
                 .ToListAsync(cancellationToken);
-            result.UnionWith(byGroup);
+            foreach (var student in byGroup)
+            {
+                result.TryAdd(student.Id, student);
+            }
         }
 
-        return result.ToArray();
+        return result.Values.ToArray();
     }
 }

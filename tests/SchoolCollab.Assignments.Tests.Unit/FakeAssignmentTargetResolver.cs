@@ -14,6 +14,12 @@ internal sealed class FakeAssignmentTargetResolver : IAssignmentTargetResolver
     /// <summary>The resolved student ids. Empty is a legal answer — publish must refuse it (D-6c).</summary>
     public Guid[] StudentIds { get; set; } = [];
 
+    /// <summary>
+    /// The resolved students WITH display names — the audience reads' source. <see cref="TargetStudent.FullName"/>
+    /// is "{Last}, {First}", the format the panel renders and sorts on.
+    /// </summary>
+    public TargetStudent[] Students { get; set; } = [];
+
     /// <summary>When set, the resolve throws it — the resolver-outage path (TGT-10 / D-6b).</summary>
     public Exception? Throw { get; set; }
 
@@ -35,6 +41,20 @@ internal sealed class FakeAssignmentTargetResolver : IAssignmentTargetResolver
         return Throw is null
             ? Task.FromResult(StudentIds)
             : Task.FromException<Guid[]>(Throw);
+    }
+
+    public Task<TargetStudent[]> ResolveStudentsAsync(
+        IReadOnlyList<TargetConstraint> targets,
+        bool includeAllStudents,
+        CancellationToken cancellationToken = default)
+    {
+        CallCount++;
+        LastConstraints = targets;
+        LastIncludeAllStudents = includeAllStudents;
+
+        return Throw is null
+            ? Task.FromResult(Students)
+            : Task.FromException<TargetStudent[]>(Throw);
     }
 }
 

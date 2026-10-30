@@ -53,19 +53,19 @@ public class GetAssignmentAudiencePreviewHandlerTests
     }
 
     private static GetAssignmentAudiencePreviewHandler Handler(
-        AssignmentsDbContext db, Guid[] cohort, params SubscriberInfo[] subscribers) =>
-        Build(db, cohort, new FakeNotificationPolicyResolver(), subscribers);
+        AssignmentsDbContext db, TargetStudent[] students, params SubscriberInfo[] subscribers) =>
+        Build(db, students, new FakeNotificationPolicyResolver(), subscribers);
 
     private static GetAssignmentAudiencePreviewHandler HandlerWithPolicy(
-        AssignmentsDbContext db, Guid[] cohort, INotificationPolicyResolver policyResolver,
+        AssignmentsDbContext db, TargetStudent[] students, INotificationPolicyResolver policyResolver,
         params SubscriberInfo[] subscribers) =>
-        Build(db, cohort, policyResolver, subscribers);
+        Build(db, students, policyResolver, subscribers);
 
     private static GetAssignmentAudiencePreviewHandler Build(
-        AssignmentsDbContext db, Guid[] cohort, INotificationPolicyResolver policyResolver,
+        AssignmentsDbContext db, TargetStudent[] students, INotificationPolicyResolver policyResolver,
         SubscriberInfo[] subscribers) =>
         new(db,
-            new FakeAssignmentTargetResolver { StudentIds = cohort },
+            new FakeAssignmentTargetResolver { Students = students },
             new FixedSubscriberContactResolver(subscribers),
             policyResolver,
             new FakeAssignmentPolicyResolver(),
@@ -85,12 +85,12 @@ public class GetAssignmentAudiencePreviewHandlerTests
 
         var before = db.AssignmentRecipients.Count();
 
-        var result = await Handler(db, [StudentId],
+        var result = await Handler(db, [new TargetStudent(StudentId, "Okafor, Ngozi")],
             Subscriber(Guid.NewGuid(), ContactChannel.Email, "Okafor, Ngozi"))
             .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 
         var row = result.Rows.Should().ContainSingle().Subject;
-        row.StudentName.Should().Be("Okafor, Ngozi", "the name rides the same batched subscriber read");
+        row.StudentName.Should().Be("Okafor, Ngozi", "the name rides the cohort read");
         row.Reached.Should().BeTrue();
 
         var contact = row.Contacts.Should().ContainSingle().Subject;
@@ -106,19 +106,21 @@ public class GetAssignmentAudiencePreviewHandlerTests
     }
 
     [TestMethod]
-    public async Task AStudentWithNoSubscriber_IsUnreachedAndContactless()
+    public async Task AStudentWithNoSubscriber_IsUnreachedAndContactless_ButStillNamed()
     {
-        var (db, _) = Build(nameof(AStudentWithNoSubscriber_IsUnreachedAndContactless));
+        var (db, _) = Build(nameof(AStudentWithNoSubscriber_IsUnreachedAndContactless_ButStillNamed));
         var assignment = DraftWithGradeTarget("Yeast respiration write-up");
         db.Assignments.Add(assignment);
         await db.SaveChangesAsync();
 
-        var result = await Handler(db, [StudentId]).HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
+        var result = await Handler(db, [new TargetStudent(StudentId, "Okafor, Ngozi")])
+            .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 
         var row = result.Rows.Should().ContainSingle().Subject;
         row.Reached.Should().BeFalse("AC7 — a student with no subscriber renders Reached = false");
         row.Contacts.Should().BeEmpty();
-        row.StudentName.Should().BeEmpty("no name resolved is empty, never invented");
+        row.StudentName.Should().Be("Okafor, Ngozi",
+            "the name rides the cohort read, so a student with no subscriber is still named");
     }
 
     [TestMethod]
@@ -129,7 +131,7 @@ public class GetAssignmentAudiencePreviewHandlerTests
         db.Assignments.Add(assignment);
         await db.SaveChangesAsync();
 
-        var result = await HandlerWithPolicy(db, [StudentId], new BlockedEmailPolicyResolver(),
+        var result = await HandlerWithPolicy(db, [new TargetStudent(StudentId, "Okafor, Ngozi")], new BlockedEmailPolicyResolver(),
             Subscriber(Guid.NewGuid(), ContactChannel.Email, "Okafor, Ngozi"))
             .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 
@@ -156,7 +158,7 @@ public class GetAssignmentAudiencePreviewHandlerTests
         db.Assignments.Add(assignment);
         await db.SaveChangesAsync();
 
-        var result = await HandlerWithPolicy(db, [StudentId], new ThrowingPolicyResolver(),
+        var result = await HandlerWithPolicy(db, [new TargetStudent(StudentId, "Okafor, Ngozi")], new ThrowingPolicyResolver(),
             Subscriber(Guid.NewGuid(), ContactChannel.Email, "Okafor, Ngozi"))
             .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 
@@ -186,7 +188,8 @@ public class GetAssignmentAudiencePreviewHandlerTests
         db.Assignments.Add(assignment);
         await db.SaveChangesAsync();
 
-        var result = await Handler(db, [StudentId]).HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
+        var result = await Handler(db, [new TargetStudent(StudentId, "Okafor, Ngozi")])
+            .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 
         result.Rows.Should().BeEmpty("nothing is targeted, so nothing resolves");
         result.Degraded.Should().BeFalse();

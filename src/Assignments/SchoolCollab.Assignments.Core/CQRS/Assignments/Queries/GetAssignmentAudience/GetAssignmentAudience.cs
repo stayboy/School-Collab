@@ -6,7 +6,6 @@ using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.CQRS;
-using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAudience;
 
@@ -26,14 +25,16 @@ public sealed record GetAssignmentAudience(Guid AssignmentId) : IQuery<Assignmen
 /// supplies <i>opened</i> only: the two are read side by side and the log never overwrites the
 /// recipient's own opened stamp, nor the reverse. A recipient with no publish log row answers
 /// <see cref="AudienceDeliveryStateDto.Unknown"/>, never a fabricated <c>Sent</c>.</para>
-/// <para><b>Degradation is split, never collapsed.</b> A directory (name) failure leaves the rows
-/// intact with an empty name and delivery untouched; a log failure leaves the roster and the
-/// contacts intact with <see cref="AudienceDeliveryStateDto.Unknown"/>. Neither empties the panel.</para>
+/// <para><b>Names come from the cohort read, not from the contacts.</b> The target resolver returns
+/// id <i>and</i> display name in one round-trip, so a student with no subscribed guardian contact
+/// still carries their name — those are exactly the rows a teacher has to chase. A failed resolver
+/// read degrades to the persisted recipient cohort with empty names and
+/// <c>Degraded = true</c>, leaving every row and every delivery state intact; a log failure
+/// degrades delivery only, never the roster.</para>
 /// </remarks>
 public sealed class GetAssignmentAudienceHandler(
     AssignmentsDbContext db,
     IAssignmentTargetResolver targetResolver,
-    IContactResolver contactResolver,
     ILogger<GetAssignmentAudienceHandler> logger)
     : IQueryHandler<GetAssignmentAudience, AssignmentAudienceDto>
 {
@@ -58,9 +59,7 @@ public sealed class GetAssignmentAudienceHandler(
             .Where(r => r.WardStudentId.HasValue)
             .ToLookup(r => r.WardStudentId!.Value);
 
-        var (cohort, cohortDegraded) = await ResolveCohortAsync(assignment, recipientsByStudent, cancellationToken);
-        var (names, namesDegraded) = await ResolveStudentNamesAsync(assignment, cohort, cancellationToken);
-        var degraded = cohortDegraded || namesDegraded;
+        var (cohort, degraded) = await ResolveCohortAsync(assignment, recipientsByStudent, cancellationToken);
 
         // A log read failure degrades DELIVERY only: the rows keep their roster and contacts.
         IReadOnlyDictionary<Guid, NotificationLog>? publishLogs;
@@ -82,23 +81,23 @@ public sealed class GetAssignmentAudienceHandler(
         }
 
         var ordered = cohort
-            .OrderBy(studentId => names.TryGetValue(studentId, out var name) ? name : string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(studentId => studentId)
+            .OrderBy(student => student.FullName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(student => student.Id)
             .ToArray();
 
         var rows = ordered
             .Take(AudienceLimits.AudienceCap)
-            .Select(studentId =>
+            .Select(student =>
             {
-                var contacts = recipientsByStudent[studentId]
+                var contacts = recipientsByStudent[student.Id]
                     .OrderBy(recipient => (int)recipient.Channel)
                     .ThenBy(recipient => (int)recipient.OwnerType)
                     .Select(recipient => ProjectContact(recipient, publishLogs))
                     .ToList();
 
                 return new AudienceStudentDto(
-                    studentId,
-                    names.TryGetValue(studentId, out var name) ? name : string.Empty,
+                    student.Id,
+                    student.FullName,
                     contacts.Exists(contact => contact.SubscriptionActive),
                     contacts);
             })
@@ -108,11 +107,12 @@ public sealed class GetAssignmentAudienceHandler(
     }
 
     /// <summary>
-    /// The student cohort, from the same resolver publish uses. A resolver failure degrades to the
-    /// persisted recipients' wards — the cohort that really was published — rather than an empty
-    /// list, because those rows are exactly what the caller came to read.
+    /// The student cohort and its display names, from the same resolver publish uses. A resolver
+    /// failure degrades to the persisted recipients' wards — the cohort that really was published,
+    /// without names — rather than an empty list, because those rows are exactly what the caller
+    /// came to read.
     /// </summary>
-    private async Task<(Guid[] Cohort, bool Degraded)> ResolveCohortAsync(
+    private async Task<(TargetStudent[] Cohort, bool Degraded)> ResolveCohortAsync(
         Assignment assignment,
         ILookup<Guid, AssignmentRecipient> recipientsByStudent,
         CancellationToken cancellationToken)
@@ -125,7 +125,7 @@ public sealed class GetAssignmentAudienceHandler(
 
         try
         {
-            var resolved = await targetResolver.ResolveStudentIdsAsync(
+            var resolved = await targetResolver.ResolveStudentsAsync(
                 targets.Select(target => new TargetConstraint(target.Kind, target.RefId)).ToArray(),
                 targets.Any(target => target.Kind == TargetKind.AllStudents),
                 cancellationToken);
@@ -138,75 +138,12 @@ public sealed class GetAssignmentAudienceHandler(
         catch (Exception ex)
         {
             logger.LogWarning(ex,
-                "Target resolution failed for assignment {AssignmentId}; falling back to the persisted recipient cohort",
+                "Target resolution failed for assignment {AssignmentId}; falling back to the persisted recipient cohort, without names",
                 assignment.Id);
-            return (recipientsByStudent.Select(group => group.Key).ToArray(), true);
+            return (recipientsByStudent
+                .Select(group => new TargetStudent(group.Key, string.Empty))
+                .ToArray(), true);
         }
-    }
-
-    /// <summary>
-    /// Student display names from the ONE batched subscriber read the publish path already uses
-    /// (spec §4.2: no per-student directory hop). A failure degrades the NAMES only: the rows keep
-    /// their cohort and their delivery state.
-    /// </summary>
-    /// <remarks>
-    /// <para><b>Degraded means a TOTAL name loss, not a missing one.</b> The names come from the batched
-    /// <c>contacts/subscribed</c> read, so a student with no subscribed guardian contact produces no row
-    /// there and therefore no name — an ordinary tenant, not evidence of a failure. Only a cohort that
-    /// resolves <i>no</i> non-blank name at all degrades the read (the signature the production
-    /// <c>StudentsContactResolver</c> leaves when it swallows a per-owner <see cref="HttpRequestException"/>:
-    /// a SUCCESSFUL read carrying nothing). One resolved name anywhere is enough to call the directory
-    /// healthy. An empty cohort is not degraded; a read that throws still is.</para>
-    /// <para><b>Known limit.</b> A partial outage is indistinguishable from students who have no contact,
-    /// so it is not reported — the names need their own agreed source, never a second hop from here.</para>
-    /// </remarks>
-    private async Task<(IReadOnlyDictionary<Guid, string> Names, bool Degraded)> ResolveStudentNamesAsync(
-        Assignment assignment,
-        Guid[] cohort,
-        CancellationToken cancellationToken)
-    {
-        var names = new Dictionary<Guid, string>();
-        if (cohort.Length == 0)
-        {
-            return (names, false);
-        }
-
-        try
-        {
-            var subscribers = await contactResolver.ResolveSubscribersAsync(
-                new ResolveSubscribersRequest(
-                    db.CurrentTenantId,
-                    SubscriptionScope.AllAssignments,
-                    AssignmentPolicyScope.GradeTargetIds(assignment),
-                    cohort,
-                    assignment.TopicId),
-                cancellationToken);
-
-            foreach (var group in subscribers.Where(subscriber => subscriber.StudentId.HasValue).GroupBy(s => s.StudentId!.Value))
-            {
-                names[group.Key] = group
-                    .Select(subscriber => subscriber.StudentName)
-                    .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty;
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "Student directory read failed for assignment {AssignmentId}; the audience rows keep an empty name",
-                assignment.Id);
-            return (names, true);
-        }
-
-        // Total loss only: a cohort without a single resolved name. Partial absence is the normal shape
-        // of a tenant whose students simply have no subscribed contact.
-        var namesDegraded = cohort.All(studentId =>
-            !names.TryGetValue(studentId, out var resolvedName) || string.IsNullOrWhiteSpace(resolvedName));
-
-        return (names, namesDegraded);
     }
 
     /// <summary>

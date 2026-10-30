@@ -10,6 +10,13 @@ namespace SchoolCollab.Assignments.Core.Services;
 public sealed record TargetConstraint(TargetKind Kind, Guid? RefId);
 
 /// <summary>
+/// One resolved target student with the display name the audience reads render.
+/// <see cref="FullName"/> is <c>"{LastName}, {FirstName}"</c> — comma, surname first: the format the
+/// audience panel already renders and the one its name sort assumes.
+/// </summary>
+public sealed record TargetStudent(Guid Id, string FullName);
+
+/// <summary>
 /// Cross-bounded-context port (Assignments → Students) that resolves the student-id union of
 /// an assignment's authored targeting constraints (TGT-3…TGT-9). The interface lives in
 /// <c>Assignments.Core</c>; the HTTP client implementation lives in <c>Assignments.Api</c>
@@ -30,6 +37,18 @@ public interface IAssignmentTargetResolver
     /// <see langword="false"/> short-circuits to an empty array without a round-trip.
     /// </summary>
     Task<Guid[]> ResolveStudentIdsAsync(
+        IReadOnlyList<TargetConstraint> targets,
+        bool includeAllStudents,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the deduped union of student ids matching <paramref name="targets"/> together with
+    /// each student's display name — one round-trip for both, so a student with no subscribed
+    /// contact still carries a name. Same short-circuit and failure posture as
+    /// <see cref="ResolveStudentIdsAsync"/>; the names ride the <c>withNames=true</c> shape of the
+    /// same Students route.
+    /// </summary>
+    Task<TargetStudent[]> ResolveStudentsAsync(
         IReadOnlyList<TargetConstraint> targets,
         bool includeAllStudents,
         CancellationToken cancellationToken = default);
