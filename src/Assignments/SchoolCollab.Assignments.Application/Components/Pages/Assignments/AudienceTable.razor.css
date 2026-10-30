@@ -1,0 +1,98 @@
+/*
+    The audience table's own styles (spec §4.2 Q130/Q152, §4.8; round plan P7).
+
+    A panel-internal four-column table, NOT an `EntityGrid` layout (§4.10): no selection, no chips,
+    no landing chrome — it carries a `PaginationState` and a `FluentPaginator` directly. Token colours
+    only, each with its light fallback (§3 of panel-layout-pattern.md).
+*/
+
+.audience-rows-per-page {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.audience-rows-per-page__label {
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.8125rem;
+    white-space: nowrap;
+}
+
+.audience-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+/* The header rule and the hairline between row groups are the only rules the table draws: the table
+   is a list inside a panel, not a second box (panel-layout-pattern §3: never nest a box in a box). */
+.audience-table thead th {
+    padding: 4px 8px 6px;
+    border-bottom: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.audience-table tbody td {
+    padding: 6px 8px;
+    vertical-align: top;
+}
+
+.audience-row + .audience-row-group-start td {
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+}
+
+/* R6: an unreached row is visually distinct — the set is name-ordered in round (a) and has no filter;
+   the reader's eye is what separates the students who will not be notified. The distinction is
+   reinforced by the verdict text, never by colour alone. */
+.audience-row--unreached td {
+    color: var(--neutral-foreground-hint, #616161);
+    background: var(--status-neutral-bg, #f0f0f0);
+}
+
+.audience-table__student {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.audience-table__guardians,
+.audience-table__channel {
+    white-space: nowrap;
+}
+
+.audience-table__detail {
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* R5: the pager and the cap notice SHARE the footer — the cap is stated where the pager is, so a page
+   can never be read as the whole cohort. */
+.audience-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+}
+
+.audience-footer__range {
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.8125rem;
+}
+
+.muted-note {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.875rem;
+}
+
+.spinner-container {
+    display: flex;
+    justify-content: center;
+    padding: 24px 0;
+}

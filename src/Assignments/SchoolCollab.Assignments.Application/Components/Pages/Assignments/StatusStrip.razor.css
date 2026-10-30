@@ -1,0 +1,96 @@
+/*
+    The Status panel's own styles (spec §4.8 Q155; round plan P8, R3).
+
+    ONE panel, THREE segments divided by coloured vertical rules drawn from the `--status-*` tokens —
+    three separate panels would each cost a header, a border and a gap, and a stack of three short
+    panels reads as one fact cut into three. Tokens only, each with its light fallback (§3 of
+    panel-layout-pattern.md).
+*/
+
+.status-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+}
+
+.status-strip__segment {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 16px;
+    min-width: 0;
+}
+
+/* The first segment leads with no rule; every other segment is separated by a coloured rule naming
+   the colour of the state it reports (info / success / warning, §4.8). */
+.status-strip__segment:first-child {
+    padding-left: 0;
+}
+
+.status-strip__segment + .status-strip__segment {
+    border-left: 3px solid var(--status-neutral-dot, #8a8a8a);
+}
+
+.status-strip__segment--signoff {
+    border-left-color: var(--status-success-dot, #107c41);
+}
+
+.status-strip__segment--notifications {
+    border-left-color: var(--status-warning-dot, #b8760a);
+}
+
+.status-strip__label {
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.status-strip__line {
+    margin: 0;
+    font-size: 0.8125rem;
+}
+
+.status-strip__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin: 12px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+    min-height: 24px;
+}
+
+.status-strip__reason {
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.8125rem;
+    font-style: italic;
+}
+
+/* The three segments stack on a narrow panel rather than squeezing one line of counts into a third
+   of the width. The rule becomes the separator in the stacked direction too. */
+@container region-grid-host (max-width: 720px) {
+    .status-strip {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .status-strip__segment {
+        padding: 8px 0;
+    }
+
+    .status-strip__segment + .status-strip__segment {
+        padding-left: 0;
+        border-left: none;
+        border-top: 3px solid var(--status-neutral-dot, #8a8a8a);
+    }
+
+    .status-strip__segment--signoff {
+        border-top-color: var(--status-success-dot, #107c41);
+    }
+
+    .status-strip__segment--notifications {
+        border-top-color: var(--status-warning-dot, #b8760a);
+    }
+}

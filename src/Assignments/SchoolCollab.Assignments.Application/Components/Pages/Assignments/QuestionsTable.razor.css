@@ -1,0 +1,89 @@
+/*
+    The Questions table's own styles (spec §4.8; round plan P7/R7).
+
+    The same shape `AudienceTable` established — a panel-internal table with the rows-per-page control
+    in the header and the range plus the pager in the footer — so the two growing grids on this page
+    read as one pattern. Token colours only, each with its light fallback (§3 of
+    panel-layout-pattern.md). CSS isolation keeps these class names local to this component, which is
+    why the labels are not shared with the audience table's file.
+*/
+
+.questions-rows-per-page {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.questions-rows-per-page__label {
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.8125rem;
+    white-space: nowrap;
+}
+
+.questions-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+/* The header rule is the only rule above the body: this is a list inside a panel, not a second box
+   (§3: never nest a box in a box). */
+.questions-table thead th {
+    padding: 4px 8px 6px;
+    border-bottom: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.questions-table tbody td {
+    padding: 6px 8px;
+    vertical-align: top;
+}
+
+.questions-row + .questions-row td {
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+}
+
+/* The authored order is the row's own fact, so the number is read as data, not as decoration. */
+.questions-table__number {
+    color: var(--neutral-foreground-hint, #616161);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.questions-table__type {
+    white-space: nowrap;
+}
+
+.questions-table__options {
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* R5: the range and the pager share the footer, so "which rows am I looking at" is stated where the
+   control that changes it sits. */
+.questions-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e1e1e1);
+}
+
+.questions-footer__range {
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.8125rem;
+}
+
+/* The two non-table states: an empty set and an unavailable read. Both are one short sentence —
+   never an empty box the reader has to interpret. */
+.questions-note {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.875rem;
+}

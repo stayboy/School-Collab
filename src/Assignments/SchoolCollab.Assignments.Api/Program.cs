@@ -72,6 +72,10 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // a converter that exists only in a test host hides the live 400 from every unit test.
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<NotificationKind>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<NotificationChannel>());
+    // Round assignment-view-page (spec §4.2): the audience read's delivery state travels as its name
+    // ("Sent"/"Failed"/"Unknown"/…) — the same ar-15/ar-18 rule as every sibling: registered on the
+    // REAL host options block AND in the client's read options, so neither side hides the other's gap.
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<AudienceDeliveryStateDto>());
 });
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")

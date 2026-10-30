@@ -1,0 +1,118 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+
+@*
+    The Status panel (spec §4.8 Q155; round plan P8, R3): ONE panel, three segments — Progress ·
+    Guardian sign-off · Notifications — divided by coloured rules drawn from the `--status-*` tokens.
+    Three separate panels would each cost their own header, border and gap and would read as one fact
+    cut into three; as segments they cost one header and read in a single glance.
+
+    R3 — it renders on a DRAFT too, one shape in both states: `Not published yet` / `Not requested` /
+    `Nothing sent`, with one reason line beneath. Hiding it until publish would hide the panel a
+    reader needs BEFORE publishing.
+
+    P8 — the Progress segment's `Open progress` affordance renders DISABLED with its reason until the
+    progress page ships (round b). The page must never carry a link that 404s.
+*@
+<PanelSection Id="assignment-status" Title="Status" TitleId="assignment-status-title" ShowBorder="false">
+    <ChildContent>
+        <div class="status-strip" id="assignment-status-strip">
+
+            <div class="status-strip__segment status-strip__segment--progress" id="assignment-status-progress">
+                <div class="status-strip__label">Progress</div>
+                @if (Model.IsPublished)
+                {
+                    <p class="status-strip__line">Cohort @Model.Cohort</p>
+                    <p class="status-strip__line">Submitted @Model.Submitted · Graded @Model.Graded</p>
+                    <p class="status-strip__line">Reached @Model.Reached</p>
+                }
+                else
+                {
+                    <p class="status-strip__line">Not published yet</p>
+                    <p class="status-strip__line">—</p>
+                    <p class="status-strip__line">—</p>
+                }
+            </div>
+
+            <div class="status-strip__segment status-strip__segment--signoff" id="assignment-status-signoff">
+                <div class="status-strip__label">Guardian sign-off</div>
+                @if (!Model.SignOffRequested)
+                {
+                    <p class="status-strip__line">Not requested</p>
+                    <p class="status-strip__line">Outstanding —</p>
+                }
+                else
+                {
+                    <p class="status-strip__line">Signed @Model.Signed</p>
+                    <p class="status-strip__line">Outstanding @Model.Outstanding</p>
+                }
+            </div>
+
+            <div class="status-strip__segment status-strip__segment--notifications" id="assignment-status-notifications">
+                <div class="status-strip__label">Notifications</div>
+                @if (Model.IsPublished)
+                {
+                    <p class="status-strip__line">Queued @Model.Queued · Sent @Model.Sent</p>
+                    <p class="status-strip__line">Failed @Model.Failed · Skipped @Model.Skipped</p>
+                    <p class="status-strip__line">Retry scheduled @Model.RetryScheduled</p>
+                }
+                else
+                {
+                    <p class="status-strip__line">Nothing sent</p>
+                    <p class="status-strip__line">Queued 0</p>
+                    <p class="status-strip__line">Failed 0 · Skipped 0</p>
+                }
+            </div>
+        </div>
+
+        <p class="status-strip__foot" id="assignment-status-foot">
+            @if (Model.IsPublished)
+            {
+                <FluentButton Appearance="ButtonAppearance.Outline"
+                              Disabled="true"
+                              Title="@ProgressReason">Open progress</FluentButton>
+                <span class="status-strip__reason" id="assignment-status-progress-reason">@ProgressReason</span>
+            }
+            else
+            {
+                <span class="status-strip__reason" id="assignment-status-draft-reason">
+                    Delivery, sign-off and progress all start at publish.
+                </span>
+            }
+        </p>
+    </ChildContent>
+</PanelSection>
+
+@code {
+    /// <summary>The Progress affordance's reason — the one route this page cannot reach yet (P8).</summary>
+    private const string ProgressReason = "Progress page arrives with the submission queue";
+
+    /// <summary>The counts this panel draws. The page owns the reads; the panel owns one shape in
+    /// both states (R3), so every segment simply states its numbers.</summary>
+    [Parameter, EditorRequired] public StatusStripModel Model { get; set; } = default!;
+
+    /// <summary>
+    /// The Status panel's three segments.
+    /// <para><see cref="IsPublished"/> is "has ever been published" — the same test the audience read
+    /// uses — so an unpublished assignment keeps the draft wording while its log history survives.</para>
+    /// <para><see cref="Signed"/> / <see cref="Outstanding"/> are null when the assignment does not
+    /// request a signature, which is what makes the segment read `Not requested`.</para>
+    /// </summary>
+    public sealed record StatusStripModel(
+        bool IsPublished,
+        int Cohort,
+        int Submitted,
+        int Graded,
+        int Reached,
+        int? Signed,
+        int? Outstanding,
+        int Queued,
+        int Sent,
+        int Failed,
+        int Skipped,
+        int RetryScheduled)
+    {
+        /// <summary>Whether a guardian signature was ever requested for this assignment.</summary>
+        public bool SignOffRequested => Signed is not null;
+    }
+}

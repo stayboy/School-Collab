@@ -313,7 +313,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
         Guid[]? linkedGroupIds = null,
         bool childrenReadFails = false,
         TimeProvider? timeProvider = null,
-        bool enterEditFields = true)
+        bool enterEditFields = true,
+        bool embedded = false)
     {
         if (dto is not null)
             SetupAssignment(dto, children, linkedGroupIds, childrenReadFails);
@@ -322,6 +323,9 @@ public class AssignmentAuthoringBunitTests : BunitContext
             parameters.Add(p => p.Mode, mode);
             if (dto is not null) parameters.Add(p => p.Id, dto.Id);
             if (timeProvider is not null) parameters.Add(p => p.TimeProvider, timeProvider);
+            // R7/D2: the embeddable mode is additive and defaults false — every existing caller of
+            // this helper renders exactly what it rendered before.
+            if (embedded) parameters.Add(p => p.Embedded, true);
         });
 
         if (enterEditFields)
@@ -639,6 +643,65 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "Questions & AI always renders");
             cut.FindAll("#authoring-targets").Count.Should().Be(1,
                 "the Targets accordion always renders");
+        });
+    }
+
+    /// <summary>R7/D2 (round <c>assignment-view-page</c>): <c>Embedded</c> hands a host page the
+    /// summary BODY — the facts and the notes — and nothing else. The shell's chrome, the card's own
+    /// header, the Questions block and the Targets accordion are all the host page's business, so a
+    /// second copy of any of them is exactly the duplicate this mode exists to remove.</summary>
+    [TestMethod]
+    public void View_Embedded_RendersFactsAndNotes_WithoutChromeHeaderQuestionsOrTargets()
+    {
+        var cut = RenderAuthoring(
+            AssignmentAuthoringMode.View,
+            MakeDto(AssignmentStatusDto.Published, instructions: "Read pages 4-6."),
+            enterEditFields: false,
+            embedded: true);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("dl.authoring-summary__facts").Should().ContainSingle(
+                "the facts read-out is the body");
+            cut.Find("#authoring-basics-instructions").Should().NotBeNull(
+                "and the notes are the rest of it — this is the only body the embeddable mode yields");
+
+            cut.FindAll("#authoring-summary").Should().ContainSingle(
+                "the card stays the body's container");
+            cut.FindAll("#authoring-summary .authoring-summary__header").Should().BeEmpty(
+                "no second <h3>, badge, back or pencil beside the page's own heading");
+            cut.FindAll("h3.authoring-summary__title").Should().BeEmpty();
+            cut.FindAll("#authoring-summary-edit").Should().BeEmpty();
+
+            cut.FindAll("#authoring-breadcrumb").Should().BeEmpty("the shell's trail is suppressed");
+            cut.FindAll(".authoring-actionbar").Should().BeEmpty("and so is its action bar");
+            cut.FindAll("#authoring-questions").Should().BeEmpty(
+                "P6/R7 — the page owns Questions, so no duplicate block");
+            cut.FindAll("#authoring-targets").Should().BeEmpty(
+                "and the page owns Targets & Audience");
+        });
+    }
+
+    /// <summary>R7/D2's guard: <c>Embedded</c> is honoured only in View. An Edit surface keeps its
+    /// header and its chrome however the host sets the flag — the alternative is a silent loss of the
+    /// primary action and the pencil.</summary>
+    [TestMethod]
+    public void Edit_Embedded_StillRendersTheChromeAndTheSummaryHeader()
+    {
+        var cut = RenderAuthoring(
+            AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft),
+            enterEditFields: false,
+            embedded: true);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("#authoring-breadcrumb").Should().ContainSingle(
+                "Mode != View ignores Embedded — Edit keeps the shell");
+            cut.FindAll(".authoring-actionbar").Should().ContainSingle();
+            cut.FindAll("#authoring-summary .authoring-summary__header").Should().ContainSingle(
+                "and the card keeps its own header, pencil included");
+            cut.FindAll("#authoring-summary-edit").Should().ContainSingle();
         });
     }
 

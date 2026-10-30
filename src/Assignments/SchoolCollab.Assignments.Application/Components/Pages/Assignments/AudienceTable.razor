@@ -1,0 +1,310 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Assignments.Application.Helpers
+@using SchoolCollab.Assignments.Contracts
+
+@*
+    The audience table (spec §4.2 Q130/Q145/Q146, §4.8; round plan P7) — ONE column set in both
+    states: "Delivery" on an assignment that has been published (the notification log answers) and
+    "Targets & Audience" on a draft (the publish-time policy filter answers). The student is the row
+    group and each of its contacts is one line beneath it.
+
+    NO CONTACT VALUE IS RENDERED, because none exists in the payload (spec §4.9 / Q154): the table
+    shows owner type, channel, role and delivery only.
+
+    Paging (Q156/Q162, R5): the rows-per-page control sits in the PANEL HEADER, the pager and the cap
+    notice share the FOOTER, and a set that fits on one page renders neither (the `Questions` table's
+    8 rows are the named case). The read itself is capped at `AudienceLimits.AudienceCap`, and the
+    footer states the cap where the pager is so a page can never be read as the whole cohort.
+*@
+<PanelSection Id="assignment-audience"
+              Title="@PanelTitle"
+              TitleId="assignment-audience-title"
+              ShowBorder="false"
+              Count="@Model?.Rows.Count">
+    <HeaderActions>
+        @* Owner Q162: no rows-per-page selector when there is only one page — the control would
+           offer a choice that changes nothing. *@
+        @if (ShowPagerWhenItFits)
+        {
+            <span class="audience-rows-per-page" id="assignment-audience-rows-per-page">
+                <DropdownComponent TItem="int" TValue="int?"
+                                   Items="@PageSizes"
+                                   @bind-SelectedValue="_pageSize"
+                                   @bind-SelectedValue:after="OnPageSizeChanged"
+                                   OptionText="@(size => size.ToString())"
+                                   OptionValue="@(size => (int?)size)"
+                                   AriaLabel="Rows per page"
+                                   Width="FieldWidth.W3" />
+                <span class="audience-rows-per-page__label">rows per page</span>
+            </span>
+        }
+    </HeaderActions>
+
+    <ChildContent>
+        @if (Model is null && LoadFailed)
+        {
+            @* A hard read failure is a STATE, not an absent one: the sibling rail panels each carry
+               their own `#…-unavailable` sentence, and a bare spinner would spin forever here. *@
+            <p class="muted-note" id="assignment-audience-unavailable">The audience could not be loaded.</p>
+        }
+        else if (Model is null)
+        {
+            <div class="spinner-container">
+                <FluentSpinner />
+            </div>
+        }
+        else if (Model.Rows.Count == 0 && Model.Degraded)
+        {
+            @* An empty audience that DEGRADED is not "no students": the read failed, and saying
+               otherwise is the silent empty list this panel exists to avoid (plan P2). *@
+            <p class="muted-note" id="assignment-audience-unresolved">
+                The audience could not be resolved. Reload the page to try again.
+            </p>
+        }
+        else if (Model.Rows.Count == 0)
+        {
+            <p class="muted-note" id="assignment-audience-empty">@EmptyMessage</p>
+        }
+        else
+        {
+            @* Split degradation, stated as the two different outages it is (plan P2): a blank name
+               is the directory read failing, `Unknown` is the log read failing. Neither is reported as
+               the other, and neither empties this table. *@
+            @if (Model.Degraded)
+            {
+                <p class="muted-note" id="assignment-audience-degraded">
+                    Some rows could not be fully resolved — a blank student name means the directory read
+                    failed, and <strong>Unknown</strong> means the delivery log could not be read.
+                </p>
+            }
+
+            <table class="audience-table" id="assignment-audience-table">
+                <thead>
+                    <tr>
+                        <th class="audience-table__student">Student</th>
+                        <th class="audience-table__guardians">Guardians</th>
+                        <th class="audience-table__channel">Chan.</th>
+                        <th class="audience-table__verdict">@VerdictHeader</th>
+                        <th class="audience-table__detail">Detail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in PageRows)
+                    {
+                        @if (row.Contacts.Count == 0)
+                        {
+                            @* AC2: a student with no subscribed contact is a VISIBLE row — it is what
+                               the old per-recipient table could never show. *@
+                            <tr class="audience-row audience-row--unreached audience-row-group-start" @key="row.StudentId">
+                                <td class="audience-table__student">@StudentLabel(row)</td>
+                                <td class="audience-table__guardians">none</td>
+                                <td class="audience-table__channel">—</td>
+                                <td class="audience-table__verdict">@ContactlessVerdict</td>
+                                <td class="audience-table__detail">no subscribed contact</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            for (var index = 0; index < row.Contacts.Count; index++)
+                            {
+                                var contact = row.Contacts[index];
+                                <tr class="audience-row@(index == 0 ? " audience-row-group-start" : null)" @key="@($"{row.StudentId}:{index}")">
+                                    @if (index == 0)
+                                    {
+                                        <td class="audience-table__student" rowspan="@row.Contacts.Count">@StudentLabel(row)</td>
+                                        <td class="audience-table__guardians" rowspan="@row.Contacts.Count">@GuardianSummary(row)</td>
+                                    }
+                                    <td class="audience-table__channel">@EnumHelper.GetDescription(contact.Channel)</td>
+                                    <td class="audience-table__verdict">@Verdict(contact)</td>
+                                    <td class="audience-table__detail">@DetailFor(contact)</td>
+                                </tr>
+                            }
+                        }
+                    }
+                </tbody>
+            </table>
+
+            <div class="audience-footer" id="assignment-audience-footer">
+                <span class="audience-footer__range" id="assignment-audience-range">@RangeText</span>
+                @if (ShowPagerWhenItFits)
+                {
+                    <FluentPaginator State="@_paginationState" />
+                }
+            </div>
+        }
+    </ChildContent>
+</PanelSection>
+
+@code {
+    /// <summary>The rows-per-page choices the two growing grids offer (Q156).</summary>
+    private static readonly IReadOnlyList<int> PageSizes = [15, 25, 50];
+
+    private const int DefaultPageSize = 15;
+
+    private readonly PaginationState _paginationState = new() { ItemsPerPage = DefaultPageSize };
+
+    /// <summary>`int?` because the wrapper's two-way binding is over the nullable key.</summary>
+    private int? _pageSize = DefaultPageSize;
+
+    /// <summary>The audience read's result; null while the page is still loading it.</summary>
+    [Parameter] public AssignmentAudienceDto? Model { get; set; }
+
+    /// <summary>
+    /// True when the page's audience read threw. Distinguishes "still loading" from "failed", which
+    /// <see cref="Model"/> alone cannot: both leave it null, and only one of them is worth spinning on.
+    /// </summary>
+    [Parameter] public bool LoadFailed { get; set; }
+
+    /// <summary>
+    /// True while the assignment has never been published: the panel is titled
+    /// <c>Targets &amp; Audience</c>, its verdict column reads <c>At publish</c>, and the rows come
+    /// from the draft preview read (Q152).
+    /// </summary>
+    [Parameter] public bool IsDraft { get; set; }
+
+    private int EffectivePageSize => _pageSize ?? DefaultPageSize;
+
+    private string PanelTitle => IsDraft ? "Targets & Audience" : "Delivery";
+
+    private string VerdictHeader => IsDraft ? "At publish" : "Delivery";
+
+    private string EmptyMessage => IsDraft
+        ? "No students resolve for this assignment's targets yet."
+        : "No students resolve for this assignment's targets.";
+
+    private string ContactlessVerdict => IsDraft ? "No contact" : "Not reached";
+
+    /// <summary>The pager is DERIVED from the row count, never chosen by the caller: a set that fits
+    /// on one page renders no pager and no rows-per-page control (Q162).</summary>
+    private bool ShowPagerWhenItFits =>
+        Model is { Rows.Count: > 0 } model && model.Rows.Count > EffectivePageSize;
+
+    private IEnumerable<AudienceStudentDto> PageRows
+    {
+        get
+        {
+            if (Model is null)
+            {
+                return [];
+            }
+
+            var pageIndex = Math.Min(_paginationState.CurrentPageIndex, LastPageIndex(Model.Rows.Count));
+            return Model.Rows.Skip(pageIndex * EffectivePageSize).Take(EffectivePageSize);
+        }
+    }
+
+    private string RangeText
+    {
+        get
+        {
+            if (Model is not { Rows.Count: > 0 } model)
+            {
+                return "No rows";
+            }
+
+            var pageIndex = Math.Min(_paginationState.CurrentPageIndex, LastPageIndex(model.Rows.Count));
+            var first = (pageIndex * EffectivePageSize) + 1;
+            var last = Math.Min(first + EffectivePageSize - 1, model.Rows.Count);
+            var capped = model.Truncated ? " (capped)" : string.Empty;
+            var reached = model.Rows.Where(row => row.Reached).Count();
+            var outcome = IsDraft ? $"{reached} will notify" : $"{reached} reached";
+
+            return $"Showing {first}–{last} of {model.Rows.Count}{capped} · {outcome}";
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        var total = Model?.Rows.Count ?? 0;
+
+        if (_paginationState.ItemsPerPage != EffectivePageSize)
+        {
+            _paginationState.ItemsPerPage = EffectivePageSize;
+        }
+
+        _ = _paginationState.SetTotalItemCountAsync(total);
+
+        var lastPageIndex = LastPageIndex(total);
+        if (_paginationState.CurrentPageIndex > lastPageIndex)
+        {
+            _ = _paginationState.SetCurrentPageIndexAsync(lastPageIndex);
+        }
+    }
+
+    private int LastPageIndex(int totalRows) =>
+        totalRows == 0 ? 0 : (totalRows - 1) / Math.Max(1, EffectivePageSize);
+
+    private void OnPageSizeChanged()
+    {
+        _paginationState.ItemsPerPage = EffectivePageSize;
+        _ = _paginationState.SetCurrentPageIndexAsync(0);
+    }
+
+    private static string StudentLabel(AudienceStudentDto row) =>
+        string.IsNullOrWhiteSpace(row.StudentName) ? "—" : row.StudentName;
+
+    /// <summary>"2 · Primary, CC" — role and COUNT only; guardian names are deliberately absent
+    /// (Q158: this read has no mechanism to authorize naming them, so it does not try).</summary>
+    private static string GuardianSummary(AudienceStudentDto row)
+    {
+        if (row.Contacts.Count == 0)
+        {
+            return "none";
+        }
+
+        var roles = row.Contacts
+            .Where(contact => contact.GuardianRole is not null)
+            .Select(contact => contact.GuardianRole!.Value)
+            .Distinct()
+            .OrderBy(role => role)
+            .Select(role => EnumHelper.GetDescription(role))
+            .ToList();
+
+        return roles.Count == 0
+            ? row.Contacts.Count.ToString()
+            : $"{row.Contacts.Count} · {string.Join(", ", roles)}";
+    }
+
+    private string Verdict(AudienceContactDto contact) => IsDraft
+        ? contact.DeliveryState switch
+        {
+            AudienceDeliveryStateDto.BlockedByPolicy => "Blocked by policy",
+            _ => "Will notify",
+        }
+        : contact.DeliveryState switch
+        {
+            // "Opened" is SENT plus the recipient's own opened stamp — the log owns the state, the
+            // recipient row owns the opened stamp, and neither overwrites the other (Q145).
+            AudienceDeliveryStateDto.Sent when contact.OpenedAt is not null => "Opened",
+            AudienceDeliveryStateDto.Sent => "Sent",
+            AudienceDeliveryStateDto.Queued => "Queued",
+            AudienceDeliveryStateDto.Failed => "Failed",
+            AudienceDeliveryStateDto.Skipped => "Skipped",
+            AudienceDeliveryStateDto.BlockedByPolicy => "Blocked by policy",
+            AudienceDeliveryStateDto.NotPublishingYet => "Not publishing yet",
+            _ => "Unknown",
+        };
+
+    private string DetailFor(AudienceContactDto contact) => IsDraft
+        ? contact.DeliveryState == AudienceDeliveryStateDto.BlockedByPolicy
+            ? "blocked by notification policy"
+            : "resolved at publish"
+        : contact.DeliveryState switch
+        {
+            AudienceDeliveryStateDto.Sent when contact.OpenedAt is not null =>
+                $"sent {Clock(contact.SentAt)} · opened {Clock(contact.OpenedAt)}",
+            AudienceDeliveryStateDto.Sent => $"sent {Clock(contact.SentAt)}",
+            AudienceDeliveryStateDto.Failed => string.IsNullOrWhiteSpace(contact.FailureReason)
+                ? "failed"
+                : $"{contact.FailureReason}{(contact.RetryScheduled ? " · retry scheduled" : string.Empty)}",
+            AudienceDeliveryStateDto.Skipped => string.IsNullOrWhiteSpace(contact.FailureReason)
+                ? "skipped"
+                : contact.FailureReason!,
+            AudienceDeliveryStateDto.Queued => "queued",
+            AudienceDeliveryStateDto.Unknown => "delivery log unavailable",
+            _ => "—",
+        };
+
+    private static string Clock(DateTimeOffset? at) => at?.ToLocalTime().ToString("HH:mm") ?? "—";
+}

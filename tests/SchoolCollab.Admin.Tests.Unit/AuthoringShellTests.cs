@@ -85,4 +85,39 @@ public class AuthoringShellTests : BunitContext
         cut.Find("#shell-leading").Should().NotBeNull();
         cut.Find("#shell-secondary").Should().NotBeNull();
     }
+
+    // ── Embedded (round assignment-view-page, R7/D2) ──────────────────────────────────────
+
+    [TestMethod]
+    public void Default_RendersTheWrapperTheTrailAndTheActionBar()
+    {
+        var cut = Render<AuthoringShell>(p => p
+            .Add(x => x.Crumbs, Trail)
+            .Add(x => x.Title, "Template"));
+
+        cut.FindAll(".authoring-page").Should().ContainSingle("the wrapper is the shell's own frame");
+        cut.Find("#authoring-breadcrumb").Should().NotBeNull();
+        cut.Find(".authoring-actionbar").Should().NotBeNull();
+        cut.Find("h2.authoring-heading").TextContent.Trim().Should().Be("Template");
+    }
+
+    [TestMethod]
+    public void Embedded_RendersTheBodyOnly_NoWrapperNoTrailNoActionBar()
+    {
+        var cut = Render<AuthoringShell>(p => p
+            .Add(x => x.Crumbs, Trail)
+            .Add(x => x.Title, "Template")
+            .Add(x => x.Badge, (RenderFragment)(b => b.AddMarkupContent(0, "<span id=\"shell-badge\">System</span>")))
+            .Add(x => x.PrimaryLabel, "Save")
+            .Add(x => x.Embedded, true)
+            .Add(x => x.ChildContent, (RenderFragment)(b => b.AddMarkupContent(0, "<dl id=\"embedded-body\"></dl>"))));
+
+        cut.Find("#embedded-body").Should().NotBeNull("the body is what an embedding page asks for");
+        cut.FindAll(".authoring-page").Should().BeEmpty("the host page owns the wrapper");
+        cut.FindAll("#authoring-breadcrumb").Should().BeEmpty("no second trail beside the page's own");
+        cut.FindAll(".authoring-actionbar").Should().BeEmpty("no second action bar");
+        cut.FindAll("h2.authoring-heading").Should().BeEmpty("and no second heading");
+        cut.FindAll("#authoring-primary-action").Should().BeEmpty();
+        cut.FindAll("#shell-badge").Should().BeEmpty("the badge rides the suppressed title group");
+    }
 }

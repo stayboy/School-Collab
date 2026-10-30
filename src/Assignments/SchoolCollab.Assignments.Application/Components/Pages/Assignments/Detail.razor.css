@@ -1,20 +1,123 @@
-/* Detail page layout */
-.detail-container {
-    max-width: 800px;
-}
+/*
+    The assignment VIEW page's own styles (spec assignment-detail-view-modernization §4.1/§4.8; round
+    plan P5/P5b).
 
-.title-row {
+    The skeleton itself is NOT here: `.region-grid` / `.region-grid-host` / the main and rail columns,
+    the container-query collapse and `.status-pill` live once in
+    src/SchoolCollab.Admin.Shared/wwwroot/app.css (panel-layout-pattern.md §2, §9). This file only
+    styles the pieces unique to the view page: the fact row under the action bar and the visible
+    reason beside the disabled primary action.
+
+    Token colours only, every one carrying its light fallback (§3: a bare `var(--missing)` invalidates
+    the whole declaration at computed-value time).
+*/
+
+.assignment-facts {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    margin: 4px 0 16px;
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.875rem;
 }
 
-.page-title {
+.assignment-facts__separator {
+    color: var(--neutral-stroke-strong, #c8c8c8);
+}
+
+.assignment-facts__fact {
+    white-space: nowrap;
+}
+
+/* R1: the disabled primary's REASON is read beside it, never hidden in a tooltip — a control the
+   reader cannot use must say why, where they are looking. */
+.assignment-primary-reason {
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.8125rem;
+    font-style: italic;
+}
+
+.spinner-container {
+    display: flex;
+    justify-content: center;
+    padding: 32px 0;
+}
+
+/* ── The rail's Content & Resources rows ──────────────────────────────────────────────────────
+   One row per material: kind icon, name, then the grounding state stacked beneath the name. The
+   two-track grid keeps a wrapping file name from dragging its state line to the middle of the row. */
+.materials-list {
+    list-style: none;
     margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
-/* Form layout (reused from Create/Edit) */
-.form-container {
-    max-width: 600px;
+.materials-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: start;
+}
+
+.materials-row__name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.materials-row__meta {
+    grid-column: 2;
+    font-size: 0.75rem;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* ── The rail's Rules readout ──────────────────────────────────────────────────────────────────
+   A definition list, not a table: seven label/value pairs in a narrow column read better stacked
+   than as two justified tracks. */
+.rules-list {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.rules-row {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.rules-row__label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.rules-row__value {
+    margin: 0;
+    font-size: 0.8125rem;
+}
+
+.rules-row__override {
+    font-size: 0.75rem;
+    font-style: italic;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+/* ── The rail's Approval block ────────────────────────────────────────────────
+   R4: the decisions are BODY buttons. They wrap rather than overflow the rail's narrow track. */
+.approval-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.approval-state {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
 }

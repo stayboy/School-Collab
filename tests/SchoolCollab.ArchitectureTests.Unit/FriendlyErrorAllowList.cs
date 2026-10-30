@@ -35,7 +35,7 @@ internal static class FriendlyErrorAllowList
     /// The number of raw sites recorded when the guard landed (debt-sweep round, 2026-10-27). A site
     /// count above this fails: admitting one means converting one first.
     /// </summary>
-    public const int RecordedEntryCount = 298;
+    public const int RecordedEntryCount = 288;
 
     /// <summary>Every remaining raw <c>Exception.Message</c> site, as <c>file:line</c>.</summary>
     public static readonly string[] Sites =
@@ -52,16 +52,6 @@ internal static class FriendlyErrorAllowList
         "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:3933", // error field assigned the raw message
         "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor:3964", // error field assigned the raw message
 
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:312", // ErrorBoundary content interpolates the raw message
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:401", // error field assigned the raw message
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:494", // error field assigned the raw message
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:531", // error field assigned the raw message
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:570", // error field assigned the raw message
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:611", // error field assigned the raw message
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:641", // error field assigned the raw message
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:665", // error field assigned the raw message
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:697", // error field assigned the raw message
-        "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor:726", // error field assigned the raw message
 
         "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:203", // error field assigned the raw message
         "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:264", // error field assigned the raw message
