@@ -69,6 +69,60 @@ is **wrong for this route**. Spec §5.3 updated from "probe it" to "settled: `no
 **A5 — route.** Recorded above. Local Ollama proxies the cloud tag; a pass run from CI would name
 `ollama.com` directly instead, and the record must say which.
 
+### Probe sitting 2 — permutation stability (Q28): PASS on both payloads
+
+Same claims, **order reversed then interleaved**; nothing else changed.
+
+| Leg | Payload | Stable | Detail |
+|---|---|---|---|
+| Text | the 45,590-byte mock source, 13 claims | **13/13** | every answer identical to the first pass · 1,915 ms · 16,774 in / 0 out |
+| Image | `after-fix.png` **cropped to its right column** (520×420 — 80% of the pixels gone), 5 claims re-ordered | **5/5** | every answer identical · 784 ms · 943 in / 0 out · 18 KB |
+
+Answers survived both a question-order change and the removal of four-fifths of the image, so §6.4's stability
+check is load-bearing and cheap, not decorative. `c08` ("one row per student in the cohort") landed at **0.8943**
+here and **0.8952** in the first pass — the lowest row in both runs.
+
+### Probe sitting 3 — the rendered-DOM leg (Q30–Q31): PASS
+
+**How, without booting the app:** bUnit 2.7.2 (already a dependency of five test projects) rendered the real
+`PeriodUpsert` component through a **temporary test file** — created, run in **3.9 s**, deleted before anything was
+staged. No AppHost, no database, no Keycloak, no lock on build outputs. It produced **45,758 characters** of genuine
+component markup: Blazor scoped-CSS attributes (`b-6hc204vvzg`), FluentUI web-component tags, and two rendered
+date-picker calendar grids.
+
+| id | truth | answer | max prob |
+|---|---|---|---|
+| d01 "Edit period" heading | PRESENT | PRESENT | 0.9736 |
+| d02 "Period name" label | PRESENT | PRESENT | **0.8836** |
+| d03 "Division" label | PRESENT | PRESENT | 0.8983 |
+| d04 "Activation tolerance (days)" label | PRESENT | PRESENT | 0.9637 |
+| d05 "Auto-split into 3" button | PRESENT | PRESENT | 0.9479 |
+| d06 "No sub-periods yet." text | PRESENT | PRESENT | 0.9511 |
+| d07 "Cancel" button | PRESENT | PRESENT | 0.9721 |
+| d08 "Sub-periods" heading | PRESENT | PRESENT | 0.9471 |
+| d09 the immutability hint | PRESENT | PRESENT | 0.9318 |
+| d10 scoped-CSS attributes present | PRESENT | PRESENT | 0.9216 |
+| x11 **control** "Student name" label | ABSENT | ABSENT | 0.9718 |
+| x12 **control** "Sign-off" column | ABSENT | ABSENT | 0.9616 |
+| x13 **control** "Publish" button | ABSENT | ABSENT | 0.8917 |
+
+**13/13 correct · 3/3 controls · 13/13 above threshold · 1,475 ms · 21,285 in / 0 out.**
+
+**Three findings worth carrying:**
+
+1. **Token arithmetic is worse than the byte count suggests.** 45.8 KB of rendered markup = **21,285 tokens =
+   32.5% of the 65,536 cloud cap**, so at most **~3** such captures fit one request. Much of it is markup noise a
+   human would not call content — two date-picker calendar grids, scoped-CSS attributes on every element. A DOM
+   capture must be **pruned to the section of interest**, not dumped whole (§6.5).
+2. **A third independent pass still lands under 0.90.** `d02` at **0.8836** is the lowest row of any pass; `x13`
+   at 0.8917 joins `c08` (0.8943 / 0.8952) and `i02`'s `confidence` below its top probability. The §6.3 refusal of
+   a 0.90 threshold now rests on three payloads, not one.
+3. **The scoring harness is part of the evidence, and it needs its own check.** My first DOM run reported
+   `p=NaN` for all 13 rows because of a missing spread in `Math.max(Object.values(...))` — a bug whose symptom is
+   **indistinguishable from an API that omitted `probabilities`**. The fail-closed comparison (`NaN >= 0.80` is
+   false) meant the bug produced "no rows above threshold" rather than a false pass, which is the right failure
+   direction — but a pass should assert at least one real probability before reporting, exactly as §11 now requires.
+
 ## Review (self-run, Tier 0)
 
 - **Standards.** Scripts are throwaway and out of the tree (`.pi/tmp/`); no production file touched; no
@@ -98,12 +152,12 @@ is **wrong for this route**. Spec §5.3 updated from "probe it" to "settled: `no
 | A5 | Route recorded | local Ollama 0.40.8 → ollama.com | **MET** |
 | A6 | Permutation stability (§6.4) | text 13/13, image 5/5 stable under reorder + crop | **MET** |
 | A7 | Threshold recalibration decided on evidence (Q27) | 0.80 kept; 0.90 refused — `c08` at 0.8943 / 0.8952 | **MET** |
-| A8 | DOM-text pass on a real page (Q26/Q29) | not run — no instance; booting one would lock build outputs | **NOT MET** (recorded, not skipped) |
+| A8 | DOM-text pass on real rendered markup (Q26/Q29/Q30) | bUnit-rendered `PeriodUpsert`, 13/13 + 3/3 controls, 13/13 above threshold | **MET** |
 
-**Verdict: CLOSED for the mechanism, PARKED for adoption.** The seat is real, cheap, stable and
-threshold-sane on both payloads exercised; its **default implementation payload (rendered DOM) is unproven on a
-real page**, so adopting it into two protected files now would spend that review on a half-proven design.
-Adoption resumes with the DOM leg at the parked round's live-render probe.
+**Verdict: CLOSED for the mechanism on all three payloads.** Text (mock source), image (a real page, plus an
+80% crop) and rendered DOM (a real component) each scored perfectly with controls, stable under permutation, all
+above the 0.80 threshold, for about a cent. **Adoption is a separate round**, and by Q33/Q34 it now waits on a
+consumer rather than on evidence: no protected file is touched until a live round needs the seat.
 
 Not accepted here, and not claimed: the seat is **not adopted**. §8's four documents, the protected-file
 reviews and the first real use remain open, per spec §9 Q23–Q29. Spec corrections this round earns: §5.3

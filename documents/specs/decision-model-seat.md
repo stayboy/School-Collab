@@ -235,11 +235,19 @@ These numbers are chosen by judgement, not justified by vendor documentation. Th
 disagrees with one records the disagreement as a deviation in `## Decision passes` rather than
 silently re-tuning them.
 
-**The one recalibration the evidence supports — and it says *do not tighten* (Q27, 2026-10-30).** Two
-independent passes over the mock's 13 claims put every row at **0.8943–0.9690**; the lowest row both times
-was `c08` ("one row per student in the cohort"), at 0.8952 then 0.8943. A **0.90** threshold was considered
-and **refused on that evidence** — it would have rejected a confirmed-correct row. 0.80 stays. This is a
-floor from 19 samples, not a calibration curve: a later pass clustering near 0.85 is the signal to revisit.
+**The one recalibration the evidence supports — and it says *do not tighten* (Q27, 2026-10-30).** Three
+independent passes now straddle the question: the mock source (13 claims, 0.8952–0.9690), a permutation re-run of
+the same (lowest `c08` 0.8943), and a bUnit-rendered component (13 claims, **0.8836–0.9736**). Every one of them
+contains a **confirmed-correct row below 0.90** — `c08` at 0.8943/0.8952 and `d02` at 0.8836. A **0.90**
+threshold was considered and **refused on that evidence**: it would have rejected rows the record proves correct.
+0.80 stays. This is a floor from 45 observations across three payloads, not a calibration curve: a later pass
+clustering near 0.85 is the signal to revisit.
+
+**A missing probability is not a pass (fail closed).** If `probabilities` is absent or non-numeric for a `choice`
+answer, the row is **not answered** — never treated as a pass, never defaulted to the top option. This was learned
+the hard way during the probe: a scoring bug produced `NaN` for every row, and only the fail-closed comparison
+kept it from being reported as a result (`documents/rounds/round-decision-model-spike.md`, Probe sitting 3,
+finding 3).
 
 ### 6.4 Verification without citations (the replacement for re-grep)
 
@@ -278,9 +286,12 @@ Captures are **per section**, not per page: a full DOM dump is the fastest route
 which **rejects** the request rather than trimming it. Capture reuses the repo's existing Playwright harness —
 no new mechanism (repo rule: reuse before new infrastructure).
 
-> **Not yet exercised (2026-10-30).** Text and image payloads are proven; the **rendered-DOM** leg has no
-execution yet — no app instance was available, and booting one for a probe would lock build outputs. It is owed
-at the parked round's live-render probe, and adoption should not complete before it.
+**Measured (2026-10-30).** A bUnit render of one real page (`PeriodUpsert`) produced 45.8 KB of markup =
+**21,285 tokens = 32.5% of the cap**, so at most **~3** such captures fit a single request. Most of that is noise a
+human would not call content (two date-picker calendar grids, a scoped-CSS attribute on every element), so prune
+the capture to the section under judgment. Capturing rendered markup needs **no app boot**: bUnit renders a
+component to markup in ~4 s with no database, no identity provider and no lock on build outputs, which is the cheap
+way to answer structural rendered atoms. Data-dependent atoms still need a live instance.
 
 ### 6.6 Prohibited content
 
@@ -360,7 +371,12 @@ first draft of this spec was written against a chat-model premise that the vendo
 | Q26 | Payload for the implemented side | **Rendered DOM default**; screenshot for visual atoms; source for structural; per-section captures | §6.5 |
 | Q27 | Recalibrate the thresholds | **0.80 kept; 0.90 refused on evidence** — a confirmed-correct row sat at 0.8943 / 0.8952 | §6.3 |
 | Q28 | Run the permutation check before adoption | **Yes — run, and it passed** (13/13 text, 5/5 image) | §6.4 |
-| Q29 | Adopt now, or close the DOM gap first | **Close it first** — adoption parks until the DOM leg runs | round doc `round-decision-model-spike`, A8 |
+| Q29 | Adopt now, or close the DOM gap first | **Close it first** — done: the DOM leg passed on rendered component markup | Q30 |
+| Q30 | Route to the DOM leg | **bUnit render, no app boot** — real markup in ~4 s; data-dependent atoms deferred to a live instance | §6.5, round doc Probe sitting 3 |
+| Q31 | If the DOM leg had failed | **It would shrink, not kill** — screenshot + source already covered 19/19 claims | moot: the leg passed |
+| Q32 | May the seat be used before adoption | **Yes, as method only** — no `DM:` convention, no ledger column, no gate reference until adopted | §8 |
+| Q33 | Continue or park the arc | **Stop after the DOM leg**; resume when a consumer exists | round doc verdict |
+| Q34 | First real consumer | **Whatever live round next presents a closed claim set** — not the parked round, which waits on an owner deliverable | §7 |
 
 ## 10. Worked case — mock vs implemented (the motivating question)
 
@@ -394,6 +410,8 @@ re-litigating a settled scope call by accident, not to enable it.
 - A holistic question in a schema (`looks right`, `honours intent`, `is complete`) ⇒ **schema
   defect**; the pass is not reported as evidence until the questions are atomised.
 - A row counted as answered while below its §6.3 threshold ⇒ **verification defect**.
+- A pass reported as evidence while its scoring harness proved nothing (no real probability present, every row
+  `NaN`, zero variance across ratings) ⇒ **harness defect**; assert at least one real probability first.
 - An unstable row reported as an answer rather than as `unstable` ⇒ **verification defect**.
 - An image-based pass whose record does not name **the route** ⇒ **incomplete record**, because the
   two silent-drop routes (§5.4) make "clef with images" meaningless without it.
