@@ -86,22 +86,22 @@ public class QuestionEditorSectionBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void TwelveQuestions_FirstRender_ShowsFirstFiveTextsAndTotal()
+    public void TwentyQuestions_FirstRender_ShowsFirstFifteenTextsAndTotal()
     {
-        var model = SeedModel(12);
+        var model = SeedModel(20);
 
         var cut = RenderEditor(model);
 
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("Q1");
-            cut.Markup.Should().Contain("Q5");
-            cut.Markup.Should().NotContain(">Q6<", "page 1 must only render the first 5 rows");
+            cut.Markup.Should().Contain("Q15");
+            cut.Markup.Should().NotContain(">Q16<", "page 1 must only render the first 15 rows (default page size)");
         });
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("12 question(s)",
-                "FR-240: the toolbar total reflects the model's question count");
+            cut.Markup.Should().Contain("20 question(s)",
+                "the toolbar total reflects the model's question count, independent of the page");
         });
     }
 
