@@ -140,8 +140,8 @@ INSERT INTO assignment_targets (id, tenant_id, assignment_id, kind, ref_id, disp
 SELECT ('7a0b0000-0000-4000-8000-00000000' || lpad(s.n::text, 2, '0') || t.k)::uuid,
        :'tenant_id'::uuid, t.assignment_id, 'Student', s.student_id, s.n - 1, now(), now()
 FROM probe2c_roster s
-CROSS JOIN (VALUES ('a50b0000-0000-4000-8000-000000000001'::uuid, '1'),
-                   ('a50b0000-0000-4000-8000-000000000002'::uuid, '2')) AS t(assignment_id, k);
+CROSS JOIN (VALUES ('a50b0000-0000-4000-8000-000000000001'::uuid, '01'),
+                   ('a50b0000-0000-4000-8000-000000000002'::uuid, '02')) AS t(assignment_id, k);
 
 -- ── Recipients: what publish wrote on the PUBLISHED assignment ────────────────────────────────────────────
 -- owner_type 1 = ContactOwnerType.Guardian; channel 0 = Email; role 0 = GuardianRole.Primary,
