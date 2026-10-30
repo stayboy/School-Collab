@@ -150,11 +150,15 @@ public sealed class GetAssignmentAudienceHandler(
     /// their cohort and their delivery state.
     /// </summary>
     /// <remarks>
-    /// The catch below is not the whole failure surface: the production <c>StudentsContactResolver</c>
-    /// swallows a per-owner <see cref="HttpRequestException"/> and degrades that owner to an empty
-    /// result, so a directory outage arrives here as a SUCCESSFUL read carrying few or no names. A
-    /// cohort student left without a name is therefore the only observable evidence of that swallowed
-    /// failure — which is why a successful read still has to report <c>Degraded</c>.
+    /// <para><b>Degraded means a TOTAL name loss, not a missing one.</b> The names come from the batched
+    /// <c>contacts/subscribed</c> read, so a student with no subscribed guardian contact produces no row
+    /// there and therefore no name — an ordinary tenant, not evidence of a failure. Only a cohort that
+    /// resolves <i>no</i> non-blank name at all degrades the read (the signature the production
+    /// <c>StudentsContactResolver</c> leaves when it swallows a per-owner <see cref="HttpRequestException"/>:
+    /// a SUCCESSFUL read carrying nothing). One resolved name anywhere is enough to call the directory
+    /// healthy. An empty cohort is not degraded; a read that throws still is.</para>
+    /// <para><b>Known limit.</b> A partial outage is indistinguishable from students who have no contact,
+    /// so it is not reported — the names need their own agreed source, never a second hop from here.</para>
     /// </remarks>
     private async Task<(IReadOnlyDictionary<Guid, string> Names, bool Degraded)> ResolveStudentNamesAsync(
         Assignment assignment,
@@ -197,7 +201,9 @@ public sealed class GetAssignmentAudienceHandler(
             return (names, true);
         }
 
-        var namesDegraded = cohort.Any(studentId =>
+        // Total loss only: a cohort without a single resolved name. Partial absence is the normal shape
+        // of a tenant whose students simply have no subscribed contact.
+        var namesDegraded = cohort.All(studentId =>
             !names.TryGetValue(studentId, out var resolvedName) || string.IsNullOrWhiteSpace(resolvedName));
 
         return (names, namesDegraded);

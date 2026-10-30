@@ -258,9 +258,9 @@ public class GetAssignmentAudienceHandlerTests
     }
 
     [TestMethod]
-    public async Task ADirectoryThatReturnsNoName_DegradesTheRead_AndKeepsTheRowsAndDelivery()
+    public async Task AWholeCohortWithoutAName_DegradesTheRead_AndKeepsTheRowsAndDelivery()
     {
-        var (db, _) = Build(nameof(ADirectoryThatReturnsNoName_DegradesTheRead_AndKeepsTheRowsAndDelivery));
+        var (db, _) = Build(nameof(AWholeCohortWithoutAName_DegradesTheRead_AndKeepsTheRowsAndDelivery));
         var assignment = NewAssignment("Photosynthesis lab report");
         db.Assignments.Add(assignment);
 
@@ -276,18 +276,54 @@ public class GetAssignmentAudienceHandlerTests
         // which is the shape a directory outage actually reaches the handler in.
         var handler = new GetAssignmentAudienceHandler(
             db,
-            new FakeAssignmentTargetResolver { StudentIds = [StudentOkafor] },
+            new FakeAssignmentTargetResolver { StudentIds = [StudentAdeyemi, StudentOkafor] },
             new FixedSubscriberContactResolver([]),
             NullLogger<GetAssignmentAudienceHandler>.Instance);
 
         var result = await handler.HandleAsync(new GetAssignmentAudience(assignment.Id));
 
         result.Degraded.Should().BeTrue(
-            "a swallowed directory failure is observable only as a cohort student with no name, and it is never reported as healthy");
-        result.Rows.Should().ContainSingle("the rows survive the name outage");
-        result.Rows[0].StudentName.Should().BeEmpty("a name that could not be read is not invented");
-        result.Rows[0].Contacts.Single().DeliveryState.Should().Be(AudienceDeliveryStateDto.Sent,
+            "a swallowed directory failure reaching the handler as a successful read of NO name at all for the whole cohort is a total name loss");
+        result.Rows.Should().HaveCount(2, "the rows survive the name outage");
+        result.Rows.Should().OnlyContain(row => row.StudentName.Length == 0,
+            "a name that could not be read is not invented");
+        var okafor = result.Rows.Single(row => row.StudentId == StudentOkafor);
+        okafor.Contacts.Single().DeliveryState.Should().Be(AudienceDeliveryStateDto.Sent,
             "a name outage does not touch delivery — the log still answers");
+    }
+
+    [TestMethod]
+    public async Task AStudentWithoutASubscriber_IsNotADegradation_WhileOthersResolve()
+    {
+        var (db, _) = Build(nameof(AStudentWithoutASubscriber_IsNotADegradation_WhileOthersResolve));
+        var assignment = NewAssignment("Photosynthesis lab report");
+        db.Assignments.Add(assignment);
+
+        var contactId = Guid.NewGuid();
+        var recipient = Recipient(assignment.Id, StudentOkafor, contactId,
+            ContactOwnerType.Guardian, ContactChannel.Email, GuardianRole.Primary);
+        db.AssignmentRecipients.Add(recipient);
+        db.NotificationLogs.Add(PublishLog(assignment.Id, recipient.Id, contactId, NotificationDeliveryStatus.Sent));
+        await db.SaveChangesAsync();
+
+        // Only Okafor has a subscribed guardian contact, so the batched subscriber read carries a row
+        // for Okafor alone. Adeyemi's absence is the ordinary shape of a tenant — not an outage.
+        var result = await Handler(db, [StudentAdeyemi, StudentOkafor],
+            Subscriber(StudentOkafor, "Okafor, Ngozi", contactId))
+            .HandleAsync(new GetAssignmentAudience(assignment.Id));
+
+        result.Degraded.Should().BeFalse(
+            "one resolved name proves the directory answered; the rest simply have no subscribed contact");
+        result.Rows.Should().HaveCount(2, "a student with no subscriber is still a visible row");
+
+        var adeyemi = result.Rows.Single(row => row.StudentId == StudentAdeyemi);
+        adeyemi.StudentName.Should().BeEmpty("no name was readable for this student");
+        adeyemi.Reached.Should().BeFalse("with no subscribed contact the student was never reached");
+
+        var okafor = result.Rows.Single(row => row.StudentId == StudentOkafor);
+        okafor.StudentName.Should().Be("Okafor, Ngozi");
+        okafor.Reached.Should().BeTrue();
+        okafor.Contacts.Single().DeliveryState.Should().Be(AudienceDeliveryStateDto.Sent);
     }
 
     [TestMethod]
