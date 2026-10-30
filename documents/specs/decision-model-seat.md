@@ -1,9 +1,12 @@
 # The decision-model seat — an advisory adjudication pass for any tier
 
-Status: **PROPOSED 2026-10-30 — settled as a proposal, not adopted.** The design questions
-(Q1–Q19) were answered as recommended in one grill round on 2026-10-30; §9 records each and marks
-the five that the vendor documentation overturned. No code, skill or rule change rides this
-document — §8 is what adoption would cost.
+Status: **PROPOSED 2026-10-30 — mechanism proven, adoption parked.** Q1–Q29 were answered as
+recommended across three grill rounds; five of the early answers were overturned by the vendor
+documentation and are recorded as superseded (§9). Two probe sittings then exercised the seat on real
+artefacts — 13 text claims and 6 image claims, all correct, both permutation checks stable — for a total of
+~$0.01 (`documents/rounds/round-decision-model-spike.md`). **Adoption has not started**: §8's files, the
+protected-file reviews and the first real use are open, and one payload (rendered DOM) is still unproven,
+which is what parks it.
 
 Date: 2026-10-30 · Provenance: a session question — *"how do I use `clef:27b` as a decision model
 to compare mocks against what is actually implemented?"* — generalised, because the answer is not
@@ -74,7 +77,7 @@ Adopting the DM changes **no** existing seat, model or gate. Specifically, uncha
 | Diff gate on Tiers 2–3 | SKILL.md § Tiers, `references/models.md` | DM has no diff verdict; it answers claim rows |
 | Acceptance is the plan author's, implementer ≠ verifier | SKILL.md § "Acceptance is a gate in every tier" | DM is a third thing; it may not appear as `ACCEPTED` |
 | **Two-model light tiers** (owner 2026-10-23) | `references/models.md` § Per-mode model sets | The ruling budgets *models that do judgment work*. A classifier call judges nothing — it answers a fixed schema, costs ~$0.002 and runs in ~0.2 s — so it is recorded as `DM:` on line 1, not counted as a seat (§9 Q17) |
-| Unattended rounds auto-accept nothing from the plan author | SKILL.md § "Unattended rounds" | DM never echoes a FRONTIER block and never ratifies a pin (§6.5) |
+| Unattended rounds auto-accept nothing from the plan author | SKILL.md § "Unattended rounds" | DM never echoes a FRONTIER block and never ratifies a pin (§6.6) |
 | A gate must never be the plan author | SKILL.md § Tiers | DM may share the author's model freely — it gates nothing, so diversity is not an invariant here |
 
 **The one-line test:** if removing the DM pass would let wrong work through a gate, the DM was
@@ -118,7 +121,7 @@ index and this machine's model registry disagree with it, see §5.4).
 | Latency | median **209 ms**, p95 **239 ms** | Faster than one `grep` round-trip |
 | Context | **64K**; cloud input **≤65,536 tokens — "rejected, not truncated"** | Over-long briefs **fail**; they do not trim themselves |
 | Images | PNG/JPEG/WebP, **≤4 per request**, ≤4 MiB each, ≤16 MP, ≤8 MiB total | A screenshot pass is per-page-section, not per-page-set |
-| Question types | **`noul`** (yes/no → probability), `choice` (→ option + `probabilities` + `confidence`), `score` | See §5.3 for the `bool`/`noul` discrepancy |
+| Question types | **`noul`** (yes/no → probability), `choice` (→ option + `probabilities` + `confidence`), `score` | See §5.3 — `bool` is rejected with a 400 on this route |
 | Variants | local `clef:27b` (256K ctx) and `clef:27b-cloud` (64K); `clef-flash` is smaller/faster but **CLINC 66.8 vs 97.4** | Flash is the wrong variant for closed classification |
 | Requires | Ollama ≥0.35.1 (cloud ≥0.40.6) | Checked before a round relies on it |
 
@@ -141,12 +144,19 @@ No `codemode` dependency (which would need `defaultTools: ["+codemode"]` — cur
 `~/.pi/agent/settings.json`, so classifier models are unreachable this session without it), no pi
 extension, no key material in the repository's configuration (the key lives in the environment).
 
-### 5.3 The `bool` / `noul` discrepancy
+### 5.3 The `bool` / `noul` type — settled by probe (2026-10-30)
 
-Ollama's API documentation names the yes/no type **`noul`**; pi's classifier documentation example
-spells it `bool`. One of the two will fail a whole request. **Probe once** — one question, one
-short state — before the round's first real pass, and record the resolved spelling in
-`## Decision passes`.
+Ollama's API names the yes/no type **`noul`**; pi's classifier documentation example spells it `bool`.
+The spike settled it against the wired route (local Ollama 0.40.8 → ollama.com):
+
+| Spelling | Result |
+|---|---|
+| `noul` | `200`, `{"noul": 0.9858}` |
+| `bool` | **`400` — `question "…": type must be choice, noul, or score`** |
+
+So the pi doc example is **wrong for this route**: use `noul`, and treat a `bool` in any copied example as
+a defect. The probe cost 147 input tokens; a wrong spelling fails the whole request, not one question.
+Evidence: `documents/rounds/round-decision-model-spike.md` § Worker Report A1.
 
 ### 5.4 Two silent-drop traps — and why "supported" is a pair, not a property
 
@@ -223,21 +233,56 @@ reject a row whose top option is 84% likely — the two quantities are not inter
 
 These numbers are chosen by judgement, not justified by vendor documentation. The first pass that
 disagrees with one records the disagreement as a deviation in `## Decision passes` rather than
-silently re-tuning it.
+silently re-tuning them.
+
+**The one recalibration the evidence supports — and it says *do not tighten* (Q27, 2026-10-30).** Two
+independent passes over the mock's 13 claims put every row at **0.8943–0.9690**; the lowest row both times
+was `c08` ("one row per student in the cohort"), at 0.8952 then 0.8943. A **0.90** threshold was considered
+and **refused on that evidence** — it would have rejected a confirmed-correct row. 0.80 stays. This is a
+floor from 19 samples, not a calibration curve: a later pass clustering near 0.85 is the signal to revisit.
 
 ### 6.4 Verification without citations (the replacement for re-grep)
 
-Since answers carry no provenance, the parent does three things — all cheap, none optional:
+Two things carry this section's weight, and both were **verified rather than assumed** (2026-10-30): answers
+do **not** move when the question order moves, and they do **not** move when 80% of the image is cropped away
+(13/13 text claims, 5/5 image claims stable in both cases). Since answers carry no provenance, the parent does
+four things — all cheap, none optional:
+
+0. **Claim provenance (Q25).** The claim list is **derived from an external artefact** — the mock, the spec,
+   the ticket. A claim the author invented is inadmissible, because then the pass grades the author's
+   imagination rather than the repository. Truth for the rows is established **after** the pass, by a
+   **different actor**, on a **sample of 3–5 rows** carrying `path:line` the checker can reopen. Full ground
+   truth is never required: someone who already knows all N answers has no reason to run the seat.
 
 1. **Threshold gate** (§6.3): an answer below its threshold is not reported as an answer.
-2. **Stability re-run**: any sub-threshold row, and a random 10% of passing rows, are re-asked once
-   with the **question order permuted** and (where available) a second image crop. A classifier's
-   answer should not move when the order moves. A row that flips is reported as `unstable`, never
-   averaged. At ~$0.002 and ~0.2 s a re-run costs less than the argument about it.
+2. **Stability re-run** (verified 2026-10-30: 13/13 text and 5/5 image stable under reorder + crop): any
+   sub-threshold row, and a random 10% of passing rows, are re-asked once with the **question order
+   permuted** and, where available, a second image crop. A classifier's answer should not move when the
+   order moves. A row that flips is reported as `unstable`, never averaged. At ~$0.002 and ~0.2 s a re-run
+   costs less than the argument about it.
 3. **Parent spot-check**: 3 rows checked by hand against the artifact, at least one of which the
    model marked high-confidence. A spot-check that contradicts the model demotes the whole pass.
 
-### 6.5 Prohibited content
+### 6.5 Payload ranking — which artefact answers which atom (Q26)
+
+The two sides of a parity pass are rarely the same kind of file, and the payload decides what a claim can even
+mean.
+
+| Payload | Answers | Do not use it for |
+|---|---|---|
+| **Rendered DOM text** — the default for implementation claims | rendered and data-dependent atoms: is this row present, does this label exist in the output | visual atoms (icons, colour, layout), code structure |
+| **Screenshot** (≤4 per request) | atomic visual presence | structure, data paths, anything a human would call "looks right" (§6.2) |
+| **Source text** (`.razor`, the mock's HTML) | structural atoms: a field exists on a DTO, a route is registered, the mock *specifies* a column | anything about the rendered page |
+
+Captures are **per section**, not per page: a full DOM dump is the fastest route to the 65,536-token hard cap,
+which **rejects** the request rather than trimming it. Capture reuses the repo's existing Playwright harness —
+no new mechanism (repo rule: reuse before new infrastructure).
+
+> **Not yet exercised (2026-10-30).** Text and image payloads are proven; the **rendered-DOM** leg has no
+execution yet — no app instance was available, and booting one for a probe would lock build outputs. It is owed
+at the parked round's live-render probe, and adoption should not complete before it.
+
+### 6.6 Prohibited content
 
 - **No owner decisions.** A question the specs do not determine is a grill question (repo
   `AGENTS.md` § "Posing questions and decisions"), never a DM question. A DM answer must never be
@@ -278,13 +323,14 @@ tester); long-document comprehension (read it).
 | `documents/agents/protected-doc-reviews.json` | record for each protected file above — SHA-256 of the exact reviewed text, reviewer, reason | mechanical, enforced by `ProtectedAgentDocReviewTests` |
 
 Prerequisites, stated because adoption fails silently without them: an ollama.com API key in the
-environment; an Ollama ≥0.35.1 client if the call is made locally rather than to the hosted tag;
-and the `bool`/`noul` probe (§5.3) before the first real pass.
+environment; an Ollama ≥0.35.1 client if the call is made locally rather than to the hosted tag.
+All three are satisfied on this machine as of 2026-10-30 (`OLLAMA_API_KEY` set, `ollama 0.40.8`), and
+the probe evidence is `documents/rounds/round-decision-model-spike.md`.
 
 **Doc layer, not code layer.** Per SKILL.md ("policy travels separately"), these ship as their own
 documentation commit — never swept into a feature branch's code diff.
 
-## 9. The decisions — settled 2026-10-30, with the five the documentation overturned
+## 9. The decisions — settled 2026-10-30
 
 Settled in one grill round ("all as recommended"). Supersessions are recorded, not deleted: the
 first draft of this spec was written against a chat-model premise that the vendor page disproved.
@@ -306,10 +352,15 @@ first draft of this spec was written against a chat-model premise that the vendo
 | Q13 | Rewrite or park | **Rewrite** §2/§5/§6/§8/§10; §3 stands | This document |
 | Q14 | Which number carries the threshold | **Max probability** — `choice` ≥0.80, `noul` ≥0.90; `confidence` recorded only | §6.3 |
 | Q15 | Atomisation and images | **Atom-level only**; images for atomic visual presence only; holistic questions banned | §6.2 |
-| Q16 | Route | **Ollama `/v1/systemone`**, text and images, no `codemode`; probe `bool` vs `noul` first | §5.2–5.3 |
+| Q16 | Route | **Ollama `/v1/systemone`**, text and images, no `codemode`; the `noul` spelling is settled (§5.3) | §5.2–5.3, spike A1 |
 | Q17 | Re-tier it | **Trigger-automatic on every tier**; `DM:` on line 1; never a gate; Tier 0 = the parent's own call | §4 |
 | Q18 | Rename the seat | **Keep "decision-model seat"**; one sentence in §2 states it decides nothing the owner or a gate decides | Renaming would touch five files to fix a one-sentence collision |
 | Q19 | Lessons into the repo | **Two accepted**, the third dropped as a corollary | `.github/copilot/rules/agent-lessons.md` |
+| Q25 | Who establishes ground truth | **Claims external; truth sampled post-hoc by a different actor** (3–5 rows with `path:line`) | §6.4 item 0 |
+| Q26 | Payload for the implemented side | **Rendered DOM default**; screenshot for visual atoms; source for structural; per-section captures | §6.5 |
+| Q27 | Recalibrate the thresholds | **0.80 kept; 0.90 refused on evidence** — a confirmed-correct row sat at 0.8943 / 0.8952 | §6.3 |
+| Q28 | Run the permutation check before adoption | **Yes — run, and it passed** (13/13 text, 5/5 image) | §6.4 |
+| Q29 | Adopt now, or close the DOM gap first | **Close it first** — adoption parks until the DOM leg runs | round doc `round-decision-model-spike`, A8 |
 
 ## 10. Worked case — mock vs implemented (the motivating question)
 
