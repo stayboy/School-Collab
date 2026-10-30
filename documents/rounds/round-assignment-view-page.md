@@ -536,7 +536,33 @@ A second round, because pinning the stack unblocked the questions that hang off 
 | Q3 | PR presentation | **Ready for review, hand-written body** — summary, AC table, gate table naming the non-green legs, and both probe screenshots. Not `--auto`: a probe has already validated the diff by then, so a draft would hide it. |
 | Q4 | Probe fixtures | **Committed** `documents/runbooks/assignment-view-probe-seed.md` + its SQL, following `student-view-probe-seed.md` (fixed ids, tenant as a variable, never in `MigrationService`). Round (b)'s tester reuses them. |
 | Q5 | Arbitration: browser vs mock vs spec | **Spec wins over the mock.** A spec↔mock divergence is recorded as a **mock correction**, not a defect; rework is only for where the page fails both. Precedent: the `pts` column and resource grounding were already dropped this way. |
-| Q6 | The vacuous-assertion class (two instances this round) | **Filed as its own issue**; only assertions in files this layer touches are fixed here. The issue names both worked examples — the `FindAll("a")` guard that could not see `<fluent-link>`, and the degradation test whose fake *threw* where production degrades quietly. |
+| Q6 | The vacuous-assertion class (two instances this round) | **Filed as** [#460](https://github.com/stayboy/School-Collab/issues/460); only assertions in files this layer touches are fixed here. The issue names both worked examples — the `FindAll("a")` guard that could not see `<fluent-link>`, and the degradation test whose fake *threw* where production degrades quietly. |
+
+### Grill round 3 (owner, 2026-10-30: "all as recommended") — the name source, and who drives the probe
+
+**Q1 — student names for contact-less students.** The audience read takes `StudentName` from the
+`contacts/subscribed` response, and a student with no subscribed contact produces no row there — so the
+spec's "explicit *not reached* rows" would render with a **blank name**, hiding the identity of exactly the
+students a teacher must chase. `students/by-target` returns `Guid[]` only; the only other Students reads are
+`/{id}` (an N+1), `/by-number`, `/by-grade/{gradeId}` and the paged list. **Settled: extend `students/by-target`
+to return `{ id, name }`** and have the two audience handlers name rows from the cohort they already resolved —
+this deletes the "names ride the subscriber read" smell at the root. Because that is a **cross-context contract
+change** in a round already carrying shared chrome, it ships as **layer 2 of the stack**, not folded into the
+committed layer 1 (which stays reviewable as it stands). Rejected: deferring to round b (ships a panel that
+cannot say *who* was not reached) and any client-side join (there is no second field to join on).
+
+**Pass 2d (defect, found by fixture design, not by the probe).** My pass-2c rule marked the whole panel degraded
+whenever *any* cohort student lacked a name — which, given names ride the subscriber read, fires on a perfectly
+normal tenant where somebody simply has no guardian contact. **Rework via the worker (R9):** degrade only on a
+**total** name loss over a non-empty cohort; partial loss stays silent and is recorded as a known limit.
+
+**Probe executor changed (owner, cost).** `clef:27b` **does not exist** in this Pi registry (verified: no `clef`
+model under any provider; `typesafe/jev-router` is a router, not a visual judge; the 27B vision models are
+`qwen/qwen3.8-27b`, `prism-ml/ternary-bonsai-2-27b`, `gemma-3-27b-it`, none on ollama-cloud). Settled split:
+**`ollama-cloud/gemma4:31b` drives the browser and collects evidence** (screenshots at 900/1400 px for both
+states, the DOM checklist, the console log), and **the parent renders the fidelity verdict** against the
+approved mock. The driver never grades its own evidence; pixel-matching a screenshot against box-art has no
+ground truth, so the checklist — not an image diff — is the real test.
 
 ## Static review — `deepseek-v4-pro:0813`, independent of the implementer
 
@@ -623,8 +649,7 @@ reds (the OpenRouter live pair CI self-skips), architecture **160/0**, both port
 4. `Unpublish` (secondary) and `Close` (kebab) are split on Published by R1's pin over spec §2's wording — the first
    thing to unify if round b revisits the header.
 
-**Not committed.** The branch `feat/assignment-view-page` sits at `8546ddef` with the tree dirty; nothing is staged
-and no PR exists. Commit, push and PR each need their own instruction.
+**Committed as `d46b7223`** on `feat/assignment-view-page` (on top of the park commit `8546ddef`), and the branch was adopted as **layer 1** of a `gh stack` rooted on `main` (`gh stack init`). Nothing is pushed and no PR exists: `gh stack submit` runs only after the live pass passes (Q3). The probe fixtures, their runbook and the probe's outcome land as further commits on this same layer.
 
 **One check not run — and it is a gate, not a courtesy.** The 900 px live-render probe was **not executed**. The
 repo rule above (`.github/copilot/rules/testing.md` § "UI rounds need one live pass") makes it mandatory for any
