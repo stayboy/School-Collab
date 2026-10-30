@@ -122,7 +122,7 @@ const secD = `
         ${row('Sofia Marchetti', 'G7-0191', '1 <span class="muted">· skipped</span>', ['neutral', 'not started'], '<span class="muted">—</span>', '<span class="muted">—</span>', '—', 'Submit…')}
         ${row('Marcus Bell', 'G7-0188', '1 <span class="muted">· terminal</span>', ['neutral', 'not started'], '<span class="muted">—</span>', '<span class="muted">—</span>', '—', 'Submit…')}
       </tbody></table>
-      ${pager(1, 15, 28, true, true)}
+      ${pager(1, 15, 28, true)}
       <p class="subtle-note" style="margin:0">Score is blank until graded — an ungraded row is a work item, not a
         missing value. “Submit…” opens the on-behalf path for paper or offline work.</p>
     </div>

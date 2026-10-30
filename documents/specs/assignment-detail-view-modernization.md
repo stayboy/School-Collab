@@ -276,10 +276,12 @@ person, so masking is not a control.
   Students contact read. Projecting either into a list read creates a **second, broader door** to data the Students
   module already guards with its own scope — the failure mode is a new read widening an old permission, not a
   missing check in the new read.
-- **Names are exposure too, and gentler.** Guardian display names come from the same batched subscriber read. They
-  may be shown **only when the caller could already list that student's guardians in the Students module**; when
-  that check is absent the cell degrades to role-only ("2 primary guardians, 1 CC"). The page never names a guardian
-  it would not otherwise expose.
+- **No guardian names either (Q158, settled).** The gate the first draft proposed — *show a name only when the
+  caller could already list that student's guardians in the Students module* — has **no mechanism to hang on**:
+  `TeacherScope` answers "can you see this assignment", not "may you list this student's guardians", and adding a
+  per-student authorization hop would turn one read into a fan-out. So the table shows **role and count only**
+  ("2 · primary, CC"). The names sit one click away in the Students module, where that exposure rule already lives
+  and is already enforced.
 - **Scope.** The read is scoped to the assignment's teacher scope *and* may not exceed the Students module's
   exposure for each student in the cohort. Two scopes, the narrower wins.
 - **If an operator needs the address** (a bounce, a support call): a separate, permission-gated, **audited**,
@@ -309,6 +311,11 @@ is how it lands on **this** page.
 - **Priced consequence.** `LandingGridSettings.ItemsPerPage` defaults to **10** today. Raising it to **15** touches
   every landing page that inherits it — **shared chrome, so it carries the full gate** — and is therefore *not*
   smuggled into this docs-only PR. It belongs to the implementation round that applies the rule.
+- **Two specs on `main` page at 5 and must be amended in that same round (Q159).**
+  `assignment-creation-with-ai.md` §2.5 says question review uses a *"fixed page size (default 5)"*, and
+  `assignment-authoring-content-questions-modern-ui.md` QA-14 mandates `FluentPaginator` over the same collection.
+  Both predate the rule; each gains one line pointing at `blazor-components.md` § "Grids are paged by default" so
+  the next reader does not implement whichever they hit first.
 
 
 
@@ -395,6 +402,10 @@ are both handler-level assertions, because both are decided server-side and neit
 | Q154 | Contact exposure | **The page carries no contact value.** No address or phone number in the DTO, not merely masked; channel kind + count + role + delivery state only. Guardian names only where the caller could already list them in the Students module. Any address need is a separate audited action (§4.9). |
 | Q155 | Status read-outs as one panel | **One Status panel in main, below Delivery**, holding Progress · Guardian sign-off · Notifications as three segments divided by coloured vertical rules. The rail drops to Content & Resources + Rules (Approval pre-publish). Page height 4 991 → 4 089 px. |
 | Q156 | Paging on every grid | **Every data-driven grid pages, default 15, page size per grid.** The rule lives in `.github/copilot/rules/blazor-components.md`; Questions and Delivery/audience also expose a 15/25/50 control. `LandingGridSettings.ItemsPerPage` (10 today → 15) is shared chrome, so it moves in the implementation round under the full gate, not in this docs PR (§4.10). |
+| Q157 | Dispatch round (a)? | **Stay parked.** The layout moved after the spec was first written and invalidated part of it three turns running; a plan gate should read a spec that has stopped moving. |
+| Q158 | Guardian names | **Drop them.** Role and count only. The proposed gate ("show a name if the caller could list that student's guardians") has no mechanism — `TeacherScope` answers a different question, and a per-student authorization hop would fan out a read. |
+| Q159 | The two specs that page at 5 | **Amend both** to point at the rule ("default 15, per grid") in the round that applies paging — not before. |
+| Q160 | The two lesson candidates | **Write both** to `.github/copilot/rules/agent-lessons.md`. |
 
   |---|---|---|---|
   | 1 | §2 re-decided lifecycle primaries (Published → *Open progress*) while claiming the §11 matrix could not fork; the matrix reads Published → Unpublish, Closed → Archive | **P1** | Applied — header follows §11; Q141 later settled the view exception, so §11 now records it explicitly and the decision takes `surface` as an input (pass 2, finding 1) |
