@@ -308,6 +308,14 @@ is how it lands on **this** page.
   `FluentPaginator` directly.
 - **Paging composes with the 200 cap (Q146).** The read stays bounded; the grid pages within what arrived and says
   so: "1–15 of 200 (capped)".
+- **No pager when the set fits (Q162).** `total <= page size` renders **no pager and no rows-per-page selector**;
+  the Questions table (8 rows) therefore shows none, while Delivery and the progress list (28) do. The mock's pager
+  helper returns nothing in that case, which is the behaviour `EntityGrid` must reproduce by deriving its pager from
+  the item count instead of taking it as a caller's choice.
+- **The shipped component does not do this yet (Q163).** `EntityGrid.ShowPager` defaults to `false` and **no call
+  site sets it** — five grids never page. Flipping that default to `true` is a shared-chrome change (full gate) and
+  lands with `LandingGridSettings.ItemsPerPage` 10 → 15, not here. Recorded so the rule and the component cannot
+  disagree silently.
 - **Priced consequence.** `LandingGridSettings.ItemsPerPage` defaults to **10** today. Raising it to **15** touches
   every landing page that inherits it — **shared chrome, so it carries the full gate** — and is therefore *not*
   smuggled into this docs-only PR. It belongs to the implementation round that applies the rule.
@@ -406,6 +414,9 @@ are both handler-level assertions, because both are decided server-side and neit
 | Q158 | Guardian names | **Drop them.** Role and count only. The proposed gate ("show a name if the caller could list that student's guardians") has no mechanism — `TeacherScope` answers a different question, and a per-student authorization hop would fan out a read. |
 | Q159 | The two specs that page at 5 | **Amend both** to point at the rule ("default 15, per grid") in the round that applies paging — not before. |
 | Q160 | The two lesson candidates | **Write both** to `.github/copilot/rules/agent-lessons.md`. |
+| Q161 | Merge #455 | **On green only** — one re-run for a flake (runbook line 129), a second identical failure means `main` is red and the answer becomes fix-forward. Merged as `3e6be4b9` after the re-run passed. |
+| Q162 | Pager when the set fits | **Hide the pager and the size selector** when `total ≤ page size`. `1–8 of 8` with dead arrows is chrome, not information. |
+| Q163 | `EntityGrid.ShowPager` | **Flip the default to `true`** — it is `false`, no call site sets it, and five grids therefore never page. Shared chrome: lands with `ItemsPerPage` 10 → 15 under the full gate. |
 
   |---|---|---|---|
   | 1 | §2 re-decided lifecycle primaries (Published → *Open progress*) while claiming the §11 matrix could not fork; the matrix reads Published → Unpublish, Closed → Archive | **P1** | Applied — header follows §11; Q141 later settled the view exception, so §11 now records it explicitly and the decision takes `surface` as an input (pass 2, finding 1) |
