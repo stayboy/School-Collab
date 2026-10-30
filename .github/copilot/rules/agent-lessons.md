@@ -79,6 +79,80 @@ to authorised users": name the check that already exists, or drop the field.
 
 ---
 
+## A recursive grep over a build-output tree reads as a hang, and a pipe is not an exclusion (2026-10-30)
+
+**Rule.** Search source with `grep -rn --include=*.cs --include=*.razor --exclude-dir=bin --exclude-dir=obj <pattern> <path>`.
+`--exclude-dir` is the flag that prevents the walk; `| grep -v "/bin/\|/obj/"` does **not** — the filter runs after
+the walk has already read every DLL. When you already know the file, open it. On a repo this size an unfiltered
+recursive grep takes minutes, produces no output, and looks exactly like a deadlocked command to any watchdog.
+
+**Evidence.** Two worker runs stalled on this in one session. The second wrote
+`grep -rln audience tests/SchoolCollab.Assignments.Api.Tests.Unit | grep -v "/bin/\|/obj/"` — the pipe *looks* like the
+exclusion, so the steer that stated the rule an hour earlier did not prevent it. The parent found the pipeline via
+`Get-CimInstance Win32_Process -Filter "Name='grep.exe'"`, saw the `-v` matcher as a second process waiting on the
+first, killed it, and the child resumed normally. CPU sampling was the tell: 15 idle `dotnet` node-reuse daemons sat
+at a **zero** CPU delta, so the stall was not a build.
+
+**Trigger.** Any tool call still running past ~2 minutes on `bash`/`shell` whose command contains `grep`, `rg`, `find`
+or a glob over `src`/`tests`. Kill the walk, not the run, and re-issue with `--exclude-dir`.
+
+---
+
+## A round patch is a diff against the stack base, never against `HEAD` (2026-10-30)
+
+**Rule.** Generate `documents/rounds/diffs-<slug>.patch` with `git diff <base>..HEAD -- src tests`, where `<base>` is
+the branch point (or a stack layer's parent). `git diff HEAD` on a committed tree is **empty**, and an empty patch
+file commits silently and looks like a legitimate artifact.
+
+**Evidence.** The round's patch was re-stamped after the work had been committed, using `git add -N` + `git diff
+HEAD`; it came out at **0 lines / 0 files** and was nearly committed that way. Recomputing against `main` produced
+the real artifact: 7,163 lines across 32 files. A second trap sits alongside it: `git diff 41e9cc7f..HEAD` with the
+space renders a *range* of commits, so a path-limited diff must be written `41e9cc7f..HEAD -- src tests`.
+
+**Trigger.** Any time you write or refresh a `.patch` artifact, and every time you check a round's expected-files
+list — verify the file count against the plan before calling the freeze done.
+
+---
+
+## Killing "every `dotnet` except the AppHost root" kills the application (2026-10-30)
+
+**Rule.** An Aspire AppHost's services are ordinary `dotnet run --project src/<Service>` children. To stop the
+application, kill the **whole tree** (`taskkill /PID <root> /T /F`) and confirm the service ports closed; to free
+memory, do not selectively kill children by process name — the root keeps running, reports healthy, and every
+request times out because nothing is listening behind its proxy.
+
+**Evidence.** Hunting `ERR_INSUFFICIENT_RESOURCES` (machine at **0.2 GB free** with 26 `dotnet` processes), the
+parent kept the AppHost root and killed 25 others it had classified as "build". Those were assignments-api,
+students-api, settings-api, the AI worker and two Blazor hosts. The AppHost still logged "Distributed application
+started"; `curl` to the admin port then returned `000` three times in a row, and Playwright reported
+`net::ERR_TIMED_OUT`. The classifier was the bug: a process whose command line reads
+`dotnet run --project …` is a service, not a build.
+
+**Trigger.** Freeing memory or "cleaning up" while an AppHost is up; a page that suddenly stops responding while the
+dashboard still shows the app as running; `ERR_INSUFFICIENT_RESOURCES` / `ERR_TIMED_OUT` on a port that answered a
+minute ago.
+
+---
+
+## A newly registered model is invisible to subagents until pi restarts (2026-10-30)
+
+**Rule.** `/reload` refreshes the **session** model list only. The subagent extension keeps its own registry, loaded
+when the session starts, and rejects a newly added model under every id form (`provider/id`, bare `id`, alternate
+provider). A pi restart is what rebuilds that registry — do not plan a child run around a model registered minutes
+ago. For what the model *is* or *can take*, this entry says nothing: see "A model registry row is not authoritative
+for a model's kind or capability" above, which is the entry to trust and the one to keep current.
+
+**Evidence.** After the owner's `/reload`, `ollama/clef:27b-cloud` appeared in `pi --list-models`, yet dispatching it
+as `ollama-cloud/clef:27b-cloud`, `ollama/clef:27b-cloud` and bare `clef:27b-cloud` all returned "Unknown subagent
+model … in the active Pi model registry". The probe fell back to the already-proven worker model, and the fidelity
+verdict stayed with the parent seat — which was the right split regardless, because a probe driver only needs to
+collect evidence, not judge it.
+
+**Trigger.** A model works in the session but a child refuses it; a registry grep showing an id that `--list-models`
+will not print; any plan whose first step is "dispatch to the model we just added".
+
+---
+
 ## Never round-trip a UTF-8 file through `Get-Content` / `Set-Content` (2026-10-29)
 
 **Rule.** On this platform, `Get-Content` decodes UTF-8 as the system ANSI code page and `Set-Content -Encoding
