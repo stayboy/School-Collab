@@ -570,6 +570,12 @@ ground truth, so the checklist — not an image diff — is the real test.
 (grill round 2 Q3). Nothing is submitted, nothing is pushed. The verdict above stays `ACCEPTED PENDING LIVE PASS`;
 the probe is a park, not a pass. `gh stack submit --open` happens only after the browser finally sees the page.
 
+**Scope of "all UI work" — settled (grill round 5, Q11): it means all UI work on THIS page.** The probe runs
+**before round (b) stacks on this layer**. Recording why, because the wording reads the other way: if the progress
+page were written on top first, any defect the browser then found would have to be fixed *under layer (b)* — moving
+a reviewed tip, or burying the fix in a diff about a different page. Cost accepted: one extra probe run when round
+(b)'s own page is ready.
+
 The AppHost was killed and its ports checked closed; `postgres-84ff496f` / `rabbitmq-84ff496f` were left running
 on purpose (persistent data-volume lifetime) — the seeded fixtures and the two settings rows survive the pause.
 
