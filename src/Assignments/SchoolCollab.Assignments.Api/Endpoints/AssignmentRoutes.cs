@@ -28,6 +28,8 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.QuestionsDraft;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.QuestionGeneration;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RegenerateAttachmentExtraction;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.QuestionsDraft;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAudience;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAudiencePreview;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAuthoringChildren;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetGuardianGate;
@@ -1074,6 +1076,41 @@ public static class AssignmentRoutes
             [FromServices] IQueryHandler<ListAssignmentRecipients, AssignmentRecipientDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListAssignmentRecipients(id), ct)));
+
+        // ── The audience read (spec §4.2 — Q130/Q145/Q146) and its draft variant (Q152) ──
+        // One table, two states: the published side is LOG-backed and answers "who got it", the
+        // draft side resolves the persisted targets through the same chain publish runs and answers
+        // "who would". Both read relative paths on this group, both answer TypedResults, and neither
+        // persists anything. A tenant-foreign (or deleted) id is a 404, exactly like an unknown one.
+        group.MapGet("/{id:guid}/audience", async Task<Results<Ok<AssignmentAudienceDto>, NotFound>> (
+            Guid id,
+            [FromServices] IQueryHandler<GetAssignmentAudience, AssignmentAudienceDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                return TypedResults.Ok(await handler.HandleAsync(new GetAssignmentAudience(id), ct));
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return TypedResults.NotFound();
+            }
+        });
+
+        group.MapGet("/{id:guid}/audience/preview", async Task<Results<Ok<AssignmentAudienceDto>, NotFound>> (
+            Guid id,
+            [FromServices] IQueryHandler<GetAssignmentAudiencePreview, AssignmentAudienceDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                return TypedResults.Ok(await handler.HandleAsync(new GetAssignmentAudiencePreview(id), ct));
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return TypedResults.NotFound();
+            }
+        });
 
         // WS-E2 (ar-16): failed notification deliveries for an assignment — the
         // read side the ar-17 Admin failure surface renders. Failed rows only and

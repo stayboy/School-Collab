@@ -1,6 +1,5 @@
 using System.Net;
 using System.Security.Claims;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Bunit;
@@ -13,45 +12,46 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Moq;
 using RichardSzalay.MockHttp;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
-using DetailPage = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Detail;
 using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Features;
-using DetailPage_Component = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Detail;
+using SchoolCollab.Students.Application.Services;
+using DetailPage = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Detail;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
 
-/// <summary>WS-A2 / spec §3.5 step 2 + §7 Q2 — the Detail page
-/// surfaces for the new lifecycle states (decision (j)):
-/// <list type="bullet">
-///   <item>Scheduled renders badge + "Publish now" + "Cancel schedule" + "Available from".</item>
-///   <item>Archived renders the Archived badge and NO Edit/Publish/Schedule/Submit controls.</item>
-///   <item>Approval section is gated: flag OFF == panel absent; flag ON + Draft == "Submit for Approval"; flag ON + Pending == Approve+Reject buttons (confirmed via dialog).</item>
-///   <item>Draft + flag ON == "Schedule…" rendered; the ScheduleDialog flow drives POST /assignments/{id}/schedule.</item>
-/// </list>
-/// Uses the same Blazor + MockHttp + bUnit pattern as the
-/// <c>AssignmentIndexBunitTests</c>; <c>FeatureFlagGate</c> from
-/// <c>Admin.Shared</c> re-evaluates on parameter change so the flag
-/// in the test DI controls the gating directly.
+/// <summary>
+/// Round <c>assignment-view-page</c> — the rebuilt view page (spec
+/// assignment-detail-view-modernization §4.1, §4.8–§4.10; round plan P5, P5b, P7, P8).
+/// <para>Pins the external behaviour the round's acceptance rests on: ONE shell-owned action-bar
+/// heading and ZERO tabs; both regions present; the status-driven primary (Publish / Unpublish /
+/// Archive / Open progress / none) with a visible reason wherever it is disabled (R1/P5b/AC4b/AC4c);
+/// the page menu's lifecycle verbs; the approval block's four decisions and its read-only approved
+/// state; the rail's Content &amp; Resources / Rules / Approval panels; the audience table's verdict set
+/// in both states; the pager absent when the set fits and the cap stated where the pager is
+/// (Q162/Q146).</para>
 /// </summary>
 [TestClass]
 public class AssignmentDetailBunitTests : BunitContext
 {
     private readonly MockHttpMessageHandler _mockHttp;
     private readonly JsonSerializerOptions _apiJsonOptions;
-    // ar-24 row 2: held so a discriminating test can stamp a teacher_id claim and assert
-    // the Detail page forwards it in the approve/reject/review bodies.
+
+    /// <summary>The circuit principal the approval verbs read their acting teacher from. No
+    /// <c>teacher_id</c> claim by default, so the bodies carry the server's <c>Guid.Empty</c>
+    /// placeholder — the same posture the reference approval tests pinned.</summary>
     private readonly StubAuthStateProvider _authStateProvider = new();
+
+    /// <summary>GET-hit counter for the assignment endpoint: the approval verbs reload the summary
+    /// after a successful POST, and a count of 2+ is the "page refreshed" observable.</summary>
+    private int _assignmentGetCount;
 
     public AssignmentDetailBunitTests()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
-        // ar-24 row 2: Detail resolves the acting teacher from the circuit principal's
-        // teacher_id claim via AuthenticationStateProvider. Default: no teacher_id claim
-        // => Guid.Empty, so the existing approve/reject body assertions hold.
-        Services.AddSingleton<AuthenticationStateProvider>(_authStateProvider);
 
         _apiJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
@@ -62,14 +62,14 @@ public class AssignmentDetailBunitTests : BunitContext
                 new JsonStringEnumConverter<GradingFormatDto>(),
                 new JsonStringEnumConverter<TargetAudienceTypeDto>(),
                 new JsonStringEnumConverter<ApprovalStatusDto>(),
-                new JsonStringEnumConverter<SignOffStateDto>(),
+                new JsonStringEnumConverter<ReviewStateDto>(),
+                // The Questions block's rows travel as the authoring child read's own DTO.
                 new JsonStringEnumConverter<QuestionTypeDto>(),
-                new JsonStringEnumConverter<ModuleTypeDto>(),
-                new JsonStringEnumConverter<ResourceKindDto>(),
-                // ar-18: the failures endpoint now emits these two as names (the host
-                // registers them), so the fixtures encode them the same way.
-                new JsonStringEnumConverter<NotificationKindDto>(),
+                // The audience read's own enums travel as names on the real host and on the client.
+                new JsonStringEnumConverter<ContactOwnerTypeDto>(),
                 new JsonStringEnumConverter<ContactChannelDto>(),
+                new JsonStringEnumConverter<GuardianRoleDto>(),
+                new JsonStringEnumConverter<AudienceDeliveryStateDto>()
             }
         };
 
@@ -81,67 +81,145 @@ public class AssignmentDetailBunitTests : BunitContext
         Services.AddSingleton<AssignmentsApiClient>();
         Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
         Services.AddSingleton(Mock.Of<ILogger<DetailPage>>());
-        // R1: Detail's Overview embeds the shared authoring component (View mode), which
-        // resolves FEATURE:EnableActivityGroups for the audience picker and injects the
-        // question-generation seams.
-        Services.AddSingleton<IFeatureFlagService>(new FakeFeatureFlagService());
-        Services.AddSingleton<SchoolCollab.Assignments.Application.Services.IAssignmentQuestionGenerator>(
-            Mock.Of<SchoolCollab.Assignments.Application.Services.IAssignmentQuestionGenerator>());
-        Services.AddSingleton<SchoolCollab.Assignments.Application.Services.IUrlTextExtractor>(
-            Mock.Of<SchoolCollab.Assignments.Application.Services.IUrlTextExtractor>());
-        Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Assignments.Application.Components.Pages.Assignments.AssignmentAuthoring>>());
-        // Detail.razor injects StudentsApiClient for the publish dialog contact picker.
-        Services.AddSingleton<SchoolCollab.Students.Application.Services.StudentsApiClient>();
+
+        // The Approval block's verbs read the acting teacher off the circuit principal.
+        Services.AddSingleton<AuthenticationStateProvider>(_authStateProvider);
+
+        // The Details block EMBEDS the authoring surface's read-only body (R7/D2), so the page's render
+        // tree now needs that component's own dependencies. They are registered here, at the page
+        // level, because the page is the thing under test — its child's backends are stubs.
+        Services.AddSingleton<StudentsApiClient>();
         Services.AddSingleton<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>();
-        Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Students.Application.Services.StudentsApiClient>>());
-        // C3: Detail renders SignOffSection, which injects CertificateDownloadService
-        // (the JS save path has no DOM in bUnit — these tests assert the action gating).
-        Services.AddSingleton<SchoolCollab.Assignments.Application.Services.CertificateDownloadService>();
-        Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Assignments.Application.Services.CertificateDownloadService>>());
+        Services.AddSingleton(Mock.Of<ILogger<StudentsApiClient>>());
+        Services.AddSingleton(Mock.Of<ILogger<AssignmentAuthoring>>());
+        Services.AddSingleton<IFeatureFlagService>(new FakeFeatureFlagService());
     }
 
-    /// <summary>GET-hit counter for the assignment endpoint — the approve /
-    /// reject / schedule flows reload <c>_item</c> after a successful POST, so a
-    /// count of 2+ is the "page reloaded" observable from the plan's binding
-    /// coverage list.</summary>
-    private int _assignmentGetCount;
-
-    /// <summary>Opens the embedded authoring bar's kebab. The bar renders from the shared
-    /// component's own (async) load, so the helper waits for the trigger before clicking — and
-    /// the click stays outside any WaitForAssertion body (a click re-issued on every retry
-    /// oscillates the menu open/closed).</summary>
-    private static void OpenAuthoringActionsMenu(IRenderedComponent<DetailPage_Component> cut)
+    private static AssignmentSummaryDto MakeDto(
+        AssignmentStatusDto status,
+        ApprovalStatusDto? approvalStatus = null,
+        DateTimeOffset? dueDate = null,
+        bool requiresSignature = false,
+        DateTimeOffset? publishedAt = null,
+        bool requiresApproval = false,
+        string topicName = "Biology",
+        string title = "Photosynthesis lab report")
     {
-        cut.WaitForAssertion(
-            () => cut.FindAll("fluent-button[title=\"More assignment actions\"]")
-                .Should().NotBeEmpty("the embedded authoring bar renders its kebab"),
-            TimeSpan.FromSeconds(15));
-        cut.Find("fluent-button[title=\"More assignment actions\"]").Click();
+        return new AssignmentSummaryDto(
+            Id: Guid.NewGuid(),
+            Title: title,
+            Description: null,
+            AssignmentType: AssignmentTypeDto.Digital,
+            GradingFormat: GradingFormatDto.TeacherGraded,
+            TargetAudienceType: TargetAudienceTypeDto.AllStudents,
+            TopicId: Guid.NewGuid(),
+            TopicName: topicName,
+            Status: status,
+            DueDate: dueDate,
+            MaxScore: 20,
+            MandatoryReview: false,
+            CreatedByTeacherId: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            AvailableFromUtc: null,
+            ArchiveGraceDays: 30,
+            ApprovalStatus: approvalStatus,
+            RequiresSignature: requiresSignature,
+            RequiresApproval: requiresApproval,
+            // "Has ever been published" is the page's own state selector: it picks the log-backed
+            // audience read, the submission counts and the Status panel's published wording.
+            PublishedAt: publishedAt ?? (status is AssignmentStatusDto.Published
+                or AssignmentStatusDto.Scheduled
+                or AssignmentStatusDto.Closed
+                or AssignmentStatusDto.Archived
+                    ? DateTimeOffset.UtcNow.AddDays(-1)
+                    : null));
     }
 
-    private void SetupGetAssignment(AssignmentSummaryDto dto, params NotificationFailureDto[] failures)
+    private static AudienceStudentDto UnreachedStudent(string name) =>
+        new(Guid.NewGuid(), name, false, []);
+
+    private static AudienceContactDto Contact(
+        AudienceDeliveryStateDto state,
+        ContactChannelDto channel = ContactChannelDto.Email,
+        GuardianRoleDto? role = GuardianRoleDto.Primary,
+        DateTimeOffset? sentAt = null,
+        DateTimeOffset? openedAt = null,
+        string? failureReason = null,
+        bool retryScheduled = false) =>
+        new(ContactOwnerTypeDto.Guardian, channel, role, SubscriptionActive: true, NotifyOnBroadcast: true,
+            state, sentAt, openedAt, failureReason, retryScheduled, TemplateId: null);
+
+    private static AssignmentAudienceDto Audience(IEnumerable<AudienceStudentDto> rows, bool truncated = false) =>
+        new(rows.ToList(), truncated, Degraded: false);
+
+    private static AssignmentQuestionReadDto Question(
+        int order,
+        string text,
+        QuestionTypeDto type = QuestionTypeDto.MultipleChoice,
+        params (string Text, bool Correct)[] options) =>
+        new(Guid.NewGuid(), text, type, order, null,
+            options.Select(option => new AssignmentQuestionOptionReadDto(Guid.NewGuid(), option.Text, option.Correct))
+                .ToList());
+
+    /// <summary>The resolved policy the fixture answers with unless a test supplies its own: every
+    /// optional field unset, so a row's "built-in" wording is what the panel has to state.</summary>
+    private static readonly EffectiveAssignmentPolicy DefaultPolicy = new(
+        SignatureRequirement: SignatureRequirementMode.Disabled,
+        RequiresApprovalBeforePublish: false,
+        MaxPrimaryContacts: null,
+        MaxCopyContacts: null,
+        MandatoryReview: null,
+        ArchiveGraceDays: null,
+        ApprovalWindowDays: null,
+        SignatureRequirementFromOverride: false,
+        RequiresApprovalBeforePublishFromOverride: false,
+        MaxPrimaryContactsFromOverride: false,
+        MaxCopyContactsFromOverride: false,
+        MandatoryReviewFromOverride: false,
+        ArchiveGraceDaysFromOverride: false,
+        ApprovalWindowDaysFromOverride: false);
+
+    private static AssignmentAttachmentReadDto Attachment(
+        string fileName,
+        string contentType,
+        AttachmentExtractionStatusDto extractionStatus = AttachmentExtractionStatusDto.Succeeded,
+        string? extractionError = null) =>
+        new(Guid.NewGuid(), fileName, contentType, 1024, $"attachments/{fileName}", extractionStatus,
+            extractionStatus == AttachmentExtractionStatusDto.Succeeded ? "extracted" : null,
+            extractionStatus == AttachmentExtractionStatusDto.Succeeded ? DateTimeOffset.UtcNow : null,
+            extractionError);
+
+    private static ResourceDto Resource(string? displayName, string? url) =>
+        new(Guid.NewGuid(), Guid.Empty, ResourceKindDto.Url, url, null, displayName, IncludedInGeneration: true);
+
+    private void SetupGetAssignment(
+        AssignmentSummaryDto dto,
+        AssignmentAudienceDto? audience = null,
+        SubmissionForReviewDto[]? submissions = null,
+        SignOffStatusDto[]? signOff = null,
+        IReadOnlyList<AssignmentQuestionReadDto>? questions = null,
+        bool childrenReadFails = false,
+        EffectiveAssignmentPolicy? policy = null,
+        bool policyReadFails = false,
+        IReadOnlyList<AssignmentAttachmentReadDto>? attachments = null,
+        IReadOnlyList<ResourceDto>? resources = null,
+        bool audienceReadFails = false)
     {
-        // R1: the embedded shared authoring component self-loads its pickers, policy reads
-        // and (for a Draft) the questions draft. Every specific route is registered BEFORE
-        // the generic detail read (MockHttp v6 first-match ordering).
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/questions-draft")
-            .Respond(HttpStatusCode.OK, "application/json", "[]");
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/effective-policy")
-            .Respond(HttpStatusCode.OK, "application/json",
-                "{\"signatureRequirement\":\"Disabled\",\"requiresApprovalBeforePublish\":false," +
-                "\"maxPrimaryContacts\":null,\"maxCopyContacts\":null,\"mandatoryReview\":null," +
-                "\"archiveGraceDays\":null,\"signatureRequirementFromOverride\":false," +
-                "\"requiresApprovalBeforePublishFromOverride\":false,\"maxPrimaryContactsFromOverride\":false," +
-                "\"maxCopyContactsFromOverride\":false,\"mandatoryReviewFromOverride\":false," +
-                "\"archiveGraceDaysFromOverride\":false}");
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/ai-prompt-policy")
-            .Respond(HttpStatusCode.OK, "application/json", "{\"aiPromptLocked\":false}");
-        _mockHttp.When(HttpMethod.Get, "http://localhost/students/grade-levels")
-            .Respond(HttpStatusCode.OK, "application/json", "[]");
-        _mockHttp.When(HttpMethod.Get, "http://localhost/students/subjects/by-grade/*")
-            .Respond(HttpStatusCode.OK, "application/json", "[]");
-        _mockHttp.When(HttpMethod.Get, "http://localhost/activity-groups*")
-            .Respond(HttpStatusCode.OK, "application/json", "[]");
+        // The Rules panel's read. Registered before the detail read (MockHttp v6 first-match ordering
+        // is registration order): the id route is a literal guid and cannot collide, but the wildcard
+        // must not be reached through a broader handler either.
+        if (policyReadFails)
+        {
+            _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/effective-policy*")
+                .Respond(HttpStatusCode.InternalServerError);
+        }
+        else
+        {
+            _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/effective-policy*")
+                .Respond(HttpStatusCode.OK, "application/json",
+                    JsonSerializer.Serialize(policy ?? DefaultPolicy, _apiJsonOptions));
+        }
 
         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
             .Respond(_ =>
@@ -149,340 +227,906 @@ public class AssignmentDetailBunitTests : BunitContext
                 _assignmentGetCount++;
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent(JsonSerializer.Serialize(dto, _apiJsonOptions),
-                        Encoding.UTF8, "application/json")
+                    Content = new StringContent(
+                        JsonSerializer.Serialize(dto, _apiJsonOptions),
+                        System.Text.Encoding.UTF8,
+                        "application/json")
                 };
             });
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/recipients")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<AssignmentRecipientDto>(), _apiJsonOptions));
+
+        // ONE child read feeds the Questions table and the rail's Content & Resources panel (P7).
+        if (childrenReadFails)
+        {
+            _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/authoring")
+                .Respond(HttpStatusCode.InternalServerError);
+        }
+        else
+        {
+            _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/authoring")
+                .Respond(HttpStatusCode.OK, "application/json",
+                    JsonSerializer.Serialize(
+                        new AssignmentAuthoringChildrenDto(
+                            dto.Id, questions ?? [], attachments ?? [], resources ?? [], []),
+                        _apiJsonOptions));
+        }
+
+        // The published read is log-backed; the draft read resolves the persisted targets (P2/P2b).
+        var audiencePath = dto.PublishedAt is null ? "audience/preview" : "audience";
+        if (audienceReadFails)
+        {
+            _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/{audiencePath}")
+                .Respond(HttpStatusCode.InternalServerError);
+        }
+        else
+        {
+            _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/{audiencePath}")
+                .Respond(HttpStatusCode.OK, "application/json",
+                    JsonSerializer.Serialize(audience ?? Audience([]), _apiJsonOptions));
+        }
+
         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/submissions")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<SubmissionForReviewDto>(), _apiJsonOptions));
-        // WS-C1: SignOffSection self-loads the per-ward status rows when the
-        // assignment requires a signature. Empty by default so the render
-        // gate is the only observable (a real status table is covered by
-        // SignOffSectionBunitTests).
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/sign-off-statuses")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<SignOffStatusDto>(), _apiJsonOptions));
-        // WS-E2 / ar-17: Published/Scheduled/Closed assignments render the
-        // self-loading NotificationFailuresSection, which reads the failures
-        // endpoint + the guardian contact list. Empty by default so the tab-gate
-        // is the only observable here (the section's row/empty/error behaviour
-        // is covered by NotificationFailuresSectionBunitTests).
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/notification-failures")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(failures, _apiJsonOptions));
-        _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed?ownerType=Guardian&scope=AllAssignments")
-            .Respond(HttpStatusCode.OK, "application/json", "[]");
+            .Respond(HttpStatusCode.OK, "application/json",
+                JsonSerializer.Serialize(submissions ?? [], _apiJsonOptions));
+
+        if (dto.RequiresSignature)
+        {
+            _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/sign-off-statuses")
+                .Respond(HttpStatusCode.OK, "application/json",
+                    JsonSerializer.Serialize(signOff ?? [], _apiJsonOptions));
+        }
     }
 
-    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false, DateTimeOffset? publishedAt = null, bool requiresApproval = false, string? approvalReason = null, DateTimeOffset? submittedAt = null, DateTimeOffset? windowExpiresAt = null) =>
-        new(
-            Id: Guid.NewGuid(),
-            Title: "Math HW",
-            Description: null,
-            AssignmentType: AssignmentTypeDto.Digital,
-            GradingFormat: GradingFormatDto.TeacherGraded,
-            TargetAudienceType: TargetAudienceTypeDto.AllStudents,
-            TopicId: Guid.NewGuid(),
-            TopicName: "Math",
-            Status: status,
-            DueDate: dueDate,
-            MaxScore: null,
-            MandatoryReview: false,
-            CreatedByTeacherId: Guid.NewGuid(),
-            CreatedAt: DateTimeOffset.UtcNow,
-            UpdatedAt: DateTimeOffset.UtcNow,
-            AvailableFromUtc: availableFromUtc,
-            ArchiveGraceDays: archiveGraceDays,
-            ApprovalStatus: approvalStatus,
-            RequiresSignature: requiresSignature,
-            // WS-E2b / ar-17: the failures-tab gate is "has ever been published", not a
-            // status test. An assignment in a post-publish status was necessarily published
-            // at some point; a Draft was not — unless the test supplies one (the unpublish
-            // case, where Unpublish() returns it to Draft with its history intact).
-            // Q6 / D3: the server-derived approval gate the Detail panel reads (the read
-            // handler ORs the effective policy with FEATURE:RequireAssignmentApproval).
-            RequiresApproval: requiresApproval,
-            // Round assignment-approval-workflow (spec §3.1/§3.3): the decision reason, the submission
-            // stamp and the server-derived window expiry the approval panel renders.
-            ApprovalReason: approvalReason,
-            SubmittedAt: submittedAt,
-            WindowExpiresAt: windowExpiresAt,
-            PublishedAt: publishedAt ?? (status is AssignmentStatusDto.Published
-                or AssignmentStatusDto.Scheduled
-                or AssignmentStatusDto.Closed
-                or AssignmentStatusDto.Archived
-                    ? DateTimeOffset.UtcNow.AddDays(-1)
-                    : null));
+    private IRenderedComponent<DetailPage> RenderDetail(AssignmentSummaryDto dto) =>
+        Render<DetailPage>(parameters => parameters.Add(page => page.Id, dto.Id));
+
+    // ── AC4: one shell-owned heading, zero tabs, both regions ─────────────────────────
 
     [TestMethod]
-    public void Detail_Scheduled_RendersScheduledBadgeAndActions()
+    public void Detail_RendersOneShellHeading_AndNoTabs()
     {
-        var dto = MakeDto(AssignmentStatusDto.Scheduled,
-            availableFromUtc: DateTimeOffset.UtcNow.AddDays(1));
-        SetupGetAssignment(dto);
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        var cut = RenderDetail(dto);
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("Scheduled");
-            // assignment-create-edit-redesign D2/D3: the View surface the Detail page embeds is now
-            // the SUMMARY, so the scheduled window is asserted through its facts grid (the same
-            // local-time "g" rendering the Basics lifecycle readout used).
-            cut.Find("#authoring-fact-available-from").TextContent.Trim()
-                .Should().Be(dto.AvailableFromUtc!.Value.ToLocalTime().ToString("g"),
-                    "the summary facts grid surfaces the Scheduled window (UX-15)");
-            // §11: Scheduled's primary action is Unpublish; the secondary actions are in the
-            // kebab (Reschedule replaces the retired "Cancel schedule" button).
-            cut.Find("#authoring-primary-action").TextContent.Trim().Should().Be("Unpublish");
+            cut.FindAll("h2.authoring-heading").Should().ContainSingle(
+                "AC4/R2 — the shell owns the page's only action-bar heading");
+            cut.FindAll("h1").Should().BeEmpty("this page renders no h1 at all — the shell's h2 is the heading");
+            cut.FindAll("fluent-tab").Should().BeEmpty("the tabs are the regression this rewrite removes");
+            cut.Find("#assignment-audience").Should().NotBeNull("the main region carries the audience block");
+            cut.Find("#assignment-status").Should().NotBeNull("the main region carries the Status block");
+            cut.Find("#assignment-rail").Should().NotBeNull("the rail region exists for its blocks");
         }, TimeSpan.FromSeconds(15));
-
-        // The kebab click stays OUTSIDE the wait: a click inside a WaitForAssertion body is
-        // re-issued on every retry, which oscillates the menu open/closed forever (the
-        // recursion guard for that trap).
-        OpenAuthoringActionsMenu(cut);
-        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim())
-            .Should().Contain("Reschedule"));
     }
 
+    // ── AC4b / R1 / P8: the disabled primary and its reason, never a 404 link ────────
+
     [TestMethod]
-    public void Detail_Archived_ShowsBadgeAndNoEditOrActions()
+    public void Detail_Published_PrimaryIsOpenProgress_DisabledWithAVisibleReason_AndNoProgressHref()
     {
-        var dto = MakeDto(AssignmentStatusDto.Archived);
-        SetupGetAssignment(dto);
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        var cut = RenderDetail(dto);
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Archived"));
-        // No edit / publish / schedule / submit controls.
-        cut.Markup.Should().NotContain(">Edit<");
-        cut.Markup.Should().NotContain(">Publish<");
-        cut.Markup.Should().NotContain("Schedule");
+        cut.WaitForAssertion(() =>
+        {
+            var primary = cut.Find("#assignment-primary-action");
+            primary.TextContent.Trim().Should().Be("Open progress", "R1 pins the published primary");
+            primary.HasAttribute("disabled").Should().BeTrue("the route does not exist until round b");
+
+            cut.Find("#assignment-progress-reason").TextContent.Trim()
+                .Should().NotBeEmpty("a disabled control states why it cannot be used");
+
+            // AC4b — the guard scans ANY element carrying an href, not just <a>: FluentLink renders
+            // <fluent-link href="…">, which an anchor-only selector never sees and which would let a
+            // 404ing /progress link through this assertion unnoticed.
+            var progressHrefs = cut.FindAll("[href]")
+                .Select(host => host.GetAttribute("href"))
+                .Where(href => href is not null && href.Contains("/progress", StringComparison.Ordinal))
+                .ToList();
+            progressHrefs.Should().BeEmpty("the page must never carry a link that 404s");
+
+            cut.FindAll("fluent-button").Should().Contain(button => button.TextContent.Trim() == "Unpublish",
+                "R1 keeps Unpublish live beside the disabled primary");
+        }, TimeSpan.FromSeconds(15));
     }
 
     [TestMethod]
-    public void Detail_NotRequiresApproval_ApprovalPanelHidden()
+    public void Detail_StatusPanel_RendersDisabledProgress_WithItsReason()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("#assignment-status-foot fluent-button")
+                .Should().Contain(button => button.TextContent.Trim() == "Open progress");
+            cut.Find("#assignment-status-progress-reason").TextContent.Trim()
+                .Should().Be("Progress page arrives with the submission queue",
+                    "P8 pins the reason the progress affordance cannot be used yet");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    // ── The audience table's verdict set, in both states (§4.2, Q152) ─────────────────
+
+    [TestMethod]
+    public void Detail_Published_DeliveryPanel_RendersTheLogVerdicts()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        var sentAt = DateTimeOffset.Now.AddMinutes(-30);
+        var openedAt = DateTimeOffset.Now.AddMinutes(-5);
+
+        SetupGetAssignment(dto, Audience(
+        [
+            UnreachedStudent("Adeyemi, Tolu"),
+            new AudienceStudentDto(Guid.NewGuid(), "Okafor, Ngozi", true,
+            [
+                Contact(AudienceDeliveryStateDto.Sent, sentAt: sentAt, openedAt: openedAt),
+                Contact(AudienceDeliveryStateDto.Failed, ContactChannelDto.SMS, failureReason: "mailbox full",
+                    retryScheduled: true)
+            ]),
+            new AudienceStudentDto(Guid.NewGuid(), "Bello, Ifeoma", true,
+                [Contact(AudienceDeliveryStateDto.Skipped, failureReason: "guardian opted out")]),
+            new AudienceStudentDto(Guid.NewGuid(), "Hassan, Yusuf", true,
+                [Contact(AudienceDeliveryStateDto.Unknown)])
+        ]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-audience-title").TextContent.Trim()
+                .Should().Be("Delivery", "the published panel is titled Delivery");
+
+            var table = cut.Find("#assignment-audience-table");
+            var verdicts = table.QuerySelectorAll("tbody td.audience-table__verdict")
+                .Select(cell => cell.TextContent.Trim()).ToList();
+
+            verdicts.Should().Contain("Opened", "Sent plus the recipient's opened stamp reads Opened");
+            verdicts.Should().Contain("Failed");
+            verdicts.Should().Contain("Skipped");
+            verdicts.Should().Contain("Unknown", "AC3 — a missing log row is never a fabricated Sent");
+            verdicts.Should().Contain("Not reached", "AC2 — an unreached student is a visible row");
+
+            table.TextContent.Should().Contain("mailbox full · retry scheduled");
+            table.TextContent.Should().Contain("guardian opted out");
+            table.TextContent.Should().Contain("2 · Primary",
+                "guardian role and count only — no guardian name, no address (§4.9)");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_Draft_TargetsAndAudiencePanel_RendersTheAtPublishVerdicts()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft, title: "Yeast respiration write-up");
+        SetupGetAssignment(dto, Audience(
+        [
+            UnreachedStudent("Adeyemi, Tolu"),
+            new AudienceStudentDto(Guid.NewGuid(), "Okafor, Ngozi", true,
+                [Contact(AudienceDeliveryStateDto.NotPublishingYet)]),
+            new AudienceStudentDto(Guid.NewGuid(), "Bello, Ifeoma", false,
+                [Contact(AudienceDeliveryStateDto.BlockedByPolicy)])
+        ]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-audience-title").TextContent.Trim()
+                .Should().Be("Targets & Audience", "a draft swaps Delivery for Targets & Audience");
+
+            var table = cut.Find("#assignment-audience-table");
+            var verdicts = table.QuerySelectorAll("tbody td.audience-table__verdict")
+                .Select(cell => cell.TextContent.Trim()).ToList();
+
+            verdicts.Should().Contain("Will notify");
+            verdicts.Should().Contain("Blocked by policy", "the filter's verdict is shown, not silence");
+            verdicts.Should().Contain("No contact");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    // ── AC6 / P7: pager presence and the cap notice ──────────────────────────────────
+
+    [TestMethod]
+    public void Detail_AudienceThatFits_RendersNoPager_AndNoRowsPerPageControl()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience(Enumerable.Range(1, 8)
+            .Select(index => new AudienceStudentDto(Guid.NewGuid(), $"Student {index:D2}", true,
+                [Contact(AudienceDeliveryStateDto.Sent, sentAt: DateTimeOffset.Now)]))));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("tbody tr").Count.Should().Be(8);
+            cut.FindComponents<FluentPaginator>().Should().BeEmpty(
+                "Q162 — a set that fits on one page renders no pager");
+            cut.FindAll("#assignment-audience-rows-per-page").Should().BeEmpty(
+                "and no rows-per-page selector either");
+            cut.Find("#assignment-audience-range").TextContent.Trim()
+                .Should().StartWith("Showing 1–8 of 8");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_AudienceThatOverflows_PagesAtFifteen()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience(Enumerable.Range(1, 28)
+            .Select(index => new AudienceStudentDto(Guid.NewGuid(), $"Student {index:D2}", true,
+                [Contact(AudienceDeliveryStateDto.Sent, sentAt: DateTimeOffset.Now)]))));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-audience-range").TextContent.Trim()
+                .Should().StartWith("Showing 1–15 of 28", "AC6 pins the first page of the 15-per-page grid");
+            cut.FindComponents<FluentPaginator>().Should().NotBeEmpty("a 28-row set pages");
+            cut.Find("#assignment-audience-rows-per-page").Should().NotBeNull();
+            cut.FindAll("tbody tr").Count.Should().Be(15, "only the current page renders");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_ACappedAudience_StatesTheCapWhereThePagerIs()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience(
+            Enumerable.Range(1, AudienceLimits.AudienceCap)
+                .Select(index => new AudienceStudentDto(Guid.NewGuid(), $"Student {index:D3}", true,
+                    [Contact(AudienceDeliveryStateDto.Sent, sentAt: DateTimeOffset.Now)])),
+            truncated: true));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() => cut.Find("#assignment-audience-range").TextContent.Trim()
+            .Should().StartWith("Showing 1–15 of 200 (capped)",
+                "Q146 — the read is capped and the cap is stated where the pager is"),
+            TimeSpan.FromSeconds(15));
+    }
+
+    // ── R7/D2 + P7: Details embeds the authoring body; Questions is the page's own table ──
+
+    [TestMethod]
+    public void Detail_DetailsPanel_EmbedsTheAuthoringBody_WithAnEditLink()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-details-title").TextContent.Trim().Should().Be("Details");
+
+            var details = cut.Find("#assignment-details");
+            details.QuerySelector("dl.authoring-summary__facts").Should().NotBeNull(
+                "R7/D2 — Details is the authoring surface's own read-out, never a forked second layout (NFR-4)");
+
+            var edit = details.QuerySelector("#assignment-details-edit")!;
+            edit.TextContent.Trim().Should().Be("Edit ▸", "the one header action the Details panel carries");
+            edit.GetAttribute("href").Should().Be($"/assignments/{dto.Id}/edit");
+
+            details.QuerySelector("#authoring-breadcrumb").Should().BeNull("the embedded body brings no second trail");
+            details.QuerySelector(".authoring-actionbar").Should().BeNull("and no second action bar");
+            cut.FindAll("#authoring-breadcrumb").Should().ContainSingle("only the page's own trail");
+            cut.FindAll("#authoring-questions").Should().BeEmpty("the page owns Questions");
+            cut.FindAll("#authoring-targets").Should().BeEmpty("and Targets & Audience");
+            cut.FindAll("h1").Should().BeEmpty("the embedded body adds no heading of its own");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_QuestionsTable_RendersTheFourFeasibleColumns_AndNoPointsColumn()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(
+            dto,
+            Audience([UnreachedStudent("Adeyemi, Tolu")]),
+            questions:
+            [
+                Question(0, "Name the products", QuestionTypeDto.MultipleChoice, ("Glucose", false), ("Oxygen", true)),
+                Question(1, "Why does the leaf float?", QuestionTypeDto.ShortAnswer)
+            ]);
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            var headers = cut.FindAll("#assignment-questions-table thead th")
+                .Select(cell => cell.TextContent.Trim()).ToList();
+            string[] expectedHeaders = ["#", "Question", "Type", "Options"];
+            headers.Should().Equal(expectedHeaders,
+                "the feasible set — AssignmentQuestionReadDto has no points field, so no points column");
+
+            var table = cut.Find("#assignment-questions-table");
+            table.TextContent.Should().NotContain("pts");
+            table.TextContent.Should().NotContain("Points");
+
+            var rows = table.QuerySelectorAll("tbody tr").ToList();
+            rows.Should().HaveCount(2);
+            rows[0].TextContent.Should().Contain("Oxygen ✓", "the correct option is marked in the Options cell");
+            rows[0].QuerySelector(".questions-table__number")!.TextContent.Trim().Should().Be("1");
+            rows[1].QuerySelector(".questions-table__type")!.TextContent.Trim().Should().Be("Short answer");
+            rows[1].QuerySelector(".questions-table__options")!.TextContent.Trim().Should()
+                .Be("—", "a short-answer row carries no options — the payload has none");
+
+            cut.FindAll("#assignment-questions fluent-button").Should().BeEmpty(
+                "read-only: the view page exposes no editing affordance for a question");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_QuestionsThatFit_RenderNoPager()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(
+            dto,
+            Audience([UnreachedStudent("Adeyemi, Tolu")]),
+            questions: Enumerable.Range(1, 8)
+                .Select(index => Question(index - 1, $"Question {index:D2}"))
+                .ToList());
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("#assignment-questions-table tbody tr").Count.Should().Be(8);
+            cut.FindComponents<FluentPaginator>().Should().BeEmpty(
+                "Q162 — a set that fits on one page renders no pager");
+            cut.FindAll("#assignment-questions-rows-per-page").Should().BeEmpty(
+                "and no rows-per-page selector either");
+            cut.Find("#assignment-questions-range").TextContent.Trim().Should().Be("Showing 1–8 of 8");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_QuestionsThatOverflow_PageAtFifteen()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(
+            dto,
+            Audience([UnreachedStudent("Adeyemi, Tolu")]),
+            questions: Enumerable.Range(1, 28)
+                .Select(index => Question(index - 1, $"Question {index:D2}"))
+                .ToList());
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-questions-range").TextContent.Trim()
+                .Should().Be("Showing 1–15 of 28", "AC6 pins the first page of the 15-per-page grid");
+            cut.FindAll("#assignment-questions-table tbody tr").Count.Should().Be(15, "only the current page renders");
+            cut.FindComponents<FluentPaginator>().Should().ContainSingle("a 28-row set pages");
+            cut.Find("#assignment-questions-rows-per-page").Should().NotBeNull();
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_NoQuestions_RenderTheEmptyLine_NotAnEmptyBox()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-questions-empty").TextContent.Trim().Should().Be("No questions yet.");
+            cut.FindAll("#assignment-questions-table").Should().BeEmpty("an empty set is a line, not an empty box");
+            cut.FindAll("#assignment-questions-footer").Should().BeEmpty("no range and no pager for no rows");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_QuestionsReadFails_DegradesToAMessageInsideThePanel()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]), childrenReadFails: true);
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-questions-unavailable").TextContent.Should()
+                .Contain("could not be loaded", "a supporting outage never fails the page");
+            cut.Find("#assignment-audience").Should().NotBeNull("Delivery still renders");
+            cut.Find("#assignment-status").Should().NotBeNull("and so does the Status panel");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    // ── R3: the Status panel renders on a draft too, with one reason line ────────────
+    [TestMethod]
+    public void Detail_Draft_StatusPanel_RendersDraftWording()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft, title: "Yeast respiration write-up");
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-status-progress").TextContent.Should().Contain("Not published yet");
+            cut.Find("#assignment-status-signoff").TextContent.Should().Contain("Not requested");
+            cut.Find("#assignment-status-notifications").TextContent.Should().Contain("Nothing sent");
+            cut.Find("#assignment-status-draft-reason").TextContent.Should()
+                .Contain("Delivery, sign-off and progress all start at publish");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_Published_StatusPanel_ReportsTheCohortAndTheSendout()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(
+            dto,
+            Audience(
+            [
+                new AudienceStudentDto(Guid.NewGuid(), "Okafor, Ngozi", true,
+                [
+                    Contact(AudienceDeliveryStateDto.Sent, sentAt: DateTimeOffset.Now),
+                    Contact(AudienceDeliveryStateDto.Failed, ContactChannelDto.SMS, failureReason: "mailbox full")
+                ]),
+                new AudienceStudentDto(Guid.NewGuid(), "Bello, Ifeoma", false,
+                    [Contact(AudienceDeliveryStateDto.Skipped)])
+            ]),
+            submissions:
+            [
+                new SubmissionForReviewDto(Guid.NewGuid(), dto.Id, dto.Title, Guid.NewGuid(), 1,
+                    ReviewStateDto.Graded, DateTimeOffset.UtcNow)
+            ]);
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            var progress = cut.Find("#assignment-status-progress").TextContent;
+            progress.Should().Contain("Cohort 2");
+            progress.Should().Contain("Submitted 1 · Graded 1");
+            progress.Should().Contain("Reached 1");
+
+            cut.Find("#assignment-status-notifications").TextContent.Should().Contain("Sent 1");
+            cut.Find("#assignment-status-notifications").TextContent.Should().Contain("Failed 1");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    // ── The status pill vocabulary (§4.5) and the sign-off chip ──────────────────────
+
+    [TestMethod]
+    public void Detail_Published_StatusIsASemanticPill()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            var pill = cut.Find("#assignment-status-pill");
+            pill.TextContent.Trim().Should().Be("Published");
+            pill.ClassList.Should().Contain("status-pill--success", "published takes the success variant");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_RequiresSignature_RendersTheSignOffChipWithItsCounts()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published, requiresSignature: true);
+        var studentId = Guid.NewGuid();
+        SetupGetAssignment(
+            dto,
+            Audience([UnreachedStudent("Adeyemi, Tolu")]),
+            signOff:
+            [
+                new SignOffStatusDto(studentId, "Okafor, Ngozi", Guid.NewGuid(), "Guardian", Guid.NewGuid(),
+                    "Guardian", SignOffStateDto.Signed, DateTimeOffset.UtcNow, null, true, true, 1, null, null),
+                new SignOffStatusDto(Guid.NewGuid(), "Bello, Ifeoma", Guid.NewGuid(), "Guardian", null,
+                    null, SignOffStateDto.AwaitingSignature, null, null, true, false, null, null, null)
+            ]);
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() => cut.Find("#assignment-signoff-chip").TextContent.Trim()
+            .Should().Be("Sign-off 1/2"), TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_NotRequiresSignature_RendersNoSignOffChip()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() => cut.Find("#assignment-status").Should().NotBeNull());
+        cut.FindAll("#assignment-signoff-chip").Should().BeEmpty();
+    }
+
+    // ── The approval chip (the decision buttons are the held Approval block) ─────────
+
+    [TestMethod]
+    public void Detail_RequiresApproval_RendersTheApprovalChip_ForEachDecisionState()
+    {
+        foreach (var (status, expected) in new[]
+        {
+            ((ApprovalStatusDto?)null, "Approval not submitted"),
+            (ApprovalStatusDto.Pending, "Approval outstanding"),
+            (ApprovalStatusDto.Approved, "Approval ✓ approved"),
+            (ApprovalStatusDto.Rejected, "Approval rejected"),
+            (ApprovalStatusDto.Denied, "Approval denied")
+        })
+        {
+            var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: status, requiresApproval: true);
+            SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+            var cut = RenderDetail(dto);
+
+            cut.WaitForAssertion(() => cut.Find("#assignment-approval-chip").TextContent.Trim()
+                .Should().Be(expected, $"the chip names the {status?.ToString() ?? "not-submitted"} decision"),
+                TimeSpan.FromSeconds(15));
+        }
+    }
+
+    [TestMethod]
+    public void Detail_ApprovalNotRequired_RendersNoApprovalChip()
     {
         var dto = MakeDto(AssignmentStatusDto.Draft);
-        SetupGetAssignment(dto);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        var cut = RenderDetail(dto);
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
-        cut.Markup.Should().NotContain("Submit for Approval");
+        cut.WaitForAssertion(() => cut.Find("#assignment-status").Should().NotBeNull());
+        cut.FindAll("#assignment-approval-chip").Should().BeEmpty();
     }
 
-    [TestMethod]
-    public void Detail_RequiresApproval_Draft_RendersSubmitForApproval()
+    // ── WS-A4 / spec §3.1 — duplicate-as-template, now a page-menu action ────────────
+
+    private static void OpenPageActionsMenu(IRenderedComponent<DetailPage> cut)
     {
-        var dto = MakeDto(AssignmentStatusDto.Draft, requiresApproval: true);
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Submit for Approval"));
+        cut.WaitForAssertion(
+            () => cut.FindAll("fluent-button[title=\"Page actions\"]").Should().NotBeEmpty(
+                "the page's kebab renders beside the title"),
+            TimeSpan.FromSeconds(15));
+        cut.Find("fluent-button[title=\"Page actions\"]").Click();
     }
 
-    [TestMethod]
-    public void Detail_RequiresApproval_Pending_RendersApproveAndReject()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain("Approve");
-            cut.Markup.Should().Contain("Reject");
-        });
-    }
-
-    [TestMethod]
-    public void Detail_RequiresApproval_Approved_ShowsReadOnlyChip()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Approved, requiresApproval: true);
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Approved"));
-        cut.Markup.Should().NotContain("Submit for Approval");
-        cut.Markup.Should().NotContain("Reject");
-    }
-
-    [TestMethod]
-    public void Detail_Draft_ShowsScheduleAction()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Draft);
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"), TimeSpan.FromSeconds(15));
-
-        // §11: the Draft secondary actions live in the authoring bar's kebab (the retired
-        // Overview button row is gone — Detail's Overview renders the shared View mode).
-        OpenAuthoringActionsMenu(cut);
-        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim())
-            .Should().Contain("Schedule"));
-    }
-
-    // ── Approval chip-text matrix (decision (k) binding coverage) ──
-
-    [TestMethod]
-    public void Detail_ApprovalChipText_NotSubmittedWhenApprovalStatusNull()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: null, requiresApproval: true);
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain("Not submitted",
-                "null ApprovalStatus renders the 'Not submitted' chip text");
-        });
-    }
-
-    [TestMethod]
-    public void Detail_ApprovalChipText_PendingRendersPendingText()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Pending"));
-    }
-
-    [TestMethod]
-    public void Detail_ApprovalChipText_RejectedRendersRejectedText()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected, requiresApproval: true);
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Rejected"));
-    }
-
-    // ── UI-tester rework P2: a REJECTED (still-Draft) assignment must
-    //    keep a resubmit path in Detail, consistent with the Index
-    //    "Submit for Approval" action. The original gate restricted the
-    //    button to "ApprovalStatus is null", leaving a rejected draft
-    //    with only the chip and no way to resubmit. The fixed gate is
-    //    "null or Rejected" so a rejected draft sees the resubmit button.
-    [TestMethod]
-    public void Detail_RequiresApproval_RejectedDraft_RendersSubmitForApproval()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected, requiresApproval: true);
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain("Rejected",
-                "the chip still surfaces the rejected state");
-            cut.Markup.Should().Contain("Submit for Approval",
-                "a rejected Draft must offer the resubmit path in Detail, consistent with the Index");
-        });
-    }
-
-    // ── Approve confirm/decline flows (decision (k) binding coverage) ──
-
-    /// <summary>Mocks the confirm dialog (<c>ShowConfirmDialogAsync</c> resolves
-    /// to <c>ShowDialogAsync&lt;ConfirmDialog, ConfirmDialogContent&gt;</c>) at the
-    /// requested outcome — the ResourcesSectionBunitTests /
-    /// QuestionEditorSectionBunitTests pattern. <see cref="FluentServiceMocks.RegisterDialogService"/>
-    /// replaces the real FluentUI registration (GetRequiredService returns the FIRST registration,
-    /// so it must be removed, not shadowed).</summary>
+    /// <summary>Mocks the confirm dialog (<c>ShowConfirmDialogAsync</c> resolves to
+    /// <c>ShowDialogAsync&lt;ConfirmDialog, ConfirmDialogContent&gt;</c>) at the requested outcome.</summary>
     private Mock<DialogService> SetupConfirmDialogResult(bool confirmed)
     {
-        // Cancelled when the user declines; Ok when they confirm.
-        var result = confirmed
-            ? DialogResult.Ok<object?>(null)
-            : DialogResult.Cancel();
+        var result = confirmed ? DialogResult.Ok<object?>(null) : DialogResult.Cancel();
         var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .Setup(dialog => dialog.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
             .ReturnsAsync(result);
         return dialogMock;
     }
 
     [TestMethod]
-    public void Detail_RequiresApproval_Pending_ApproveClicked_UserConfirms_PostsApprove()
+    public void Detail_PageMenu_OffersDuplicate()
     {
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
-        SetupGetAssignment(dto);
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        OpenPageActionsMenu(cut);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(item => item.TextContent.Trim())
+            .Should().Contain("Duplicate"));
+    }
+
+    [TestMethod]
+    public void Detail_DuplicateConfirmed_PostsAndNavigatesToTheCopy()
+    {
+        var sourceId = Guid.NewGuid();
+        var newId = Guid.NewGuid();
+        var dto = MakeDto(AssignmentStatusDto.Published) with { Id = sourceId };
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
         SetupConfirmDialogResult(confirmed: true);
 
-        // The Expect matches only the POST (the initial GET falls through to
-        // the When backend above — the AssignmentIndexBunitTests
-        // expect-before-backend ordering note). The body assertion pins the
-        // Guid.Empty approver placeholder (decision (f) / spec §7 Q2 identity
-        // posture).
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        var cut = RenderDetail(dto);
 
-        // The Approve / Reject buttons carry no title attribute — select by
-        // text content (the TopicCreateDialogTests fluent-button precedent).
+        OpenPageActionsMenu(cut);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(item => item.TextContent.Trim())
+            .Should().Contain("Duplicate"));
+
+        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{sourceId}/duplicate")
+            .Respond(HttpStatusCode.Created, "application/json", JsonSerializer.Serialize(new { id = newId }));
+
+        cut.FindAll("fluent-menu-item").Single(item => item.TextContent.Trim() == "Duplicate").MenuItemClick();
+
         cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Approve"));
+        {
+            _mockHttp.VerifyNoOutstandingExpectation();
+            Services.GetRequiredService<NavigationManager>().Uri
+                .Should().EndWith($"/assignments/{newId}", "confirming duplicate navigates to the copy");
+        }, TimeSpan.FromSeconds(15));
+    }
 
-        // v6 ordering rule (the flag-ON Index test's documented constraint): an
-        // outstanding Expect 404s every other request, so it is registered
-        // only now — the initial GETs are already served by the When backends.
-        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/approve")
-            .WithContent(JsonSerializer.Serialize(new ApproveAssignmentRequest(Guid.Empty), _apiJsonOptions))
+    [TestMethod]
+    public void Detail_DuplicateDeclined_PostsNothing()
+    {
+        var sourceId = Guid.NewGuid();
+        var dto = MakeDto(AssignmentStatusDto.Published) with { Id = sourceId };
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+        var dialogMock = SetupConfirmDialogResult(confirmed: false);
+
+        var postCount = 0;
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{sourceId}/duplicate")
+            .Respond(_ =>
+            {
+                postCount++;
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            });
+
+        var cut = RenderDetail(dto);
+
+        OpenPageActionsMenu(cut);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(item => item.TextContent.Trim())
+            .Should().Contain("Duplicate"));
+
+        cut.FindAll("fluent-menu-item").Single(item => item.TextContent.Trim() == "Duplicate").MenuItemClick();
+
+        cut.WaitForAssertion(() => dialogMock.Verify(
+            dialog => dialog.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
+            Times.Once));
+
+        postCount.Should().Be(0, "declining the confirm dialog must not fire the duplicate POST");
+        Services.GetRequiredService<NavigationManager>().Uri.Should().Be("http://localhost/",
+            "declining must not navigate away from the source assignment");
+    }
+
+    [TestMethod]
+    public void Detail_DuplicateFails_RendersTheFriendlyErrorLine_AndStays()
+    {
+        var sourceId = Guid.NewGuid();
+        var dto = MakeDto(AssignmentStatusDto.Published) with { Id = sourceId };
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+        SetupConfirmDialogResult(confirmed: true);
+
+        var cut = RenderDetail(dto);
+
+        OpenPageActionsMenu(cut);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(item => item.TextContent.Trim())
+            .Should().Contain("Duplicate"));
+
+        var duplicatePosts = 0;
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{sourceId}/duplicate")
+            .Respond(_ =>
+            {
+                duplicatePosts++;
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            });
+
+        cut.FindAll("fluent-menu-item").Single(item => item.TextContent.Trim() == "Duplicate").MenuItemClick();
+
+        cut.WaitForAssertion(() =>
+        {
+            duplicatePosts.Should().Be(1, "the confirmed duplicate fires the POST");
+            cut.Find("#assignment-action-error").TextContent.Trim()
+                .Should().Be("The assignment could not be duplicated. Try again.",
+                    "the failure is this page's own sentence — a raw transport message never reaches the reader");
+        }, TimeSpan.FromSeconds(15));
+
+        Services.GetRequiredService<NavigationManager>().Uri.Should().Be("http://localhost/",
+            "a failure must not navigate away from the source assignment");
+    }
+
+    // ── P5b (extended) / §2 / §11: the status-driven header and the lifecycle verbs ─────────────
+
+    [TestMethod]
+    public void Detail_PrimaryAction_IsStatusDriven_ForEveryStatus()
+    {
+        var expected = new (AssignmentStatusDto Status, string? Label)[]
+        {
+            (AssignmentStatusDto.Draft, "Publish"),
+            (AssignmentStatusDto.Scheduled, "Unpublish"),
+            (AssignmentStatusDto.Closed, "Archive"),
+            (AssignmentStatusDto.Published, "Open progress"),
+            (AssignmentStatusDto.Archived, null)
+        };
+
+        foreach (var (status, label) in expected)
+        {
+            var dto = MakeDto(status);
+            SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+            var cut = RenderDetail(dto);
+
+            cut.WaitForAssertion(() =>
+            {
+                if (label is null)
+                {
+                    cut.FindAll("#assignment-primary-action").Should().BeEmpty(
+                        $"{status} is terminal — it offers no primary action at all");
+                }
+                else
+                {
+                    cut.Find("#assignment-primary-action").TextContent.Trim().Should().Be(label,
+                        $"§11 pins the {status} primary");
+                    if (status != AssignmentStatusDto.Published)
+                    {
+                        cut.Find("#assignment-primary-action").HasAttribute("disabled").Should().BeFalse(
+                            $"{status}'s primary is live");
+                    }
+                }
+
+                if (status != AssignmentStatusDto.Published)
+                {
+                    cut.FindAll("#assignment-progress-reason").Should().BeEmpty(
+                        "only the published page carries the round-b route's reason");
+                }
+            }, TimeSpan.FromSeconds(15));
+        }
+    }
+
+    [TestMethod]
+    public void Detail_DraftWithOutstandingApproval_PrimaryIsDisabled_WithItsReason()
+    {
+        foreach (var approvalStatus in new[]
+                 {
+                     (ApprovalStatusDto?)null, ApprovalStatusDto.Pending, ApprovalStatusDto.Rejected
+                 })
+        {
+            var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: approvalStatus, requiresApproval: true);
+            SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+            var cut = RenderDetail(dto);
+
+            cut.WaitForAssertion(() =>
+            {
+                var primary = cut.Find("#assignment-primary-action");
+                primary.TextContent.Trim().Should().Be("Publish");
+                primary.HasAttribute("disabled").Should().BeTrue(
+                    $"approval is {approvalStatus?.ToString() ?? "not submitted"} — publishing must wait");
+                cut.Find("#assignment-publish-reason").TextContent.Trim().Should()
+                    .Be("Approval is required before this assignment can be published",
+                        "AC4b — a disabled primary states why, and the approval is the reason");
+            }, TimeSpan.FromSeconds(15));
+        }
+    }
+
+    [TestMethod]
+    public void Detail_ApprovedDraft_PrimaryIsLive()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Approved, requiresApproval: true);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-primary-action").HasAttribute("disabled").Should().BeFalse(
+                "an approved draft publishes");
+            cut.FindAll("#assignment-publish-reason").Should().BeEmpty("and there is nothing to explain");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_Draft_PageMenu_OffersSchedule()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        OpenPageActionsMenu(cut);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(item => item.TextContent.Trim())
+            .Should().Contain("Schedule…", "US7 — scheduling is not split across surfaces"));
+    }
+
+    [TestMethod]
+    public void Detail_Scheduled_PageMenu_OffersReschedule()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Scheduled);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        OpenPageActionsMenu(cut);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(item => item.TextContent.Trim())
+            .Should().Contain("Reschedule…"));
+    }
+
+    [TestMethod]
+    public void Detail_Published_PageMenu_OffersCloseAndDuplicate()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        OpenPageActionsMenu(cut);
+        cut.WaitForAssertion(() =>
+        {
+            var items = cut.FindAll("fluent-menu-item").Select(item => item.TextContent.Trim()).ToList();
+            items.Should().Contain("Close", "R1 splits the pair: Close is the kebab item");
+            items.Should().Contain("Duplicate");
+        });
+    }
+
+    // ── The Approval rail block (LIF-1, spec §3.1/§3.6; R4 body buttons) ───────────────────────
+
+    /// <summary>Mocks the reason dialog shell (<c>ShowShellDialogAsync&lt;ApprovalDecisionReasonDialog, …&gt;</c>
+    /// resolves to <c>ShowDialogAsync(typeof(ApprovalDecisionReasonDialog), …)</c> and unwraps the
+    /// <see cref="DialogShellResult{TResult}"/> the extension hands back).</summary>
+    private void SetupReasonDialogResult(string? reason)
+    {
+        var payload = new DialogShellResult<ApprovalDecisionReasonDialog.ReasonResult>(
+            new ApprovalDecisionReasonDialog.ReasonResult(reason));
+        var dialogMock = this.RegisterDialogService();
+        dialogMock
+            .Setup(dialog => dialog.ShowDialogAsync(typeof(ApprovalDecisionReasonDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Ok<object?>(payload));
+    }
+
+    private static void ClickApprovalButton(IRenderedComponent<DetailPage> cut, string label) =>
+        cut.FindAll("fluent-button").Single(button => button.TextContent.Trim() == label).Click();
+
+    [TestMethod]
+    public void Detail_ApprovalSubmit_PostsAndRefreshes()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft, requiresApproval: true);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Should().Contain(button => button.TextContent.Trim() == "Submit for approval"),
+            TimeSpan.FromSeconds(15));
+
+        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/submit-for-approval")
             .Respond(HttpStatusCode.NoContent);
 
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Approve").Click();
+        ClickApprovalButton(cut, "Submit for approval");
 
         cut.WaitForAssertion(() =>
         {
             _mockHttp.VerifyNoOutstandingExpectation();
             _assignmentGetCount.Should().BeGreaterThanOrEqualTo(2,
-                "the page reloads the assignment after the approve POST succeeds");
+                "the page re-reads the assignment after the submission succeeds");
         }, TimeSpan.FromSeconds(15));
     }
 
-    // ar-24 row 2 (discriminating): with a teacher_id claim on the circuit principal, the
-    // approve request body carries the acting teacher id — NOT the Guid.Empty placeholder.
     [TestMethod]
-    public void Detail_WithTeacherClaim_ApprovePostsActingTeacherId()
+    public void Detail_ApprovalApprove_PostsTheActingTeacher_AndRefreshes()
     {
-        var actingTeacherId = Guid.Parse("00000000-0000-0000-0000-00000000AB24");
-        _authStateProvider.TeacherId = actingTeacherId;
-
         var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
-        SetupGetAssignment(dto);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
         SetupConfirmDialogResult(confirmed: true);
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Approve"));
+        var cut = RenderDetail(dto);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Should().Contain(button => button.TextContent.Trim() == "Approve"), TimeSpan.FromSeconds(15));
 
         _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/approve")
-            .WithContent(JsonSerializer.Serialize(new ApproveAssignmentRequest(actingTeacherId), _apiJsonOptions))
+            .WithContent(JsonSerializer.Serialize(new ApproveAssignmentRequest(Guid.Empty), _apiJsonOptions))
             .Respond(HttpStatusCode.NoContent);
 
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Approve").Click();
+        ClickApprovalButton(cut, "Approve");
 
-        cut.WaitForAssertion(() => _mockHttp.VerifyNoOutstandingExpectation(), TimeSpan.FromSeconds(15));
+        cut.WaitForAssertion(() =>
+        {
+            _mockHttp.VerifyNoOutstandingExpectation();
+            _assignmentGetCount.Should().BeGreaterThanOrEqualTo(2,
+                "the page re-reads the assignment after the approval succeeds");
+        }, TimeSpan.FromSeconds(15));
     }
 
     [TestMethod]
-    public void Detail_RequiresApproval_Pending_ApproveClicked_UserDeclines_NoPost()
+    public void Detail_ApprovalApprove_Declined_PostsNothing()
     {
         var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
-        SetupGetAssignment(dto);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
         var dialogMock = SetupConfirmDialogResult(confirmed: false);
 
-        // Counting backend that is NOT expected to fire: a wrongly-sent POST
-        // succeeds here and becomes observable on the counters below (a NoMatch
-        // exception would instead be swallowed into the page error bar).
         var approvePosts = 0;
         _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/approve")
             .Respond(_ =>
@@ -491,648 +1135,395 @@ public class AssignmentDetailBunitTests : BunitContext
                 return new HttpResponseMessage(HttpStatusCode.NoContent);
             });
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        var cut = RenderDetail(dto);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Should().Contain(button => button.TextContent.Trim() == "Approve"), TimeSpan.FromSeconds(15));
 
-        cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Approve"));
-
-        // Baseline AFTER the initial render: Detail loads the assignment itself and R1's embedded
-        // authoring component loads it once too, so the assertion is "declining adds no further
-        // load" rather than a fixed count.
         var loadsBeforeDecline = _assignmentGetCount;
 
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Approve").Click();
+        ClickApprovalButton(cut, "Approve");
 
-        // Positive wait first: the confirm dialog opened and resolved (declined).
         cut.WaitForAssertion(() => dialogMock.Verify(
-            d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
+            dialog => dialog.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
             Times.Once));
 
-        approvePosts.Should().Be(0,
-            "declining the confirm dialog must not fire the approve POST");
-        _assignmentGetCount.Should().Be(loadsBeforeDecline,
-            "declining must not reload the assignment either — only the initial loads fired");
-    }
-
-    /// <summary>Round assignment-approval-workflow (spec §3.6): Reject now opens the shell reason
-    /// dialog instead of a confirm box, so the decision carries the approver's optional note. The
-    /// mock follows the ScheduleDialog pattern — <c>ShowShellDialogAsync</c> resolves to
-    /// <c>ShowDialogAsync(typeof(TDialog), DialogOptions)</c> and the dialog Result carries a
-    /// <see cref="DialogShellResult{TResult}"/> the extension unwraps.</summary>
-    private void SetupReasonDialogResult(string? reason)
-    {
-        var payload = new DialogShellResult<ApprovalDecisionReasonDialog.ReasonResult>(
-            new ApprovalDecisionReasonDialog.ReasonResult(reason));
-        var dialogMock = this.RegisterDialogService();
-        dialogMock
-            .Setup(d => d.ShowDialogAsync(typeof(ApprovalDecisionReasonDialog), It.IsAny<DialogOptions>()))
-            .ReturnsAsync(DialogResult.Ok<object?>(payload));
+        approvePosts.Should().Be(0, "declining the confirm dialog must not record a decision");
+        _assignmentGetCount.Should().Be(loadsBeforeDecline, "and must not reload the page either");
     }
 
     [TestMethod]
-    public void Detail_RequiresApproval_Pending_RejectClicked_ReasonGiven_PostsRejectWithTheReason()
+    public void Detail_ApprovalReject_PostsTheReason()
     {
         var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
-        SetupGetAssignment(dto);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
         SetupReasonDialogResult("Add the rubric");
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        var cut = RenderDetail(dto);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Should().Contain(button => button.TextContent.Trim() == "Reject…"), TimeSpan.FromSeconds(15));
 
-        cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Reject"));
-
-        // v6 ordering rule: register the Expect only now — an outstanding
-        // Expect 404s every other request (the flag-ON Index test documents
-        // the same constraint), and the initial GETs must hit the When
-        // backends first.
         _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/reject")
-            .WithContent(JsonSerializer.Serialize(new RejectAssignmentRequest(Guid.Empty, "Add the rubric"), _apiJsonOptions))
+            .WithContent(JsonSerializer.Serialize(
+                new RejectAssignmentRequest(Guid.Empty, "Add the rubric"), _apiJsonOptions))
             .Respond(HttpStatusCode.NoContent);
 
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Reject").Click();
+        ClickApprovalButton(cut, "Reject…");
 
-        cut.WaitForAssertion(() =>
-        {
-            _mockHttp.VerifyNoOutstandingExpectation();
-            _assignmentGetCount.Should().BeGreaterThanOrEqualTo(2,
-                "the page reloads the assignment after the reject POST succeeds");
-        }, TimeSpan.FromSeconds(15));
+        cut.WaitForAssertion(() => _mockHttp.VerifyNoOutstandingExpectation(), TimeSpan.FromSeconds(15));
     }
 
     [TestMethod]
-    public void Detail_RequiresApproval_Pending_RejectDialogCancelled_PostsNothing()
+    public void Detail_ApprovalDeny_PostsTheReason()
     {
         var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
-        SetupGetAssignment(dto);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+        SetupReasonDialogResult("Out of scope");
+
+        var cut = RenderDetail(dto);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Should().Contain(button => button.TextContent.Trim() == "Deny…"), TimeSpan.FromSeconds(15));
+
+        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/deny")
+            .WithContent(JsonSerializer.Serialize(
+                new DenyAssignmentRequest(Guid.Empty, "Out of scope"), _apiJsonOptions))
+            .Respond(HttpStatusCode.NoContent);
+
+        ClickApprovalButton(cut, "Deny…");
+
+        cut.WaitForAssertion(() => _mockHttp.VerifyNoOutstandingExpectation(), TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_ApprovalReasonDialogCancelled_PostsNothing()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
         var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync(typeof(ApprovalDecisionReasonDialog), It.IsAny<DialogOptions>()))
+            .Setup(dialog => dialog.ShowDialogAsync(
+                typeof(ApprovalDecisionReasonDialog), It.IsAny<DialogOptions>()))
             .ReturnsAsync(DialogResult.Cancel());
 
         var rejectPosts = 0;
         _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/reject")
-            .Respond(_ => { rejectPosts++; return new HttpResponseMessage(HttpStatusCode.NoContent); });
+            .Respond(_ =>
+            {
+                rejectPosts++;
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            });
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        var cut = RenderDetail(dto);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Should().Contain(button => button.TextContent.Trim() == "Reject…"), TimeSpan.FromSeconds(15));
 
-        cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Reject"));
-
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Reject").Click();
+        ClickApprovalButton(cut, "Reject…");
 
         cut.WaitForAssertion(() => dialogMock.Verify(
-            d => d.ShowDialogAsync(typeof(ApprovalDecisionReasonDialog), It.IsAny<DialogOptions>()),
+            dialog => dialog.ShowDialogAsync(
+                typeof(ApprovalDecisionReasonDialog), It.IsAny<DialogOptions>()),
             Times.Once));
 
         rejectPosts.Should().Be(0, "cancelling the reason dialog must not record a decision");
     }
 
     [TestMethod]
-    public void Detail_RequiresApproval_Pending_RendersDeny()
+    public void Detail_ApprovalPanel_Approved_IsReadOnlyWithNoButtons()
     {
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
-        SetupGetAssignment(dto);
-        SetupReasonDialogResult("Out of scope");
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Approved, requiresApproval: true);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        var cut = RenderDetail(dto);
 
         cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Deny"),
-            TimeSpan.FromSeconds(15));
-
-        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/deny")
-            .WithContent(JsonSerializer.Serialize(new DenyAssignmentRequest(Guid.Empty, "Out of scope"), _apiJsonOptions))
-            .Respond(HttpStatusCode.NoContent);
-
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Deny").Click();
-
-        cut.WaitForAssertion(() => _mockHttp.VerifyNoOutstandingExpectation(), TimeSpan.FromSeconds(15));
+        {
+            cut.Find("#assignment-approval-approved").TextContent.Trim().Should().Be("Approval ✓ approved");
+            cut.FindAll("#assignment-approval fluent-button").Should().BeEmpty(
+                "an approved draft has no decision left to take");
+        }, TimeSpan.FromSeconds(15));
     }
 
     [TestMethod]
-    public void Detail_Pending_WithAWindow_RendersTheCountdown()
-    {
-        var expiresAt = DateTimeOffset.UtcNow.AddDays(2);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending,
-            requiresApproval: true, submittedAt: DateTimeOffset.UtcNow.AddDays(-1), windowExpiresAt: expiresAt);
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("left"),
-            TimeSpan.FromSeconds(15));
-        cut.Markup.Should().NotContain("Approval window expired");
-    }
-
-    [TestMethod]
-    public void Detail_Rejected_WithAStaleWindow_RendersTheReasonButNoCountdown()
-    {
-        // Reject/Deny/auto-return clear SubmittedAt, so WindowExpiresAt is null on the wire; this
-        // pins the panel's own gate — the countdown is Pending-only even if a stale value arrived.
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected,
-            requiresApproval: true, approvalReason: "Add the rubric",
-            windowExpiresAt: DateTimeOffset.UtcNow.AddDays(-30));
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Reason: Add the rubric"),
-            TimeSpan.FromSeconds(15));
-        cut.Markup.Should().NotContain("left", "the countdown renders ONLY while Pending");
-        cut.Markup.Should().NotContain("Approval window expired");
-    }
-
-    [TestMethod]
-    public void Detail_Denied_ShowsTheDeniedChipAndReason()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Denied,
-            requiresApproval: true, approvalReason: "Out of scope for this term");
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Denied"), TimeSpan.FromSeconds(15));
-        cut.Markup.Should().Contain("Reason: Out of scope for this term");
-        cut.Markup.Should().NotContain("Submit for Approval",
-            "Denied is terminal — the resubmit button must not be offered");
-        cut.FindAll("fluent-button").Should().NotContain(b => b.TextContent.Trim() == "Approve");
-    }
-
-    // ── Schedule dialog POST flow (decision (k) binding coverage) ──
-
-    /// <summary>Mocks the ScheduleDialog shell open — the ContactsEditorTests
-    /// pattern: <c>ShowShellDialogAsync&lt;ScheduleDialog, ScheduleFormModel,
-    /// ScheduleResult&gt;</c> resolves to
-    /// <c>ShowDialogAsync&lt;ScheduleDialog, DialogShellData&lt;ScheduleFormModel&gt;&gt;</c>,
-    /// and the dialog Result carries a <see cref="DialogShellResult{TResult}"/>
-    /// the extension unwraps into the typed result.</summary>
-    private void SetupScheduleDialogResult(DateTimeOffset availableFromUtc)
-    {
-        var payload = new DialogShellResult<ScheduleResult>(new ScheduleResult(availableFromUtc));
-        var dialogMock = this.RegisterDialogService();
-        dialogMock
-            .Setup(d => d.ShowDialogAsync(typeof(ScheduleDialog), It.IsAny<DialogOptions>()))
-            .ReturnsAsync(DialogResult.Ok<object?>(payload));
-    }
-
-    [TestMethod]
-    public void Detail_Draft_ScheduleDialogConfirm_PostsScheduleAtUtcMidnight()
+    public void Detail_ApprovalPanel_IsAbsentWhenApprovalIsNotRequired()
     {
         var dto = MakeDto(AssignmentStatusDto.Draft);
-        SetupGetAssignment(dto);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
 
-        // Pick a future calendar date — the dialog lands at 00:00 UTC of it
-        // (decision (j) ScheduleDialog behavior). The mocked dialog result
-        // carries the exact 00:00-UTC moment the real ScheduleDialog.SubmitAsync
-        // produces from the chosen date.
-        var expectedUtc = new DateTimeOffset(new DateTime(2027, 3, 15), TimeSpan.Zero);
-        SetupScheduleDialogResult(expectedUtc);
+        var cut = RenderDetail(dto);
 
-        // The body assertion pins the serialized ScheduleAssignmentRequest. It
-        // is built with the same Web-default options the ApiClient uses —
-        // hand-rolled "o"-format strings mismatch because System.Text.Json
-        // omits zero fractional seconds when writing DateTimeOffset values.
-        var expectedJson = JsonSerializer.Serialize(new ScheduleAssignmentRequest(expectedUtc), _apiJsonOptions);
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        // R1 (§11): the Schedule action moved from Detail's Overview button row into the shared
-        // authoring action bar's kebab — Detail's Overview now renders the shared View mode.
-        OpenAuthoringActionsMenu(cut);
-        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim())
-            .Should().Contain("Schedule", "the authoring bar hosts the schedule action"));
-
-        // v6 ordering rule: register the Expect only now — an outstanding
-        // Expect 404s every other request (the flag-ON Index test documents
-        // the same constraint), and the initial GETs must hit the When
-        // backends first.
-        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/schedule")
-            .WithContent(expectedJson)
-            .Respond(HttpStatusCode.NoContent);
-
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Schedule").MenuItemClick();
-
-        cut.WaitForAssertion(() =>
-        {
-            _mockHttp.VerifyNoOutstandingExpectation();
-            _assignmentGetCount.Should().BeGreaterThanOrEqualTo(2,
-                "the authoring bar reloads the assignment after the schedule POST succeeds");
-        }, TimeSpan.FromSeconds(15));
+        cut.WaitForAssertion(() => cut.Find("#assignment-status").Should().NotBeNull());
+        cut.FindAll("#assignment-approval").Should().BeEmpty(
+            "the panel is gated on the server-derived RequiresApproval");
     }
 
-    // ── WS-A4 / spec §3.1 — duplicate-as-template action ─────────────
+    [TestMethod]
+    public void Detail_ApprovalPanel_IsAbsentOnAPublishedAssignment()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published, approvalStatus: ApprovalStatusDto.Approved,
+            requiresApproval: true);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() => cut.Find("#assignment-status").Should().NotBeNull());
+        cut.FindAll("#assignment-approval").Should().BeEmpty(
+            "Approval joins the rail before publish and leaves it once the assignment is out");
+        cut.Find("#assignment-approval-chip").Should().NotBeNull("the header chip still states the decision");
+    }
+
+    // ── The rail: Content & Resources and Rules ─────────────
 
     [TestMethod]
-    public void Detail_PublishedAssignment_RendersDuplicateButton()
+    public void Detail_MaterialsPanel_ListsAttachmentsWithTheirGroundingState_AndLinksResources()
     {
         var dto = MakeDto(AssignmentStatusDto.Published);
-        SetupGetAssignment(dto);
+        SetupGetAssignment(
+            dto,
+            Audience([UnreachedStudent("Adeyemi, Tolu")]),
+            attachments:
+            [
+                Attachment("Lab safety sheet.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                Attachment("Bench setup.png", "image/png", AttachmentExtractionStatusDto.Unsupported),
+                Attachment("Practical demo.mp4", "video/mp4", AttachmentExtractionStatusDto.Failed,
+                    extractionError: "codec unsupported")
+            ],
+            resources: [Resource("Royal Society — photosynthesis", "https://royalsociety.org/photosynthesis")]);
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Duplicate",
-                "a Published assignment must render the Duplicate button regardless of status");
-        });
-    }
-
-    [TestMethod]
-    public void Detail_DuplicateClicked_UserConfirms_PostsAndNavigatesToCopy()
-    {
-        var sourceId = Guid.NewGuid();
-        var newId = Guid.NewGuid();
-        var dto = MakeDto(AssignmentStatusDto.Published) with { Id = sourceId };
-        SetupGetAssignment(dto);
-        SetupConfirmDialogResult(confirmed: true);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-        cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Duplicate"));
-
-        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{sourceId}/duplicate")
-            .Respond(HttpStatusCode.Created, "application/json",
-                JsonSerializer.Serialize(new { id = newId }, _apiJsonOptions));
-
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Duplicate").Click();
+        var cut = RenderDetail(dto);
 
         cut.WaitForAssertion(() =>
         {
-            _mockHttp.VerifyNoOutstandingExpectation();
-            Services.GetRequiredService<NavigationManager>().Uri.Should().EndWith($"/assignments/{newId}",
-                "confirming duplicate must navigate to the new copy");
+            cut.Find("#assignment-materials-title").TextContent.Trim().Should().Be("Content & Resources");
+            cut.Find("#assignment-materials").TextContent.Should().Contain("4",
+                "the count is the panel's whole row set: three attachments and one reference");
+
+            var rows = cut.FindAll("#assignment-materials-list .materials-row");
+            rows.Should().HaveCount(4);
+
+            var states = cut.FindAll("#assignment-materials-list .materials-row__meta")
+                .Select(cell => cell.TextContent.Trim()).ToList();
+            states.Should().BeEquivalentTo(
+            [
+                "grounds ✓ · extracted text",
+                "image only · not grounded",
+                "extraction failed — codec unsupported"
+            ], "the grounding readout is derived from the persisted extraction outcome, per row");
+
+            cut.Find("#assignment-materials-list fluent-link").GetAttribute("href")
+                .Should().Be("https://royalsociety.org/photosynthesis", "a reference renders as a link");
+            cut.Find("#assignment-materials-manage").GetAttribute("href")
+                .Should().Be($"/assignments/{dto.Id}/edit", "the panel's one header action");
         }, TimeSpan.FromSeconds(15));
     }
 
     [TestMethod]
-    public void Detail_DuplicateClicked_UserDeclines_NoPostStaysOnPage()
+    public void Detail_MaterialsPanel_WithNoMaterials_RendersTheEmptyLine()
     {
-        var sourceId = Guid.NewGuid();
-        var dto = MakeDto(AssignmentStatusDto.Published) with { Id = sourceId };
-        SetupGetAssignment(dto);
-        var dialogMock = SetupConfirmDialogResult(confirmed: false);
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
 
-        var postCount = 0;
-        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{sourceId}/duplicate")
-            .Respond(_ =>
-            {
-                postCount++;
-                return new HttpResponseMessage(HttpStatusCode.Created);
-            });
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-        cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Duplicate"));
-
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Duplicate").Click();
-
-        cut.WaitForAssertion(() => dialogMock.Verify(
-            d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
-            Times.Once));
-
-        postCount.Should().Be(0, "declining the confirm dialog must not fire the duplicate POST");
-        Services.GetRequiredService<NavigationManager>().Uri.Should().Be("http://localhost/",
-            "declining must not navigate away from the source assignment page");
-    }
-
-    [TestMethod]
-    public void Detail_DuplicateClicked_PostFails_ShowsDuplicateError()
-    {
-        var sourceId = Guid.NewGuid();
-        var dto = MakeDto(AssignmentStatusDto.Published) with { Id = sourceId };
-        SetupGetAssignment(dto);
-        SetupConfirmDialogResult(confirmed: true);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-        cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Duplicate"));
-
-        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{sourceId}/duplicate")
-            .Respond(HttpStatusCode.InternalServerError);
-
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Duplicate").Click();
+        var cut = RenderDetail(dto);
 
         cut.WaitForAssertion(() =>
         {
-            _mockHttp.VerifyNoOutstandingExpectation();
-            cut.Markup.Should().Contain("fluent-message-bar",
-                "a failing duplicate POST must render the dedicated error bar");
-            cut.Markup.Should().Contain("intent=\"error\"",
-                "the rendered message bar must carry the error intent");
-            cut.Markup.Should().MatchRegex("500|Internal Server Error",
-                "the error bar must surface the failure message");
+            cut.Find("#assignment-materials-empty").TextContent.Trim().Should().Be("No materials yet.");
+            cut.FindAll("#assignment-materials-list").Should().BeEmpty();
         }, TimeSpan.FromSeconds(15));
-
-        Services.GetRequiredService<NavigationManager>().Uri.Should().Be("http://localhost/",
-            "a failure must not navigate away from the source assignment");
     }
 
-    // ── WS-A3 (spec §3.3): versions table Score + Passed columns ──────────
-
     [TestMethod]
-    public void Detail_VersionsTable_RendersScoreAndPassed_WhenSet()
+    public void Detail_RulesPanel_RendersEveryResolvedPolicyField_WithItsOverrideMark()
     {
-        var dto = MakeDto(AssignmentStatusDto.Published);
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        SetupGetAssignment(
+            dto,
+            Audience([UnreachedStudent("Adeyemi, Tolu")]),
+            policy: new EffectiveAssignmentPolicy(
+                SignatureRequirement: SignatureRequirementMode.Mandatory,
+                RequiresApprovalBeforePublish: true,
+                MaxPrimaryContacts: 2,
+                MaxCopyContacts: null,
+                MandatoryReview: true,
+                ArchiveGraceDays: 14,
+                ApprovalWindowDays: 3,
+                SignatureRequirementFromOverride: true,
+                RequiresApprovalBeforePublishFromOverride: false,
+                MaxPrimaryContactsFromOverride: false,
+                MaxCopyContactsFromOverride: false,
+                MandatoryReviewFromOverride: false,
+                ArchiveGraceDaysFromOverride: true,
+                ApprovalWindowDaysFromOverride: false));
 
-        // WS-A3: register the specific /submissions backend BEFORE the generic
-        // SetupGetAssignment fallback; MockHttp v6 first-match ordering means
-        // the later empty fallback would otherwise win.
-        var studentId = Guid.NewGuid();
-        var submissionId = Guid.NewGuid();
-        var submissions = new[] {
-            new SubmissionForReviewDto(submissionId, dto.Id, dto.Title, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow),
-        };
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/submissions")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(submissions, _apiJsonOptions));
-
-        SetupGetAssignment(dto);
-
-        // Submission detail with two versions — both carry Score/Passed
-        // (AutoGraded / InstantGraded path).
-        var detail = new SubmissionDetailDto(
-            submissionId, dto.Id, studentId, 2, ReviewStateDto.Pending, DateTimeOffset.UtcNow,
-            new[]
-            {
-                new SubmissionVersionDto(Guid.NewGuid(), 1, SubmissionSourceDto.Student, "v1", null, DateTimeOffset.UtcNow, Score: 50m, Passed: true),
-                new SubmissionVersionDto(Guid.NewGuid(), 2, SubmissionSourceDto.GuardianOnBehalf, "v2", Guid.NewGuid(), DateTimeOffset.UtcNow, Score: 66.67m, Passed: true),
-            },
-            Review: null);
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/students/{studentId}/submission")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(detail, _apiJsonOptions));
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        // Drive the click: list of submissions shows the student; click "View" to load the detail.
-        cut.WaitForState(() => cut.FindAll("fluent-button").Any(b => b.TextContent.Trim() == "View"));
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "View").Click();
+        var cut = RenderDetail(dto);
 
         cut.WaitForAssertion(() =>
         {
-            // WS-A3 — versions table shows the Score values formatted to "0.##".
-            cut.Markup.Should().Contain("50", "the first version's score renders");
-            cut.Markup.Should().Contain("66.67", "the second version's score renders (2dp rounding)");
-            // The header always says "Passed"; scope to the v2 row's value cell so
-            // the assertion proves the VALUE rendered, not the header (parent-fix
-            // 2026-09-09: the escalation-authored Contain("Passed") was vacuously
-            // true against the <th>Passed</th> header).
-            cut.FindAll("table.recipients-table tbody tr")[1].QuerySelectorAll("td").ElementAt(4).TextContent.Trim()
-                .Should().Be("Passed", "the Passed value label renders for the passing version");
-            cut.Markup.Should().NotContain("Failed", "no version is marked Failed in this scenario");
-        });
+            cut.Find("#assignment-rules-title").TextContent.Trim().Should().Be("Rules");
+
+            var labels = cut.FindAll("#assignment-rules-list .rules-row__label")
+                .Select(cell => cell.TextContent.Trim()).ToList();
+            string[] expectedLabels =
+            [
+                "Signature requirement",
+                "Approval before publish",
+                "Max primary contacts",
+                "Max copy contacts",
+                "Mandatory review",
+                "Archive grace days",
+                "Approval window"
+            ];
+            labels.Should().Equal(expectedLabels,
+                "one row per real EffectiveAssignmentPolicy field, and nothing invented");
+
+            var values = cut.FindAll("#assignment-rules-list .rules-row__value")
+                .Select(cell => FlatText(cell)).ToList();
+            values[0].Should().Be("Required after completion (override)");
+            values[1].Should().Be("Required");
+            values[2].Should().Be("2");
+            values[3].Should().Be("Uncapped");
+            values[4].Should().Be("Required");
+            values[5].Should().Be("14 days (override)");
+            values[6].Should().Be("3 days");
+
+            cut.Find("#assignment-rules").TextContent.Should().NotContain("5 slots",
+                "the mock's slots/chars line has no backing field and is dropped, not invented");
+        }, TimeSpan.FromSeconds(15));
     }
 
     [TestMethod]
-    public void Detail_VersionsTable_RendersFailedLabel_WhenPassedFalse()
+    public void Detail_RulesPanel_DegradesToItsOwnLine_WhenThePolicyReadFails()
     {
         var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]), policyReadFails: true);
 
-        // A single non-passing version — the plan's coverage line
-        // (renders "Passed"/"Failed") needs a positive "Failed" render.
-        var studentId = Guid.NewGuid();
-        var submissionId = Guid.NewGuid();
-        var submissions = new[] {
-            new SubmissionForReviewDto(submissionId, dto.Id, dto.Title, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow),
-        };
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/submissions")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(submissions, _apiJsonOptions));
-
-        SetupGetAssignment(dto);
-
-        var detail = new SubmissionDetailDto(
-            submissionId, dto.Id, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow,
-            new[]
-            {
-                new SubmissionVersionDto(Guid.NewGuid(), 1, SubmissionSourceDto.Student, "v1", null, DateTimeOffset.UtcNow, Score: 40m, Passed: false),
-            },
-            Review: null);
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/students/{studentId}/submission")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(detail, _apiJsonOptions));
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForState(() => cut.FindAll("fluent-button").Any(b => b.TextContent.Trim() == "View"));
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "View").Click();
+        var cut = RenderDetail(dto);
 
         cut.WaitForAssertion(() =>
         {
-            // Scope to the row's Passed value cell (td[4]) so the header's
-            // <th>Passed</th> text cannot satisfy the assertion vacuously
-            // (the parent-fix row-scoping pattern).
-            var versionRow = cut.FindAll("table.recipients-table tbody tr").First();
-            versionRow.QuerySelectorAll("td").ElementAt(4).TextContent.Trim()
-                .Should().Be("Failed", "a version with Passed=false must render the 'Failed' label");
-        });
+            cut.Find("#assignment-rules-unavailable").TextContent.Trim().Should().Be("Policy unavailable.");
+            cut.FindAll("#assignment-rules-list").Should().BeEmpty();
+            cut.Find("#assignment-audience").Should().NotBeNull("a supporting outage never fails the page");
+            cut.Find("#assignment-status").Should().NotBeNull();
+        }, TimeSpan.FromSeconds(15));
     }
 
     [TestMethod]
-    public void Detail_VersionsTable_RendersEmDashForNullScoreAndPassed()
+    public void Detail_RailPanels_CarryTheirOwnIds()
     {
-        var dto = MakeDto(AssignmentStatusDto.Published);
+        var dto = MakeDto(AssignmentStatusDto.Draft, requiresApproval: true);
+        SetupGetAssignment(dto, Audience([UnreachedStudent("Adeyemi, Tolu")]));
 
-        // WS-A3: register the specific /submissions backend BEFORE the generic
-        // SetupGetAssignment fallback so the submission row actually renders.
-        var studentId = Guid.NewGuid();
-        var submissionId = Guid.NewGuid();
-        var submissions = new[] {
-            new SubmissionForReviewDto(submissionId, dto.Id, dto.Title, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow),
-        };
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/submissions")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(submissions, _apiJsonOptions));
-
-        SetupGetAssignment(dto);
-
-        // TeacherGraded path: Score + Passed null → "—" fallback.
-        var detail = new SubmissionDetailDto(
-            submissionId, dto.Id, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow,
-            new[]
-            {
-                new SubmissionVersionDto(Guid.NewGuid(), 1, SubmissionSourceDto.Student, "v1", null, DateTimeOffset.UtcNow, Score: null, Passed: null),
-            },
-            Review: null);
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/students/{studentId}/submission")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(detail, _apiJsonOptions));
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForState(() => cut.FindAll("fluent-button").Any(b => b.TextContent.Trim() == "View"));
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "View").Click();
+        var cut = RenderDetail(dto);
 
         cut.WaitForAssertion(() =>
         {
-            // Two em-dashes for the two null columns + one for the null Content (already shipped).
-            cut.Markup.Should().Contain("\u2014", "the em-dash placeholder renders for null Score/Passed");
-            // The Passed column HEADER always renders the word "Passed"; scope the
-            // value assertions to the version row so the header text cannot collide
-            // (parent-fix 2026-09-09: the escalation-authored NotContain("Passed")
-            // deterministically failed against the <th>Passed</th> header).
-            var versionRow = cut.FindAll("table.recipients-table tbody tr").Single();
-            var cells = versionRow.QuerySelectorAll("td").ToArray();
-            cells[3].TextContent.Trim().Should().Be("\u2014", "null Score renders the em-dash placeholder");
-            cells[4].TextContent.Trim().Should().Be("\u2014", "null Passed renders the em-dash placeholder");
-            cut.Markup.Should().NotContain("Failed", "no Failed value label when Passed is null");
-        });
+            var rail = cut.Find("#assignment-rail");
+            rail.QuerySelector("#assignment-materials-title")!.TextContent.Trim().Should().Be("Content & Resources");
+            rail.QuerySelector("#assignment-rules-title")!.TextContent.Trim().Should().Be("Rules");
+            rail.QuerySelector("#assignment-approval-title")!.TextContent.Trim().Should().Be("Approval");
+        }, TimeSpan.FromSeconds(15));
     }
 
-    /// <summary>WS-E2b / ar-18 (ar-17 follow-up F5): the failures tab badges the row count
-    /// that <c>NotificationFailuresSection</c> reports from its own load — Detail issues no
-    /// extra fetch for it.</summary>
-    [TestMethod]
-    public void NotificationFailuresTab_BadgesRowCount()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Published);
-        SetupGetAssignment(dto,
-            new NotificationFailureDto(Guid.NewGuid(), Guid.NewGuid(), ContactChannelDto.Email,
-                NotificationKindDto.Publish, 3, "Provider replied: 550 permanent failure", null),
-            new NotificationFailureDto(Guid.NewGuid(), Guid.NewGuid(), ContactChannelDto.SMS,
-                NotificationKindDto.Reminder, 1, "Carrier rejected", null));
+    /// <summary>An element's text with Razor's line breaks and indentation collapsed, so an assertion
+    /// reads the text rather than the markup's whitespace.</summary>
+    private static string FlatText(AngleSharp.Dom.IElement element) =>
+        string.Join(' ', element.TextContent.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Notifications (2)",
-            "the label badges the count the section reported (F5)"));
-    }
-
-    /// <summary>WS-E2 / ar-17 decision-gate: the "Notifications" tab (and the
-    /// self-loading <c>NotificationFailuresSection</c>) renders for assignments that have
-    /// EVER been published — gated on <c>PublishedAt is not null</c>, not on the current
-    /// status. The distinction matters because <c>Unpublish</c> returns an assignment to
-    /// <c>Draft</c> while its <c>NotificationLog</c> rows survive (residual 7); a status
-    /// test would hide a never-published Draft's (empty) tab but also lose an unpublished
-    /// assignment's real failure history.</summary>
-    [TestMethod]
-    public void NotificationFailuresTab_Visibility_ByStatus()
-    {
-        var draft = MakeDto(AssignmentStatusDto.Draft);
-        SetupGetAssignment(draft);
-
-        var draftCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, draft.Id));
-        draftCut.WaitForAssertion(() => draftCut.Markup.Should().Contain("Math HW"));
-        draftCut.Markup.Should().NotContain("Notifications",
-            "a Draft that has NEVER been published must not render the failures tab");
-
-        var published = MakeDto(AssignmentStatusDto.Published);
-        SetupGetAssignment(published);
-
-        var pubCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, published.Id));
-        pubCut.WaitForAssertion(() => pubCut.Markup.Should().Contain("Notifications",
-            "a Published assignment renders the failures tab"));
-
-        var archived = MakeDto(AssignmentStatusDto.Archived);
-        SetupGetAssignment(archived);
-
-        var archCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, archived.Id));
-        archCut.WaitForAssertion(() => archCut.Markup.Should().Contain("Notifications",
-            "an Archived assignment keeps its failure history (read-only retention, spec §7 Q6) — review finding F6"));
-
-        // UI-tester coverage gap: Scheduled and Closed are part of the declared gate but
-        // were exercised only by the `is` pattern, never asserted per status.
-        foreach (var status in new[] { AssignmentStatusDto.Scheduled, AssignmentStatusDto.Closed })
-        {
-            var dto = MakeDto(status);
-            SetupGetAssignment(dto);
-
-            var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-            cut.WaitForAssertion(() => cut.Markup.Should().Contain("Notifications",
-                $"{status} is part of the failures-tab gate"));
-        }
-
-        // Residual (7), fixed: Unpublish() returns an assignment to Draft while its
-        // NotificationLog rows survive, so the gate must be "has ever been published"
-        // (PublishedAt) rather than a status test — otherwise a teacher who unpublishes to
-        // fix a typo silently loses the failure history for that publish.
-        var unpublished = MakeDto(AssignmentStatusDto.Draft, publishedAt: DateTimeOffset.UtcNow.AddDays(-2));
-        SetupGetAssignment(unpublished);
-
-        var unpubCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, unpublished.Id));
-        unpubCut.WaitForAssertion(() => unpubCut.Markup.Should().Contain("Notifications",
-            "an assignment returned to Draft by Unpublish keeps its failure history — the old status test hid it"));
-    }
-
-    /// <summary> ── WS-C1 decision (g) render gate: the "Guardian Sign-off" tab (and
-    /// the self-loading <c>SignOffSection</c> inside it) is present only when the
-    /// assignment snapshotted <see cref="AssignmentSummaryDto.RequiresSignature"/>;
-    /// an ordinary assignment renders no trace of the card.</summary>
-    [TestMethod]
-    public void SignOffCard_RenderGate_ByRequiresSignature()
-    {
-        var withSignature = MakeDto(AssignmentStatusDto.Published, requiresSignature: true);
-        SetupGetAssignment(withSignature);
-
-        var gated = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, withSignature.Id));
-
-        gated.WaitForAssertion(() => gated.Markup.Should().Contain("Guardian Sign-off",
-            "the card renders when RequiresSignature is true (WS-C1 / spec §3.2 line 51)"));
-
-        var withoutSignature = MakeDto(AssignmentStatusDto.Published, requiresSignature: false);
-        SetupGetAssignment(withoutSignature);
-
-        var plain = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, withoutSignature.Id));
-
-        plain.WaitForAssertion(() => plain.Markup.Should().Contain("Math HW"));
-        plain.Markup.Should().NotContain("Guardian Sign-off",
-            "the card renders NOTHING when the assignment does not require a signature");
-    }
-
-    // ── C3 certificate download action (decision (f)) ─────────────────────
-
-    private static SignOffStatusDto StatusRow(Guid studentId, DateTimeOffset? finalizedAt) =>
-        new(studentId, "Ward One", null, null, Guid.NewGuid(), "Jane Doe",
-            SignOffStateDto.Signed, DateTimeOffset.UtcNow, finalizedAt, true, true, 2, 88m, true);
-
-    private void SetupSignOffStatuses(Guid assignmentId, params SignOffStatusDto[] rows)
-    {
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{assignmentId}/sign-off-statuses")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(rows, _apiJsonOptions));
-    }
-
-    [TestMethod]
-    public void Certificate_Action_Shown_ForFinalizedWard()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Published, requiresSignature: true);
-        var studentId = Guid.NewGuid();
-
-        // Specific backend BEFORE the generic SetupGetAssignment fallback
-        // (MockHttp v6 first-match ordering, the documented pattern).
-        SetupSignOffStatuses(dto.Id, StatusRow(studentId, finalizedAt: DateTimeOffset.UtcNow));
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Certificate",
-            "a finalized ward gains the per-row certificate download action"));
-    }
-
-    [TestMethod]
-    public void Certificate_Action_Hidden_WhenNotFinalized()
-    {
-        var dto = MakeDto(AssignmentStatusDto.Published, requiresSignature: true);
-        var studentId = Guid.NewGuid();
-
-        SetupSignOffStatuses(dto.Id, StatusRow(studentId, finalizedAt: null));
-        SetupGetAssignment(dto);
-
-        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
-
-        // Wait for the Signed row to render, then assert no certificate action.
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Signed",
-            "the (still-signed) row renders with a status badge"));
-        cut.Markup.Should().NotContain("Certificate",
-            "a not-yet-finalized ward must not offer the certificate download");
-    }
-
-    // ar-24 row 2: test-double AuthenticationStateProvider. Default: an unauthenticated
-    // principal with NO teacher_id claim (=> Detail sends Guid.Empty, the dev/TestAuth
-    // posture). The discriminating test sets TeacherId to prove the claim path drives the
-    // outgoing request body.
+    /// <summary>The circuit principal the approval verbs read the acting teacher from. It carries no
+    /// <c>teacher_id</c> claim (the dev/TestAuth default), so an approval body carries the server's
+    /// <c>Guid.Empty</c> placeholder.</summary>
     private sealed class StubAuthStateProvider : AuthenticationStateProvider
     {
-        public Guid? TeacherId { get; set; }
+        public override Task<AuthenticationState> GetAuthenticationStateAsync() =>
+            Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity("test"))));
+    }
 
-        public override Task<AuthenticationState> GetAuthenticationStateAsync()
+    // ── Degraded reads are stated, never silently swallowed (plan P2) ────────────────
+
+    [TestMethod]
+    public void Detail_EmptyAudienceThatDegraded_SaysItCouldNotBeResolved_NotThatThereAreNoStudents()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, new AssignmentAudienceDto([], Truncated: false, Degraded: true));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
         {
-            var identity = TeacherId is null
-                ? new ClaimsIdentity()
-                : new ClaimsIdentity(new[] { new Claim("teacher_id", TeacherId.Value.ToString()) }, "test");
-            return Task.FromResult(new AuthenticationState(new ClaimsPrincipal(identity)));
-        }
+            cut.Find("#assignment-audience-unresolved").TextContent.Trim()
+                .Should().Be("The audience could not be resolved. Reload the page to try again.",
+                    "an empty-but-degraded audience is a failure, never 'no students'");
+            cut.FindAll("#assignment-audience-empty").Should().BeEmpty(
+                "the empty sentence would claim a resolve that did not happen");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_EmptyAudienceThatResolved_SaysThereAreNoStudents()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, Audience([]));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-audience-empty").TextContent.Trim()
+                .Should().Be("No students resolve for this assignment's targets.");
+            cut.FindAll("#assignment-audience-unresolved").Should().BeEmpty(
+                "a healthy empty read is not an outage");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_AudienceReadThatFails_SaysSoInsteadOfSpinning()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, audienceReadFails: true);
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#assignment-audience-unavailable").TextContent.Trim()
+                .Should().Be("The audience could not be loaded.",
+                    "a supporting outage never fails the page, and never leaves a spinner running");
+            cut.Find("#assignment-audience").QuerySelectorAll("fluent-spinner").Should().BeEmpty(
+                "the panel is no longer loading — it failed");
+        }, TimeSpan.FromSeconds(15));
+
+        cut.Find("#assignment-status").Should().NotBeNull("the rest of the page is unaffected");
+    }
+
+    [TestMethod]
+    public void Detail_DegradedAudience_StatesTheTwoOutagesSeparately()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto, new AssignmentAudienceDto(
+            [UnreachedStudent(string.Empty),
+             new AudienceStudentDto(Guid.NewGuid(), "Hassan, Yusuf", true,
+                 [Contact(AudienceDeliveryStateDto.Unknown)])],
+            Truncated: false,
+            Degraded: true));
+
+        var cut = RenderDetail(dto);
+
+        cut.WaitForAssertion(() =>
+        {
+            var note = cut.Find("#assignment-audience-degraded").TextContent;
+            note.Should().Contain("blank student name", "a directory failure is reported as itself");
+            note.Should().Contain("delivery log", "and a log failure as itself");
+            cut.Find("#assignment-audience-table").TextContent.Should().Contain("Unknown");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_UnknownAssignment_ShowsNotFound()
+    {
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/*")
+            .Respond(HttpStatusCode.NotFound);
+
+        var cut = Render<DetailPage>(parameters => parameters.Add(page => page.Id, Guid.NewGuid()));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Assignment not found"));
     }
 }

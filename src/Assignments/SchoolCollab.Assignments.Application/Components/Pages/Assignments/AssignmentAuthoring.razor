@@ -58,6 +58,7 @@
                        PrimaryId="authoring-primary-action"
                        PrimaryLabel="@ShellPrimaryLabel"
                        PrimaryDisabled="@_busy"
+                       Embedded="@(Embedded == true && Mode == AssignmentAuthoringMode.View)"
                        OnPrimaryAction="OnPrimaryActionAsync">
 
         @if (_loading)
@@ -110,6 +111,13 @@
                         @* The page action header carries the primary, the Cancel and this page's kebab
                            (owner, 2026-10-24). The summary card keeps only its own affordances: the
                            pencil, and the return to the edit-fields view. *@
+                        @* R7/D2: a host page that already owns the trail, the heading and the page action
+                           EMBEDS this body — so the card's own header (its `<h3>`, the status badge, the
+                           return to the edit fields and the pencil) is suppressed. The facts `<dl>` and the
+                           notes are then the whole body. `Mode == View` is part of the guard on purpose:
+                           Edit / Create must never silently lose their header. *@
+                        @if (!(Embedded == true && Mode == AssignmentAuthoringMode.View))
+                        {
                         <div class="authoring-summary__header">
                             <div class="authoring-title-group">
                                 <h3 class="authoring-summary__title">@_item.Title</h3>
@@ -131,6 +139,7 @@
                                 }
                             </div>
                         </div>
+                        }
                         <dl class="authoring-summary__facts">
                             @foreach (var fact in SummaryFacts)
                             {
@@ -672,7 +681,14 @@
                 {
                 <div class="region-grid-host">
                 <div class="region-stack">
+                    @* R7/D2: the host page owns Questions AND Targets & Audience, so neither block is
+                       embedded with the facts body — a second copy is the duplicate this mode exists to
+                       avoid. Suppressed here at the block's own call site; the blocks themselves are
+                       untouched. *@
+                    @if (!(Embedded == true && Mode == AssignmentAuthoringMode.View))
+                    {
                     @QuestionsPanel
+                    }
 
                     @* ── Targets & audience accordion (D2/D3, summary only) ─────────
                        Collapsed by default under Questions & AI; the expanded body reuses the
@@ -680,7 +696,7 @@
                        preview the edit-fields view renders — only the container differs. The
                        card's own header title is empty here because the accordion heading above
                        it is the compartment's single title (X-1). *@
-                    @if (ShowSummary && _item is not null)
+                    @if (ShowSummary && _item is not null && !(Embedded == true && Mode == AssignmentAuthoringMode.View))
                     {
                         <section id="authoring-targets" class="authoring-summary__targets">
                             @if (AudienceEditorDisabledReason is not null)
@@ -919,6 +935,18 @@
     /// <summary>Raised after a successful save or lifecycle action so a host page (Detail) can
     /// re-read the assignment it renders around this component.</summary>
     [Parameter] public EventCallback Changed { get; set; }
+
+    /// <summary>
+    /// R7/D2: renders the read-only summary BODY for a host page that already owns the chrome — the
+    /// shell's trail/heading/action bar, the summary card's own header, the Questions &amp; AI block and
+    /// the Targets accordion are all suppressed, leaving the facts and the notes (the assignment view
+    /// page's Details block).
+    /// <para>The flag is honoured ONLY in <see cref="AssignmentAuthoringMode.View"/>. Every gate reads
+    /// <c>Embedded == true &amp;&amp; Mode == AssignmentAuthoringMode.View</c>, so Edit and Create can never
+    /// silently lose their header to it. <b>False by default</b>, which keeps every existing render —
+    /// including the eleven pre-existing View-mode surface tests — byte-identical.</para>
+    /// </summary>
+    [Parameter] public bool Embedded { get; set; }
 
     private readonly AssignmentEditFormModel _model = new();
     private AssignmentSummaryDto? _item;

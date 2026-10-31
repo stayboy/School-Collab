@@ -11,6 +11,14 @@
     test seam (the assignment suite pins `#authoring-breadcrumb`, the crumb classes,
     `#authoring-primary-action` and `#authoring-summary-back`).
 *@
+@if (Embedded)
+{
+    @* The host page owns the chrome: the body renders on its own, with no wrapper, no trail and no
+       action bar. *@
+    @ChildContent
+}
+else
+{
 <div class="authoring-page">
     <nav id="authoring-breadcrumb" class="authoring-breadcrumb" aria-label="Breadcrumb">
         @for (var i = 0; i < Crumbs.Count; i++)
@@ -60,6 +68,7 @@
 
     @ChildContent
 </div>
+}
 
 @code {
     /// <summary>The trail, outermost first. The last entry renders as the current page.</summary>
@@ -100,6 +109,15 @@
 
     /// <summary>The page body, rendered below the action bar (or below the title block).</summary>
     [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>
+    /// Renders the body and NOTHING else — no <c>authoring-page</c> wrapper, no breadcrumb trail, no
+    /// action bar. For a host page that already owns its chrome (the assignment view page's Details
+    /// block, round <c>assignment-view-page</c> R7/D2): a second trail, a second <c>&lt;h2&gt;</c> and a
+    /// second action bar beside the page's own is the duplicate block this mode exists to avoid.
+    /// <para><b>False by default</b>, so every existing call site renders byte-identically.</para>
+    /// </summary>
+    [Parameter] public bool Embedded { get; set; }
 
     /// <summary>The title + badge cluster, shared by both placements so the two cannot drift.</summary>
     private RenderFragment TitleGroup => @<text>

@@ -938,6 +938,77 @@ public record AssignmentRecipientDto(
     bool NotifyOnBroadcast,
     bool SubscriptionActive);
 
+/// <summary>
+/// Q146 (spec §4.2) — the audience reads' fixed cohort cap, declared ONCE so the client and the
+/// server cannot drift. Both the published read and the draft preview stop at this many student
+/// rows and set <see cref="AssignmentAudienceDto.Truncated"/>; the panel states the cap where the
+/// pager is, so a page can never be read as the whole cohort.
+/// </summary>
+public static class AudienceLimits
+{
+    public const int AudienceCap = 200;
+}
+
+/// <summary>
+/// The delivery state of one audience contact.
+/// <para>The published read takes it from the <b>notification log</b> (authoritative — Q145), and
+/// answers <see cref="Unknown"/> when no log row exists for the recipient or the log read failed:
+/// a status nobody wrote is never fabricated as <see cref="Sent"/>. <see cref="NotPublishingYet"/> is
+/// the draft preview's only reachable state (nothing has been sent), and <see cref="BlockedByPolicy"/>
+/// marks a resolved contact the publish-time policy filter would drop, so the draft panel can say
+/// why it will not be notified instead of silently omitting it.</para>
+/// </summary>
+public enum AudienceDeliveryStateDto
+{
+    [Description("Not publishing yet")] NotPublishingYet = 0,
+    [Description("Blocked by policy")] BlockedByPolicy = 1,
+    [Description("Queued")] Queued = 2,
+    [Description("Sent")] Sent = 3,
+    [Description("Failed")] Failed = 4,
+    [Description("Skipped")] Skipped = 5,
+    [Description("Unknown")] Unknown = 6
+}
+
+/// <summary>
+/// One contact of one student in the audience read (spec §4.2, Q145).
+/// <para><b>Deliberately carries no address of any kind</b> (spec §4.9, Q154/Q158): no email, no
+/// phone, no guardian name. A value that never enters the payload cannot leak through devtools, a
+/// screenshot or a future export; the table shows owner type, channel, role and delivery only.</para>
+/// </summary>
+public record AudienceContactDto(
+    ContactOwnerTypeDto OwnerType,
+    ContactChannelDto Channel,
+    GuardianRoleDto? GuardianRole,
+    bool SubscriptionActive,
+    bool NotifyOnBroadcast,
+    AudienceDeliveryStateDto DeliveryState,
+    DateTimeOffset? SentAt,
+    DateTimeOffset? OpenedAt,
+    string? FailureReason,
+    bool RetryScheduled,
+    Guid? TemplateId);
+
+/// <summary>One student row of the audience read: the resolved cohort member, whether any of its
+/// contacts is subscribed, and one entry per contact.</summary>
+public record AudienceStudentDto(
+    Guid StudentId,
+    string StudentName,
+    bool Reached,
+    IReadOnlyList<AudienceContactDto> Contacts);
+
+/// <summary>
+/// The audience read (spec §4.2, Q145/Q146): the cohort per student, capped at
+/// <see cref="AudienceLimits.AudienceCap"/>.
+/// <para><see cref="Truncated"/> is true when the cohort exceeded the cap. <see cref="Degraded"/> is
+/// true when a supporting read failed — the directory (names) or the notification log (delivery);
+/// the rows still carry the cohort and whatever did resolve, so a partial outage never empties the
+/// panel and is never reported as a different outage than the one that happened.</para>
+/// </summary>
+public record AssignmentAudienceDto(
+    IReadOnlyList<AudienceStudentDto> Rows,
+    bool Truncated,
+    bool Degraded);
+
 /// <summary>A single submission version (spec §4.11).</summary>
 public record SubmissionVersionDto(
     Guid Id,

@@ -74,7 +74,10 @@ public sealed class AssignmentsApiClient
                 // WS-C1/C2: sign-off + signature-type enums round-trip as
                 // strings on the sign-off routes.
                 new JsonStringEnumConverter<SignOffStateDto>(),
-                new JsonStringEnumConverter<SignatureTypeDto>()
+                new JsonStringEnumConverter<SignatureTypeDto>(),
+                // Round assignment-view-page (spec §4.2): the audience read's delivery state
+                // round-trips as its name, registered on both this read side and the API host.
+                new JsonStringEnumConverter<AudienceDeliveryStateDto>()
             }
         };
     }
@@ -430,6 +433,40 @@ public sealed class AssignmentsApiClient
             return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<AssignmentRecipientDto[]>(_jsonOptions, ct);
+    }
+
+    public async Task<AssignmentAudienceDto?> GetAssignmentAudienceAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting the published audience for assignment {AssignmentId}", id);
+        var response = await _http.GetAsync($"/assignments/{id}/audience", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        var audience = await response.Content.ReadFromJsonAsync<AssignmentAudienceDto>(_jsonOptions, ct);
+        _logger.LogInformation(
+            "Read {Count} audience row(s) for assignment {AssignmentId} (truncated {Truncated}, degraded {Degraded})",
+            audience?.Rows.Count ?? 0, id, audience?.Truncated, audience?.Degraded);
+        return audience;
+    }
+
+    /// <summary>
+    /// The DRAFT audience read (spec §4.2 Q152): the same rows resolved from the assignment's
+    /// persisted targets, with <c>NotPublishingYet</c> where the published read carries a delivery
+    /// state. A page-load read — never the authoring surface's 500 ms debounce, which keeps the
+    /// counts-only preview. Null on 404.
+    /// </summary>
+    public async Task<AssignmentAudienceDto?> GetAssignmentAudiencePreviewAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting the draft audience preview for assignment {AssignmentId}", id);
+        var response = await _http.GetAsync($"/assignments/{id}/audience/preview", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        var audience = await response.Content.ReadFromJsonAsync<AssignmentAudienceDto>(_jsonOptions, ct);
+        _logger.LogInformation(
+            "Read {Count} draft audience row(s) for assignment {AssignmentId} (truncated {Truncated}, degraded {Degraded})",
+            audience?.Rows.Count ?? 0, id, audience?.Truncated, audience?.Degraded);
+        return audience;
     }
 
     public async Task<SubmissionForReviewDto[]?> ListSubmissionsAsync(Guid assignmentId, CancellationToken ct = default)
