@@ -153,6 +153,29 @@ will not print; any plan whose first step is "dispatch to the model we just adde
 
 ---
 
+## A new read must not become a second, weaker door to data another module guards (2026-10-29)
+
+**Rule.** Before projecting a field into a new DTO, ask which context **owns** that field and what its own read
+already enforces. A new read that surfaces another module's protected data is not a display decision — it is a
+permission decision taken by whoever wrote the projection. Prefer **omitting the field from the contract** to
+masking it in the view: a value that never enters the payload cannot leak through devtools, a screenshot, a log
+line or a future export, and a mask is cosmetic control that one DOM inspection undoes.
+
+**Evidence.** The assignment view spec proposed an audience table showing each student's guardians and contacts.
+The mock rendered masked values (`n.okafor@…`, `+44 7700 900…`) and the owner stopped it: a local-part plus domain
+and a partial phone number still identify a household, and masking is not a control. The values would have come from
+`NotificationLog.ToAddress` and the Students contact read — data the Students module already guards with its own
+scope. The replacement rule ("show a guardian name only if the caller could already list that student's guardians in
+the Students module") then turned out to have **no mechanism**: `TeacherScope` answers "can you see this
+assignment", not "may you list this student's guardians", and a per-student authorization hop would fan a single
+read into N hops. Dropping names entirely was both the safest and the simplest answer.
+
+**Trigger.** You are adding a field to a list read and the field belongs to another context — contact details,
+guardian identity, addresses, dates of birth, medical or SEN flags. Also when the plan says "masked" or "shown only
+to authorised users": name the check that already exists, or drop the field.
+
+---
+
 ## Never round-trip a UTF-8 file through `Get-Content` / `Set-Content` (2026-10-29)
 
 **Rule.** On this platform, `Get-Content` decodes UTF-8 as the system ANSI code page and `Set-Content -Encoding
