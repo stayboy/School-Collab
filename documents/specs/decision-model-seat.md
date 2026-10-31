@@ -1,12 +1,14 @@
 # The decision-model seat — an advisory adjudication pass for any tier
 
-Status: **PROPOSED 2026-10-30 — mechanism proven, adoption parked.** Q1–Q29 were answered as
-recommended across three grill rounds; five of the early answers were overturned by the vendor
-documentation and are recorded as superseded (§9). Two probe sittings then exercised the seat on real
-artefacts — 13 text claims and 6 image claims, all correct, both permutation checks stable — for a total of
-~$0.01 (`documents/rounds/round-decision-model-spike.md`). **Adoption has not started**: §8's files, the
-protected-file reviews and the first real use are open, and one payload (rendered DOM) is still unproven,
-which is what parks it.
+Status: **PROPOSED 2026-10-30 — mechanism proven on all three payloads, adoption parked on a
+consumer.** Q1–Q34 were answered as recommended across four grill rounds; five of the early answers were
+overturned by the vendor documentation and are recorded as superseded (§9). Three probe sittings exercised
+the seat on real artefacts — 13 text claims on a mock's source, 6 image claims on a real page (and 5 on an
+80% crop of it), and 13 claims on **bUnit-rendered component markup** — all correct, all permutation checks
+stable, every row above threshold, for ~$0.01 in total
+(`documents/rounds/round-decision-model-spike.md`). **Adoption has not started and now waits on a consumer,
+not on evidence** (Q33/Q34): §8's files, the protected-file reviews and the first real use are open. The
+harness is checked in as `scripts/round/decision-probe.mjs` so the method is rerunnable rather than described.
 
 Date: 2026-10-30 · Provenance: a session question — *"how do I use `clef:27b` as a decision model
 to compare mocks against what is actually implemented?"* — generalised, because the answer is not
@@ -15,9 +17,11 @@ spec was built on the wrong premise (a chat model that reads files and cites lin
 page for `clef:27b-cloud` overturned it, and §5 records what it actually is.
 
 Companions (neither is restated here): `.pi/skills/orchestrator-worker-reviewer/SKILL.md` — the
-tier ladder this seat plugs into — and its `references/models.md`, the **operational id catalog**
-(`documents/specs/round-runner-model-policy.md` decision 9 splits policy from ids; this document
-follows that split and adds no id catalog of its own).
+tier ladder this seat plugs into — and its `references/models.md`, the **operational id catalog**.
+`documents/specs/round-runner-model-policy.md` decision 9 splits policy from ids; this document follows
+that split and adds no id catalog of its own. That policy spec links back here under its "Related harness
+documents" section, because this seat decides nothing and therefore neither consumes nor displaces any seat
+the policy assigns.
 
 ---
 
@@ -327,6 +331,8 @@ tester); long-document comprehension (read it).
 | File | Change | Gate |
 |---|---|---|
 | `documents/specs/decision-model-seat.md` | this document | normal PR |
+| `scripts/round/decision-probe.mjs` + `scripts/round/README.md` | **already shipped 2026-10-31** (Q35): the harness as a script, plus its row and section in the round-harness README. Not wired into `gates.sh` — a model endpoint is not a repo precondition | normal PR |
+| `documents/specs/round-runner-model-policy.md` | **already shipped 2026-10-31** for the pointer only (Q36): a "Related harness documents" section. No decision in that spec is amended, because this seat settles nothing | normal PR |
 | `.pi/skills/orchestrator-worker-reviewer/references/models.md` | **one row**: seat, route, default id, clinepass/provider note, substitution, and the "a classifier call is not a seated model" clause of §3 | **protected** — reviewed before merge |
 | `.pi/skills/orchestrator-worker-reviewer/SKILL.md` | one short § "Decision model (advisory classifier seat)": the seat, the trigger list pointer, the `DM:` line-1 record, and "never a gate" | **protected** — reviewed before merge |
 | `documents/rounds/README.md` | the `## Decision passes` section (§6 recording shape) beside the existing `## Not run` rule | normal PR |

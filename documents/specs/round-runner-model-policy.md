@@ -95,3 +95,15 @@ lives in `references/models.md` and is binding there by reference.
 Operational model ids, provider catalogs, the substitution rule, and the dispatch-time
 resolution rules — all in `references/models.md`. This spec names model ids only as evidence,
 never as policy.
+
+## Related harness documents
+
+| Subject | Document | Relation |
+|---|---|---|
+| Which model runs a seat, and how a round is staffed | **this file** | policy — settles who decides |
+| An advisory classifier pass over a closed claim set, usable on **every** tier | `documents/specs/decision-model-seat.md` (**PROPOSED**) | different layer: it decides nothing, so it neither consumes nor displaces a seat here. Pointer added 2026-10-31 so a reader arriving from the policy side can find it; the seat spec does not amend any decision above. |
+
+Its harness is `scripts/round/decision-probe.mjs`, and its evidence record is
+`documents/rounds/round-decision-model-spike.md`. It is deliberately **not** wired into
+`scripts/round/gates.sh`: it needs a model endpoint, so it is evidence a round may request,
+never a gate a round must pass.

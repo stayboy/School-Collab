@@ -163,3 +163,20 @@ Not accepted here, and not claimed: the seat is **not adopted**. §8's four docu
 reviews and the first real use remain open, per spec §9 Q23–Q29. Spec corrections this round earns: §5.3
 (`noul` settled), §6.3 (the 0.90 refusal, from evidence), §6.4 (permutation verified) and §6.6 (payload
 ranking) — applied to the spec after this doc, in the same change set.
+
+## Handover (Q35–Q37, same day)
+
+Closing the arc exposed one claim that the repo could not keep: "usable as method" described a harness that
+existed only as three gitignored files in `.pi/tmp/`. Q35 settled it by checking the method in, and the
+script was then **run before being claimed** — a 5-claim DOM probe, 5/5 above threshold and 5/5 correct with
+2/2 absent controls, and a `--permute` re-run stable on all five.
+
+| Item | Where |
+|---|---|
+| Harness, as a script | `scripts/round/decision-probe.mjs` — claims file in, answer table with probabilities out; fail-closed on a missing probability; never thresholds `confidence` |
+| Its documentation | `scripts/round/README.md` — its row, its section, and why it is **not** wired into `gates.sh` |
+| Reciprocal pointer | `documents/specs/round-runner-model-policy.md` § "Related harness documents" — the policy spec now names this seat and records that it amends no decision |
+| Delivery | Q37: push and open a docs PR. The two owner-accepted lessons stand on their own; the spec and this record land with them |
+
+The parked round (`round-assignment-view-page.md`) is untouched and remains blocked on its owner deliverable;
+by Q34 it is explicitly **not** the seat's first consumer.
