@@ -14,7 +14,49 @@ entry here shrinks to a pointer at that check.
 
 ---
 
-## A new read must not become a second, weaker door to data another module guards (2026-10-29)
+## A model registry row is not authoritative for a model's kind or capability (2026-10-30)
+
+**Rule.** Before building a plan on what a model *is* or *can take*, read the vendor's own page for that
+**tag** — not `pi --list-models`, not a catalog index, not the provider block of a local store. Registry rows
+describe what the harness will resolve, and they are frequently silent about kind: classifier models are not
+chat models and do not appear in `/model` at all. The vendor page is also the only place the request shape,
+the hard input cap and the billing unit are stated, and each of those changes the design.
+
+**Evidence.** Spec `documents/specs/decision-model-seat.md` was first drafted on a chat-model premise: "no
+thinking support, no image input, 128K context". `pi --list-models` printed
+`ollama clef:27b-cloud 128K 16.4K no no` — wrong on context (the tag page says **64K**, and cloud input is
+**≤65,536 tokens, rejected not truncated**) and wrong on images (the model is multimodal, ≤4 PNG/JPEG/WebP per
+request). More damaging than either number: the model **does not chat** — it is a non-autoregressive classifier
+on `POST /v1/systemone` that scores a schema of typed questions in one pass, so the citation-based verification
+the draft was built around was impossible. The owner caught the image error from the library page; it cost a full
+rewrite of the spec's mechanism sections.
+
+**Trigger.** You are writing anything that depends on a model's capability — context, image input, tool use,
+output shape, price — or on how the harness reaches it. Also whenever a plan's verification step says "the model
+cites / lists / reports line numbers": classifiers score, they do not cite.
+
+---
+
+## A classifier's `confidence` is not its top probability, and a route can drop images in silence (2026-10-30)
+
+**Rule.** Two separate traps, one habit: **name the quantity and name the route.** When thresholding a classifier
+answer, threshold the **max probability** of the answer and say so — a returned `confidence` is a different,
+more conservative number (the vendor's own example: top option `0.8425` with `confidence` `0.6298`). And when the
+capability under discussion is image input, the claim is never "the model takes images": it is "this model **on
+this route** takes images", because at least two routes accept the request, return a plausible answer, and discard
+the images — OpenRouter (documented: answers in TypeSafe's format without an error, dropping images) and the
+TypeSafe Python SDK against Ollama (documented: uploads images in a format Ollama does not accept). Both failures
+are invisible in the output.
+
+**Evidence.** Mining `https://ollama.com/library/clef:27b-cloud` for the seat spec: the API example returns
+`"choice": "meals", "probabilities": {"meals": 0.8425, …}, "confidence": 0.6298`, which makes the draft's
+"threshold `confidence` ≥ 0.80" reject a row whose top option is 84% likely — the threshold was unusable as
+written. The same page's TypeSafe SDK section ends "To send images, use the API or the Ollama CLI. The SDK uploads
+images in a format Ollama doesn't accept", and `docs/models.md` records OpenRouter dropping them without an error.
+
+**Trigger.** You are writing a threshold, a confidence gate, or a "high-confidence only" filter over model output;
+or you are choosing between an SDK, a proxy, a gateway and the vendor's own endpoint for a multimodal request.
+
 
 **Rule.** Before projecting a field into a new DTO, ask which context **owns** that field and what its own read
 already enforces. A new read that surfaces another module's protected data is not a display decision — it is a
