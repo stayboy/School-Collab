@@ -17,11 +17,11 @@
         <span class="period-active-chip__label">Active tenant period:</span>
         @if (_activeYear is null)
         {
-            <FluentBadge Appearance="BadgeAppearance.Filled">None — no active academic year</FluentBadge>
+            <FluentBadge Color="BadgeColor.Subtle">None — no active academic year</FluentBadge>
         }
         else
         {
-            <FluentBadge Appearance="BadgeAppearance.Filled">@_activeYear.Name</FluentBadge>
+            <FluentBadge Color="BadgeColor.Brand">@_activeYear.Name</FluentBadge>
         }
     </div>
 }
@@ -47,7 +47,7 @@
                           title="Edit period">@context.Name</FluentLink>
         </TemplateColumn>
         <TemplateColumn TGridItem="PeriodLandingDto" Title="Academic Division">
-            <FluentBadge Appearance="BadgeAppearance.Filled">@GetDivisionLabel(context)</FluentBadge>
+            <FluentBadge Appearance="BadgeAppearance.Filled" Color="BadgeColor.Informative">@GetDivisionLabel(context)</FluentBadge>
         </TemplateColumn>
         <TemplateColumn TGridItem="PeriodLandingDto" Title="Sub-periods">
             @if (context.SubPeriodCount > 0)
