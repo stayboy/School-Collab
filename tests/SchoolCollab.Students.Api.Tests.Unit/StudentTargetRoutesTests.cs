@@ -19,6 +19,7 @@ using SchoolCollab.Students.Api;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.ResolveStudentsByTarget;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Domain;
+using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Api.Tests.Unit;
 
@@ -26,7 +27,9 @@ namespace SchoolCollab.Students.Api.Tests.Unit;
 /// R2-7 (TGT-8 / D-7): wire tests for <code>GET /students/by-target</code>.
 /// Covers repeated query-array binding, all four id-array legs (union + dedupe),
 /// archived-group exclusion, soft-deleted student exclusion, the grade-agnostic
-/// stream leg, and that the route inherits the students group's authorization.
+/// stream leg, that the route inherits the students group's authorization, and that the
+/// additive <code>withNames=true</code> shape carries id + both names while the default stays
+/// the bare <code>Guid[]</code>.
 /// </summary>
 [TestClass]
 public class StudentTargetRoutesTests
@@ -59,7 +62,7 @@ public class StudentTargetRoutesTests
         var dbName = "students-by-target-" + Guid.NewGuid();
         builder.Services.AddTenancy();
         builder.Services.AddDbContext<StudentsDbContext>(o => o.UseInMemoryDatabase(dbName));
-        builder.Services.AddScoped<IQueryHandler<ResolveStudentsByTarget, Guid[]>, ResolveStudentsByTargetHandler>();
+        builder.Services.AddScoped<IQueryHandler<ResolveStudentsByTarget, TargetStudentDto[]>, ResolveStudentsByTargetHandler>();
         builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags());
         builder.Services.Replace(ServiceDescriptor.Singleton<ITenantProvider>(new StubTenantProvider()));
 
@@ -238,6 +241,28 @@ public class StudentTargetRoutesTests
             var ids = await DeserializeIdsAsync(response);
 
             ids.Should().BeEquivalentTo(new[] { kept }, "TGT-6: soft-deleted students never match");
+        }
+    }
+
+    [TestMethod]
+    public async Task ByTarget_WithNames_ReturnsIdAndBothNames_ForAMatchedStudent()
+    {
+        await using var app = BuildApp(out var client);
+        var (db, scope) = await SeedAsync(app.Services);
+        await using (scope)
+        {
+            var kept = db.Students.Single(s => s.StudentNumber == "S4").Id;
+
+            var response = await client.GetAsync($"/students/by-target?allStudents=false&studentIds={kept}&withNames=true");
+            response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+            var json = await response.Content.ReadAsStringAsync();
+            var students = JsonSerializer.Deserialize<TargetStudentDto[]>(
+                json, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+
+            var student = students.Should().ContainSingle().Subject;
+            student.Id.Should().Be(kept, "the name shape keeps the id the id-only shape carried");
+            student.FirstName.Should().Be("A");
+            student.LastName.Should().Be("S4");
         }
     }
 

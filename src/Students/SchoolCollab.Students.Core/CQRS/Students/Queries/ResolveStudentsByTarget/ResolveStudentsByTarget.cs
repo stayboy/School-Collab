@@ -1,4 +1,5 @@
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Core.CQRS.Students.Queries.ResolveStudentsByTarget;
 
@@ -24,4 +25,4 @@ public sealed record ResolveStudentsByTarget(
     IReadOnlyList<Guid> GradeLevelIds,
     IReadOnlyList<Guid> StreamCodedValueIds,
     IReadOnlyList<Guid> StudentIds,
-    IReadOnlyList<Guid> ActivityGroupIds) : IQuery<Guid[]>;
+    IReadOnlyList<Guid> ActivityGroupIds) : IQuery<TargetStudentDto[]>;

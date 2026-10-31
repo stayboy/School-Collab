@@ -23,6 +23,8 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 /// delivery state, <see cref="AssignmentRecipient.OpenedAt"/> supplies "opened" only, a missing log
 /// row is <see cref="AudienceDeliveryStateDto.Unknown"/> (never a fabricated <c>Sent</c>), an
 /// unreached student is a visible row, and the serialized payload carries no address at all (§4.9).
+/// <para>Names come from the cohort read itself, so the rows are name-ordered and a student with no
+/// subscribed contact still carries their name — those rows are the point of the panel.</para>
 /// </summary>
 [TestClass]
 public class GetAssignmentAudienceHandlerTests
@@ -93,16 +95,10 @@ public class GetAssignmentAudienceHandlerTests
         return log;
     }
 
-    private static GetAssignmentAudienceHandler Handler(
-        AssignmentsDbContext db, Guid[] cohort, params SubscriberInfo[] subscribers) =>
+    private static GetAssignmentAudienceHandler Handler(AssignmentsDbContext db, params TargetStudent[] cohort) =>
         new(db,
-            new FakeAssignmentTargetResolver { StudentIds = cohort },
-            new FixedSubscriberContactResolver(subscribers),
+            new FakeAssignmentTargetResolver { Students = cohort },
             NullLogger<GetAssignmentAudienceHandler>.Instance);
-
-    private static SubscriberInfo Subscriber(Guid studentId, string studentName, Guid contactId) =>
-        new(contactId, ContactOwnerType.Guardian, contactId, studentId, ContactChannel.Email, GuardianRole.Primary,
-            "Guardian Name", studentName);
 
     [TestMethod]
     public async Task Rows_CarryTheCohort_WithTheLogAuthoritativeForDelivery_AndOpenedFromTheRecipient()
@@ -123,13 +119,16 @@ public class GetAssignmentAudienceHandlerTests
         db.NotificationLogs.Add(PublishLog(assignment.Id, sentRecipient.Id, sentContact, NotificationDeliveryStatus.Sent));
         await db.SaveChangesAsync();
 
-        var result = await Handler(db, [StudentAdeyemi, StudentOkafor],
-            Subscriber(StudentAdeyemi, "Adeyemi, Tolu", unreachedRecipient.ContactId),
-            Subscriber(StudentOkafor, "Okafor, Ngozi", sentContact))
+        // The cohort arrives in the OPPOSITE order to the names, so the rows below prove the
+        // name ordering rather than the resolver's order.
+        var result = await Handler(db,
+            new TargetStudent(StudentOkafor, "Okafor, Ngozi"),
+            new TargetStudent(StudentAdeyemi, "Adeyemi, Tolu"))
             .HandleAsync(new GetAssignmentAudience(assignment.Id));
 
         result.Degraded.Should().BeFalse();
-        result.Rows.Select(row => row.StudentName).Should().Equal("Adeyemi, Tolu", "Okafor, Ngozi");
+        result.Rows.Select(row => row.StudentName).Should()
+            .Equal(["Adeyemi, Tolu", "Okafor, Ngozi"], "the panel is surname-sorted");
 
         var unreached = result.Rows[0];
         unreached.Reached.Should().BeFalse("AC2 — a student with no subscribed contact is a visible row");
@@ -165,7 +164,10 @@ public class GetAssignmentAudienceHandlerTests
             PublishLog(assignment.Id, skipped.Id, skippedContact, NotificationDeliveryStatus.Skipped));
         await db.SaveChangesAsync();
 
-        var result = await Handler(db, [StudentAdeyemi, StudentOkafor]).HandleAsync(new GetAssignmentAudience(assignment.Id));
+        var result = await Handler(db,
+            new TargetStudent(StudentAdeyemi, "Adeyemi, Tolu"),
+            new TargetStudent(StudentOkafor, "Okafor, Ngozi"))
+            .HandleAsync(new GetAssignmentAudience(assignment.Id));
 
         var failedRow = result.Rows.Single(row => row.StudentId == StudentOkafor).Contacts.Single();
         failedRow.DeliveryState.Should().Be(AudienceDeliveryStateDto.Failed);
@@ -191,7 +193,7 @@ public class GetAssignmentAudienceHandlerTests
         db.AssignmentRecipients.Add(recipient);
         await db.SaveChangesAsync();
 
-        var result = await Handler(db, [StudentOkafor], Subscriber(StudentOkafor, "Okafor, Ngozi", contactId))
+        var result = await Handler(db, new TargetStudent(StudentOkafor, "Okafor, Ngozi"))
             .HandleAsync(new GetAssignmentAudience(assignment.Id));
 
         // Spec §4.9 / AC1: asserted on the PAYLOAD, not the view — a field a later template starts
@@ -218,20 +220,20 @@ public class GetAssignmentAudienceHandlerTests
         await db.SaveChangesAsync();
 
         var cohort = Enumerable.Range(0, AudienceLimits.AudienceCap + 1).Select(_ => Guid.NewGuid()).ToArray();
-        var subscribers = cohort
-            .Select((studentId, index) => Subscriber(studentId, $"Student {index:D3}", Guid.NewGuid()))
+        var students = cohort
+            .Select((studentId, index) => new TargetStudent(studentId, $"Student {index:D3}"))
             .ToArray();
 
-        var result = await Handler(db, cohort, subscribers).HandleAsync(new GetAssignmentAudience(assignment.Id));
+        var result = await Handler(db, students).HandleAsync(new GetAssignmentAudience(assignment.Id));
 
         result.Rows.Should().HaveCount(AudienceLimits.AudienceCap, "Q146 fixes the read at 200 rows");
         result.Truncated.Should().BeTrue("the panel must be able to state the cap");
     }
 
     [TestMethod]
-    public async Task ADirectoryFailure_LeavesTheRowsAndTheDeliveryIntact()
+    public async Task AFailedCohortRead_LeavesTheRowsAndTheDeliveryIntact()
     {
-        var (db, _) = Build(nameof(ADirectoryFailure_LeavesTheRowsAndTheDeliveryIntact));
+        var (db, _) = Build(nameof(AFailedCohortRead_LeavesTheRowsAndTheDeliveryIntact));
         var assignment = NewAssignment("Photosynthesis lab report");
         db.Assignments.Add(assignment);
 
@@ -242,10 +244,11 @@ public class GetAssignmentAudienceHandlerTests
         db.NotificationLogs.Add(PublishLog(assignment.Id, recipient.Id, contactId, NotificationDeliveryStatus.Sent));
         await db.SaveChangesAsync();
 
+        // The students-api leg is down, so the same read that supplies the names fails: the rows
+        // fall back to the persisted recipients, with a state and a delivery answer but no name.
         var handler = new GetAssignmentAudienceHandler(
             db,
-            new FakeAssignmentTargetResolver { StudentIds = [StudentOkafor] },
-            new ThrowingContactResolver(),
+            new FakeAssignmentTargetResolver { Throw = new HttpRequestException("students-api unreachable") },
             NullLogger<GetAssignmentAudienceHandler>.Instance);
 
         var result = await handler.HandleAsync(new GetAssignmentAudience(assignment.Id));
@@ -254,48 +257,13 @@ public class GetAssignmentAudienceHandlerTests
         result.Rows.Should().ContainSingle("a name outage never empties the panel");
         result.Rows[0].StudentName.Should().BeEmpty("a name that could not be read is not invented");
         result.Rows[0].Contacts.Single().DeliveryState.Should().Be(AudienceDeliveryStateDto.Sent,
-            "a directory failure does not touch delivery — the log still answers");
-    }
-
-    [TestMethod]
-    public async Task AWholeCohortWithoutAName_DegradesTheRead_AndKeepsTheRowsAndDelivery()
-    {
-        var (db, _) = Build(nameof(AWholeCohortWithoutAName_DegradesTheRead_AndKeepsTheRowsAndDelivery));
-        var assignment = NewAssignment("Photosynthesis lab report");
-        db.Assignments.Add(assignment);
-
-        var contactId = Guid.NewGuid();
-        var recipient = Recipient(assignment.Id, StudentOkafor, contactId,
-            ContactOwnerType.Guardian, ContactChannel.Email, GuardianRole.Primary);
-        db.AssignmentRecipients.Add(recipient);
-        db.NotificationLogs.Add(PublishLog(assignment.Id, recipient.Id, contactId, NotificationDeliveryStatus.Sent));
-        await db.SaveChangesAsync();
-
-        // The production StudentsContactResolver swallows a per-owner HttpRequestException and degrades
-        // that owner to an EMPTY result — this read therefore succeeds and carries no name at all,
-        // which is the shape a directory outage actually reaches the handler in.
-        var handler = new GetAssignmentAudienceHandler(
-            db,
-            new FakeAssignmentTargetResolver { StudentIds = [StudentAdeyemi, StudentOkafor] },
-            new FixedSubscriberContactResolver([]),
-            NullLogger<GetAssignmentAudienceHandler>.Instance);
-
-        var result = await handler.HandleAsync(new GetAssignmentAudience(assignment.Id));
-
-        result.Degraded.Should().BeTrue(
-            "a swallowed directory failure reaching the handler as a successful read of NO name at all for the whole cohort is a total name loss");
-        result.Rows.Should().HaveCount(2, "the rows survive the name outage");
-        result.Rows.Should().OnlyContain(row => row.StudentName.Length == 0,
-            "a name that could not be read is not invented");
-        var okafor = result.Rows.Single(row => row.StudentId == StudentOkafor);
-        okafor.Contacts.Single().DeliveryState.Should().Be(AudienceDeliveryStateDto.Sent,
             "a name outage does not touch delivery — the log still answers");
     }
 
     [TestMethod]
-    public async Task AStudentWithoutASubscriber_IsNotADegradation_WhileOthersResolve()
+    public async Task AStudentWithoutASubscriber_StillCarriesTheirName_AndIsNotADegradation()
     {
-        var (db, _) = Build(nameof(AStudentWithoutASubscriber_IsNotADegradation_WhileOthersResolve));
+        var (db, _) = Build(nameof(AStudentWithoutASubscriber_StillCarriesTheirName_AndIsNotADegradation));
         var assignment = NewAssignment("Photosynthesis lab report");
         db.Assignments.Add(assignment);
 
@@ -306,19 +274,21 @@ public class GetAssignmentAudienceHandlerTests
         db.NotificationLogs.Add(PublishLog(assignment.Id, recipient.Id, contactId, NotificationDeliveryStatus.Sent));
         await db.SaveChangesAsync();
 
-        // Only Okafor has a subscribed guardian contact, so the batched subscriber read carries a row
-        // for Okafor alone. Adeyemi's absence is the ordinary shape of a tenant — not an outage.
-        var result = await Handler(db, [StudentAdeyemi, StudentOkafor],
-            Subscriber(StudentOkafor, "Okafor, Ngozi", contactId))
+        // Only Okafor has a persisted contact row. Adeyemi has none at all — and still carries a
+        // name, because the name rides the cohort read rather than the contact read. Those are
+        // exactly the rows a teacher has to chase.
+        var result = await Handler(db,
+            new TargetStudent(StudentAdeyemi, "Adeyemi, Tolu"),
+            new TargetStudent(StudentOkafor, "Okafor, Ngozi"))
             .HandleAsync(new GetAssignmentAudience(assignment.Id));
 
-        result.Degraded.Should().BeFalse(
-            "one resolved name proves the directory answered; the rest simply have no subscribed contact");
-        result.Rows.Should().HaveCount(2, "a student with no subscriber is still a visible row");
+        result.Degraded.Should().BeFalse("the cohort read answered with every name");
 
         var adeyemi = result.Rows.Single(row => row.StudentId == StudentAdeyemi);
-        adeyemi.StudentName.Should().BeEmpty("no name was readable for this student");
+        adeyemi.StudentName.Should().Be("Adeyemi, Tolu",
+            "a student with no subscribed contact is still named — this is the row the panel exists to show");
         adeyemi.Reached.Should().BeFalse("with no subscribed contact the student was never reached");
+        adeyemi.Contacts.Should().BeEmpty();
 
         var okafor = result.Rows.Single(row => row.StudentId == StudentOkafor);
         okafor.StudentName.Should().Be("Okafor, Ngozi");
@@ -331,22 +301,14 @@ public class GetAssignmentAudienceHandlerTests
     {
         var (db, _) = Build(nameof(AnUnknownAssignment_IsNotFound));
 
-        var act = () => Handler(db, []).HandleAsync(new GetAssignmentAudience(Guid.NewGuid()));
+        var act = () => Handler(db).HandleAsync(new GetAssignmentAudience(Guid.NewGuid()));
 
         await act.Should().ThrowAsync<AssignmentNotFoundException>();
-    }
-
-    /// <summary>A directory outage: every subscriber read fails.</summary>
-    private sealed class ThrowingContactResolver : IContactResolver
-    {
-        public Task<IReadOnlyList<SubscriberInfo>> ResolveSubscribersAsync(
-            ResolveSubscribersRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromException<IReadOnlyList<SubscriberInfo>>(new HttpRequestException("Students directory unavailable"));
     }
 }
 
 /// <summary>A subscriber read over a fixed set of already-resolved contacts — the batched
-/// Students read the publish path and both audience reads share.</summary>
+/// Students read publish and the draft preview share.</summary>
 internal sealed class FixedSubscriberContactResolver(IReadOnlyList<SubscriberInfo> subscribers) : IContactResolver
 {
     public Task<IReadOnlyList<SubscriberInfo>> ResolveSubscribersAsync(

@@ -14,7 +14,8 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAu
 
 /// <summary>
 /// The DRAFT audience read (spec §4.2 Q152, round plan P2b): the same rows the published read
-/// returns, resolved from the assignment's persisted targets through the same resolver, the same
+/// returns, resolved from the assignment's persisted targets through the same resolver (which
+/// supplies both the cohort and its names), the same
 /// batched subscriber read and the same policy filter publish runs — with
 /// <see cref="AudienceDeliveryStateDto.NotPublishingYet"/> where the published read would carry a
 /// delivery state. <b>Nothing is persisted</b>: publish re-resolves, and the panel says so in words.
@@ -30,6 +31,9 @@ public sealed record GetAssignmentAudiencePreview(Guid AssignmentId) : IQuery<As
 /// <see cref="AudienceDeliveryStateDto.BlockedByPolicy"/>: the draft panel exists to answer "who will
 /// be told", and an omitted contact answers it with silence. Nothing here writes — no recipient row,
 /// no gate, no log entry.
+/// <para>Student names ride the target resolver's read, exactly as in the published read, so a
+/// student with no subscribed contact is still named; the subscriber read is the contact source
+/// only.</para>
 /// </remarks>
 public sealed class GetAssignmentAudiencePreviewHandler(
     AssignmentsDbContext db,
@@ -56,10 +60,10 @@ public sealed class GetAssignmentAudiencePreviewHandler(
             return new AssignmentAudienceDto([], false, false);
         }
 
-        Guid[] cohort;
+        TargetStudent[] students;
         try
         {
-            cohort = await targetResolver.ResolveStudentIdsAsync(
+            students = await targetResolver.ResolveStudentsAsync(
                 targets.Select(target => new TargetConstraint(target.Kind, target.RefId)).ToArray(),
                 targets.Any(target => target.Kind == TargetKind.AllStudents),
                 cancellationToken);
@@ -76,10 +80,14 @@ public sealed class GetAssignmentAudiencePreviewHandler(
             return new AssignmentAudienceDto([], false, true);
         }
 
-        if (cohort.Length == 0)
+        if (students.Length == 0)
         {
             return new AssignmentAudienceDto([], false, false);
         }
+
+        // The names ride the cohort read, so a student with no subscribed contact still carries
+        // one; the subscriber read below is the CONTACT source only.
+        var cohort = students.Select(student => student.Id).ToArray();
 
         var tenantId = db.CurrentTenantId;
         var gradeTargetIds = AssignmentPolicyScope.GradeTargetIds(assignment);
@@ -152,26 +160,21 @@ public sealed class GetAssignmentAudiencePreviewHandler(
             .Select(recipient => (recipient.ContactId, recipient.WardStudentId))
             .ToHashSet();
 
-        var names = subscribers
-            .Where(subscriber => subscriber.StudentId.HasValue)
-            .GroupBy(subscriber => subscriber.StudentId!.Value)
-            .ToDictionary(
-                group => group.Key,
-                group => group.Select(subscriber => subscriber.StudentName)
-                    .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty);
-
-        var rows = cohort
-            .OrderBy(studentId => names.TryGetValue(studentId, out var name) ? name : string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(studentId => studentId)
+        var ordered = students
+            .OrderBy(student => student.FullName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(student => student.Id)
             .Take(AudienceLimits.AudienceCap)
-            .Select(studentId => new AudienceStudentDto(
-                studentId,
-                names.TryGetValue(studentId, out var studentName) ? studentName : string.Empty,
+            .ToArray();
+
+        var rows = ordered
+            .Select(student => new AudienceStudentDto(
+                student.Id,
+                student.FullName,
                 projected.Exists(recipient =>
-                    recipient.WardStudentId == studentId
+                    recipient.WardStudentId == student.Id
                     && reachable.Contains((recipient.ContactId, recipient.WardStudentId))),
                 projected
-                    .Where(recipient => recipient.WardStudentId == studentId)
+                    .Where(recipient => recipient.WardStudentId == student.Id)
                     .OrderBy(recipient => (int)recipient.Channel)
                     .ThenBy(recipient => (int)recipient.OwnerType)
                     .Select(recipient => new AudienceContactDto(
@@ -191,6 +194,6 @@ public sealed class GetAssignmentAudiencePreviewHandler(
                     .ToList()))
             .ToList();
 
-        return new AssignmentAudienceDto(rows, cohort.Length > AudienceLimits.AudienceCap, false);
+        return new AssignmentAudienceDto(rows, students.Length > AudienceLimits.AudienceCap, false);
     }
 }

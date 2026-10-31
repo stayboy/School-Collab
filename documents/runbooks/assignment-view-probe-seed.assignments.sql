@@ -115,7 +115,7 @@ VALUES
      'Read the panel, not the assignment.', 0, 0, 3,
      '70000000-0000-4000-8000-0000000000c1', 'PROBE-2C-PUB',
      now() + interval '7 days', 20.00, NULL, NULL, false, 1,
-     '70000000-0000-4000-8000-0000000000a1', false,
+     '00000000-0000-0000-0000-000000000003', false,
      now() - interval '2 days', 30, '{}', '{}',
      '50000000-0000-4000-8000-000000000001', now(), now()),
 
@@ -127,7 +127,7 @@ VALUES
      'Six questions, no materials, no recipients.', 0, 0, 3,
      '70000000-0000-4000-8000-0000000000c2', 'PROBE-2C-DRAFT',
      now() + interval '14 days', 15.00, NULL, NULL, false, 0,
-     '70000000-0000-4000-8000-0000000000a1', true,
+     '00000000-0000-0000-0000-000000000003', true,
      NULL, 30, '{}', '{}',
      '50000000-0000-4000-8000-000000000001', now(), now());
 

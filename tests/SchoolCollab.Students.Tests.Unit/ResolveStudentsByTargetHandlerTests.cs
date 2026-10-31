@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.ResolveStudentsByTarget;
 using SchoolCollab.Students.Core.Domain;
+using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Tests.Unit;
 
@@ -48,6 +49,8 @@ public class ResolveStudentsByTargetHandlerTests
 
     private static ResolveStudentsByTargetHandler Handler(StudentsTestScope s) => new(s.Db);
 
+    private static Guid[] Ids(TargetStudentDto[] students) => students.Select(student => student.Id).ToArray();
+
     private static ResolveStudentsByTarget Query(
         bool all = false, Guid[]? grades = null, Guid[]? streams = null, Guid[]? students = null, Guid[]? groups = null) =>
         new(all, grades ?? [], streams ?? [], students ?? [], groups ?? []);
@@ -65,8 +68,10 @@ public class ResolveStudentsByTargetHandlerTests
 
         var result = await Handler(s).HandleAsync(Query(all: true));
 
-        result.Should().BeEquivalentTo(new[] { kept.Id, other.Id },
+        Ids(result).Should().BeEquivalentTo(new[] { kept.Id, other.Id },
             "D-6: the allStudents leg is tenant-wide and excludes soft-deleted students only");
+        result.Should().Contain(student => student.Id == kept.Id && student.FirstName == "A" && student.LastName == "S1",
+            "the element carries both name columns beside the id");
     }
 
     [TestMethod]
@@ -83,11 +88,11 @@ public class ResolveStudentsByTargetHandlerTests
         await s.Db.SaveChangesAsync();
 
         var byGrade = await Handler(s).HandleAsync(Query(grades: [GradeA]));
-        byGrade.Should().BeEquivalentTo(new[] { inGradeA.Id },
+        Ids(byGrade).Should().BeEquivalentTo(new[] { inGradeA.Id },
             "TGT-4: the grade leg is the current-period active enrollment");
 
         var byStream = await Handler(s).HandleAsync(Query(streams: [StreamId]));
-        byStream.Should().BeEquivalentTo(new[] { inGradeB.Id },
+        Ids(byStream).Should().BeEquivalentTo(new[] { inGradeB.Id },
             "TGT-5: the stream leg carries NO grade predicate and is current-period scoped");
     }
 
@@ -115,7 +120,7 @@ public class ResolveStudentsByTargetHandlerTests
         var union = await Handler(s).HandleAsync(
             Query(grades: [GradeA], groups: [activeGroup.Id, archivedGroup.Id], students: [student.Id]));
 
-        union.Should().BeEquivalentTo(new[] { student.Id },
+        Ids(union).Should().BeEquivalentTo(new[] { student.Id },
             "TGT-3: a student matching several legs appears once; EC-4 excludes the archived group");
 
         var archivedOnly = await Handler(s).HandleAsync(Query(groups: [archivedGroup.Id]));
@@ -136,12 +141,12 @@ public class ResolveStudentsByTargetHandlerTests
         await s.Db.SaveChangesAsync();
 
         var byStudent = await Handler(s).HandleAsync(Query(students: [kept.Id, deleted.Id]));
-        byStudent.Should().BeEquivalentTo(new[] { kept.Id }, "TGT-6: soft-deleted students never match");
+        Ids(byStudent).Should().BeEquivalentTo(new[] { kept.Id }, "TGT-6: soft-deleted students never match");
 
         var noPeriod = await Handler(s).HandleAsync(Query(grades: [GradeA]));
         noPeriod.Should().BeEmpty("no current period ⇒ the period-scoped legs match nothing");
 
         var explicitStudent = await Handler(s).HandleAsync(Query(students: [kept.Id]));
-        explicitStudent.Should().BeEquivalentTo(new[] { kept.Id });
+        Ids(explicitStudent).Should().BeEquivalentTo(new[] { kept.Id });
     }
 }

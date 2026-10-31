@@ -564,6 +564,65 @@ states, the DOM checklist, the console log), and **the parent renders the fideli
 approved mock. The driver never grades its own evidence; pixel-matching a screenshot against box-art has no
 ground truth, so the checklist — not an image diff — is the real test.
 
+## Resume point (updated 2026-10-30, late) — live probe DEFERRED by owner
+
+**Owner call: park the live pass until all UI work is completed** — overriding the "probe before submit" order
+(grill round 2 Q3). Nothing is submitted, nothing is pushed. The verdict above stays `ACCEPTED PENDING LIVE PASS`;
+the probe is a park, not a pass. `gh stack submit --open` happens only after the browser finally sees the page.
+
+**Scope of "all UI work" — settled (grill round 5, Q11): it means all UI work on THIS page.** The probe runs
+**before round (b) stacks on this layer**. Recording why, because the wording reads the other way: if the progress
+page were written on top first, any defect the browser then found would have to be fixed *under layer (b)* — moving
+a reviewed tip, or burying the fix in a diff about a different page. Cost accepted: one extra probe run when round
+(b)'s own page is ready.
+
+The AppHost was killed and its ports checked closed; `postgres-84ff496f` / `rabbitmq-84ff496f` were left running
+on purpose (persistent data-volume lifetime) — the seeded fixtures and the two settings rows survive the pause.
+
+**Learned while trying to probe (would have been re-paid at resume):**
+
+1. THIS session's postgres is `postgres-84ff496f` on `127.0.0.1:11637` (the user-secrets-pinned port). The older
+   `postgres-057ea9d7` also held `11637` for the first hours, so seeding went to **the wrong instance** — that is
+   the whole "Assignment not found" mystery. At resume, seed **only** whatever container currently owns `11637`.
+2. Aspire re-creates the postgres/redis/keycloak/mailpit/pgadmin containers with **random name suffixes at every
+   AppHost start** (cache went `uhhuwftu` → previous `ncabnuqg`). Any restart recipe must look them up by port or
+    prefix, never by the exact name. Postgres/rabbitmq are the exception: `WithDataVolume` + persistent lifetime.
+3. Tenant ids **rotate with the database**, not the code: this fresh instance's Hydeson is
+   `6363fc4d-2c3d-4d50-94eb-047b0608babf` (the earlier `514faa38…` died with its instance).
+4. **A fresh students-db has no students, so the seed's gender lookup has no source** — pass
+   `-v gender_id=<guid>` explicitly (this instance: `GENDER_FEMALE` = `6eb9109a-96d6-47e4-adc8-6a05ea4e540b`),
+   exactly as the SQL's own comment says.
+5. The dev tenant claim is `TenantProvider` → `tenant_id` claim, where the dev `TestAuthHandler` reads Redis key
+   **`dev:tenant-selection`** (value = the GUID as plain UTF-8 text; `dev:tenant-default` holds the portal's
+   applied default) through `IDevTenantSelection` (`DevTenantSelection.cs:81`). Clicking the switcher never
+   took; writing the key directly is the reliable path. The session's Redis rejected `redis-cli` with
+   *Connection reset by peer* on PLAINTEXT but the auth'd attempt was never completed — try `--tls -p <6380-mapped>
+   -a <cache-password>` first next time.
+6. **The fixture author bug is already fixed** (teacher `…00a1` → dev teacher `…0003`): the list page and the
+   by-id read both apply `TeacherScope.AllowsAnyTargetGrade` (`ListAssignmentsQueryHandler.cs:165`), which filters
+   out rows the scoped dev teacher didn't create — the earlier "No assignments yet." was this + the wrong
+   instance, jointly.
+7. Memory pressure note: the machine sat at **0.2 GB free** when the probe hit `ERR_INSUFFICIENT_RESOURCES`. At
+   resume, check memory before launching a browser; headless chromium + eight services need several GB.
+
+**The probe harness is ready and proven working** at `C:/tmp/avprobe` (`probe.js`; four screenshots + `probe-report.json`): it launches system Edge (`channel: 'msedge'` — the cached playwright chromium build is missing),
+waits for `#assignment-facts` beyond the no-prerender shell, and captures both states at 900/1400 px plus the DOM
+report. It currently screenshots the *empty* states — at resume: tenant right → DB right (`11637` owner) →
+`node probe.js` → judge.
+
+### Resume order (unchanged from the pause, corrected)
+
+1. Start AppHost; wait for admin on `https://localhost:7300`.
+2. Confirm which container owns `11637`; seed that one (students `-v gender_id=…`, assignments) under the tenant
+   the pill will show — write Redis `dev:tenant-selection` directly with that tenant's current GUID.
+3. Re-apply the two settings rows if the instance changed (`blocked_channels=[1]`, approval-required = true).
+4. `node probe.js` → judge against the approved mock; spec beats mock; mock divergences recorded as corrections.
+5. Any reader-visible defect ⇒ **rework via a worker** (R9), re-freeze the patch, re-probe.
+6. Then `gh stack submit --open`, hand-written body.
+
+`clef:27b` remains unusable for subagents until pi restarts; the probe's evidence role is filled by `probe.js`,
+and the fidelity verdict stays with the parent seat (per grill round 3).
+
 ## Static review — `deepseek-v4-pro:0813`, independent of the implementer
 
 Reviewed the frozen 22-file patch against the plan, the approved mock and the spec. **Verdict: `CLOSED WITH NOTES`.**
@@ -590,6 +649,39 @@ list" promise (P2, gate finding #4), so they were **fixed in pass 2c rather than
 (one source of truth either way — naming, not drift); and `Duplicate` as kebab-only rather than the mock's visible
 secondary beside the draft primary, because the six pins never covered its placement and the later P5b matrix + AC4c
 pin kebab-only, which supersedes the drawing.
+
+## Delta review — `deepseek-v4-pro:0813`, the part the first review never saw
+
+The first review covered the patch only up to `41e9cc7f`. Everything after it — pass 2d, the fixture SQL and all of
+layer 2, including the round's only cross-context contract change — was reviewed separately over
+`41e9cc7f..8096bda5`. **Verdict: `CLOSED WITH NOTES`**, no blocking finding.
+
+Confirmed clean, each checked rather than assumed: **`withNames` breaks nothing** — the only two consumers of
+`GET /students/by-target` (`AssignmentRoutes.cs:493`, `PublishAssignmentCommandHandler.cs:148`) both go through
+`ResolveStudentIdsAsync`, which never sends the flag, so `bool?` binds `null` and the response stays `Guid[]`; no
+third caller exists in any context. **The name source is coherent** — `"{LastName}, {FirstName}"` is applied in
+exactly one place, both handlers sort `OrderBy(FullName, OrdinalIgnoreCase).ThenBy(Id)`, a contact-less student is
+still named, and `Degraded` now means only what it says. **Pass 2d was correctly removed, not regressed** — its rule
+existed to catch a *swallowed* `contacts/subscribed` failure, and that failure mode is gone now that the name read
+fail-closes on the cohort read. **The Students regression surface holds** — five union legs, tenant filter and dedupe
+intact, and the wire tests still pin the default `Guid[]` contract **unmodified**, which is the assertion that would
+have hidden a break had it been edited. **The fixture SQL** is idempotent by fixed id, carries no cross-database FK
+assumption, keeps the one column that must stay stable (`date_of_birth`) fixed rather than `now()`-derived, and is
+referenced by no `.cs` file, so there is no path into `MigrationService`.
+
+**Notes, and what happened to each:**
+
+1. `GetAssignmentAudiencePreview.cs:29` — the `<remarks>` tag had lost its `>`, malforming the whole doc block, and
+   **no build says so** because `GenerateDocumentationFile` is not set. **Fixed** (one character); a repo-wide sweep
+   for other `/// <remarks` lines found none.
+2. `AssignmentTargetResolverHttpClient.cs:68` — the wire→sort-key join (`"{LastName}, {FirstName}"`, plus the
+   `&withNames=true` URL) has **no direct test**. The handler test proves the *source* changed, not the *format*, so a
+   swap to `"{First} {Last}"` would silently invert the panel's only stated ordering. **Carried to resume**, to be
+   written alongside the probe: the probe exercises this exact glue against real names, so the test and the
+   observation should land together rather than the test pinning a format nobody has seen rendered.
+3. `ResolveStudentsByTargetHandler.cs:36/51/83/104/127` — projecting name columns for the default `Guid[]` caller is a
+   small, documented cost ("one query serves both shapes and the route does the projection"). **Accepted, no action**
+   — the alternative is two queries or a flag threaded through the handler.
 
 ## Named risks
 
@@ -659,3 +751,57 @@ container-query collapse is currently verified **by structure only**: bUnit sees
 collapse rule (gate finding 5 deferred precisely this). The page has never been rendered in a browser this round,
 so **no claim of visual fidelity to the mock should be read into this acceptance**. The probe, its executor and its
 required evidence are the open question in the round's grill round.
+
+---
+
+## Resume point (paused 2026-10-30, resume 18:00 GMT)
+
+**Everything is committed and green; only the live pass is unfinished.** Tree clean, two stack layers, nothing pushed, no PR.
+
+```
+● feat/assignment-view-names  3452a5ad  layer 2 — names from the target read
+○ feat/assignment-view-page   41e9cc7f  layer 1 — the page, the reads, fixtures, 2d
+└ main
+```
+
+| Gate | Result |
+|---|---|
+| build `SchoolCollab.slnx -v q` | 0 errors |
+| Assignments 1432 · Assignments.Api 207 · Students.Api 38 · Students 695 · Architecture 160 | **0 failures** |
+| `gates.sh` no flags | 2 pre-existing #459, 2 OpenRouter live (CI skips), 1 flake (`CodedValueDropdown_WithSelectedId_MarksOptionSelected`, 3/3 green in isolation on this tree) |
+| MAUI head | 0 errors / 0 warnings |
+
+### The one blocker, precisely
+
+The probe runs and the app renders — Blazor circuit connects, nav and pages paint — but **the app's tenant is `System`**, and every read therefore returns nothing:
+
+- `◐ System` is the tenant pill; "Hydeson School" beside it is a *term/school* label, not the tenant.
+- The switcher lists `(system / no tenant)`, `Dev School`, `Hydeson School`, `Little Legends`. Clicking `Hydeson School` did **not** take: after click + reload the pill still reads `System`, and both the list page ("No assignments yet.") and the detail page ("Assignment not found.") stay empty. `[role=option]` matches 0 — it is a `FluentSelect`, so it needs its own interaction (or the Redis dev-selection key written directly; the `cache-*` container rejected `redis-cli` with an *I/O error* on both ports, so auth/TLS needs checking first).
+- Server-side the tenant comes from `TenantProvider` → the `tenant_id` claim, which the dev `TestAuthHandler` seeds from Redis `IDevTenantSelection` (`TenantProvider.cs:34-58`, `AdminDefaultTenantResolver.cs:16`). That is the seam to drive.
+
+### Data already in place (verified against the DB)
+
+- Both probe assignments seeded under **`514faa38-37c2-4969-8825-51cac6854723`** (Hydeson School): `a50b0000-…0001` published, `a50b0000-…0002` draft. 28 students, the five contact shapes, 8+6 questions, 2 attachments, 1 resource; published mix Sent 18 / Opened 4 / Failed 3 / Skipped 2 / Unknown 1, 23 reached.
+- Settings-db rows for the same tenant: `blocked_channels=[1]` (id `7c0b0000-…0001`, inserted) and `requires_approval_before_publish=true` (updated the tenant's pre-existing row `77e42279-e2bc-471a-87ca-e5506549dcd6`, whose prior value was **NULL** — that is the restore). Dev School's rows were deleted again, so it is back to pre-probe state.
+- **Seed fix still needed in the runbook**: its fixed GUIDs are unique per *database*, not per tenant — seeding a second tenant collides on `pk_tenant_notification_policies`. The working form is `INSERT … ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id`, and for `tenant_assignment_policies` an **UPDATE of the tenant's existing row** (there is a unique index per tenant).
+
+### Restart recipe
+
+```bash
+# from the repo root — Admin lands on https://localhost:7300 (self-signed; ignore TLS errors)
+nohup dotnet run --project src/AppHost/SchoolCollab.AppHost > /tmp/apphost.log 2>&1 &
+# postgres is postgres-057ea9d7 on 127.0.0.1:11637; password in the AppHost user-secrets
+# (Parameters:postgres-password). Seed tenant: 514faa38-37c2-4969-8825-51cac6854723
+```
+
+Probe harness is ready at `C:/tmp/avprobe` (`probe.js`, `probe-report.json`, four PNGs — currently screenshots of the empty "not found" states, worth keeping only as proof the harness works). Playwright 1.64.1 is installed there and launches the **system Edge** (`channel: 'msedge'`) because its pinned chromium build is not in the cache.
+
+### Order of work when resumed
+
+1. Get the app into the **Hydeson** tenant (switcher or Redis), confirm `/assignments` lists the two PROBE rows.
+2. Re-run `node probe.js` → four screenshots + DOM report.
+3. Judge the screenshots against the approved 2c mock (parent seat; the driver collects only). Record any spec↔mock divergence as a **mock correction**, per R-Q5.
+4. Any "a reader would notice" defect ⇒ **rework via a worker** (R9), re-freeze the patch, re-probe.
+5. Only then `gh stack submit --open` with a hand-written body (summary, AC table, gate table naming the non-green legs, both screenshots).
+
+`clef:27b` is visible to the session (`ollama/clef:27b-cloud`, text-only) but the **subagent registry rejects it** under all three id forms — a restart of pi is needed before it can drive a probe.

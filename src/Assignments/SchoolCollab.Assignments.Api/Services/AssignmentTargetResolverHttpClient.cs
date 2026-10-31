@@ -32,6 +32,45 @@ public sealed class AssignmentTargetResolverHttpClient(
             return [];
         }
 
+        var url = BuildUrl(targets, includeAllStudents);
+
+        var client = httpClientFactory.CreateClient("students-api");
+        logger.LogDebug("Resolving target students via {Url}", url);
+        var studentIds = await client.GetFromJsonAsync<Guid[]>(url, cancellationToken) ?? [];
+        logger.LogInformation(
+            "Target resolution matched {Count} student(s) for {ConstraintCount} constraint(s)",
+            studentIds.Length, targets.Count);
+
+        return studentIds;
+    }
+
+    public async Task<TargetStudent[]> ResolveStudentsAsync(
+        IReadOnlyList<TargetConstraint> targets,
+        bool includeAllStudents,
+        CancellationToken cancellationToken = default)
+    {
+        if (targets.Count == 0 && !includeAllStudents)
+        {
+            return [];
+        }
+
+        // The additive shape of the same route: identical query string, plus the names flag.
+        var url = $"{BuildUrl(targets, includeAllStudents)}&withNames=true";
+
+        var client = httpClientFactory.CreateClient("students-api");
+        logger.LogDebug("Resolving target students with names via {Url}", url);
+        var rows = await client.GetFromJsonAsync<TargetStudentRow[]>(url, cancellationToken) ?? [];
+        logger.LogInformation(
+            "Target resolution matched {Count} named student(s) for {ConstraintCount} constraint(s)",
+            rows.Length, targets.Count);
+
+        return rows
+            .Select(row => new TargetStudent(row.Id, $"{row.LastName}, {row.FirstName}"))
+            .ToArray();
+    }
+
+    private static string BuildUrl(IReadOnlyList<TargetConstraint> targets, bool includeAllStudents)
+    {
         var query = new List<string> { $"allStudents={includeAllStudents.ToString().ToLowerInvariant()}" };
         foreach (var target in targets)
         {
@@ -51,15 +90,9 @@ public sealed class AssignmentTargetResolverHttpClient(
             });
         }
 
-        var client = httpClientFactory.CreateClient("students-api");
-        var url = $"students/by-target?{string.Join("&", query)}";
-
-        logger.LogDebug("Resolving target students via {Url}", url);
-        var studentIds = await client.GetFromJsonAsync<Guid[]>(url, cancellationToken) ?? [];
-        logger.LogInformation(
-            "Target resolution matched {Count} student(s) for {ConstraintCount} constraint(s)",
-            studentIds.Length, targets.Count);
-
-        return studentIds;
+        return $"students/by-target?{string.Join("&", query)}";
     }
+
+    /// <summary>The <c>withNames=true</c> wire shape of <c>GET /students/by-target</c>.</summary>
+    private sealed record TargetStudentRow(Guid Id, string FirstName, string LastName);
 }

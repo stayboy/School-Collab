@@ -68,6 +68,76 @@ index 3d0a6d29..708bcd4c 100644
  });
  
  var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Services/AssignmentTargetResolverHttpClient.cs b/src/Assignments/SchoolCollab.Assignments.Api/Services/AssignmentTargetResolverHttpClient.cs
+index c03f1a38..cc068542 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Services/AssignmentTargetResolverHttpClient.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Services/AssignmentTargetResolverHttpClient.cs
+@@ -32,6 +32,45 @@ public sealed class AssignmentTargetResolverHttpClient(
+             return [];
+         }
+ 
++        var url = BuildUrl(targets, includeAllStudents);
++
++        var client = httpClientFactory.CreateClient("students-api");
++        logger.LogDebug("Resolving target students via {Url}", url);
++        var studentIds = await client.GetFromJsonAsync<Guid[]>(url, cancellationToken) ?? [];
++        logger.LogInformation(
++            "Target resolution matched {Count} student(s) for {ConstraintCount} constraint(s)",
++            studentIds.Length, targets.Count);
++
++        return studentIds;
++    }
++
++    public async Task<TargetStudent[]> ResolveStudentsAsync(
++        IReadOnlyList<TargetConstraint> targets,
++        bool includeAllStudents,
++        CancellationToken cancellationToken = default)
++    {
++        if (targets.Count == 0 && !includeAllStudents)
++        {
++            return [];
++        }
++
++        // The additive shape of the same route: identical query string, plus the names flag.
++        var url = $"{BuildUrl(targets, includeAllStudents)}&withNames=true";
++
++        var client = httpClientFactory.CreateClient("students-api");
++        logger.LogDebug("Resolving target students with names via {Url}", url);
++        var rows = await client.GetFromJsonAsync<TargetStudentRow[]>(url, cancellationToken) ?? [];
++        logger.LogInformation(
++            "Target resolution matched {Count} named student(s) for {ConstraintCount} constraint(s)",
++            rows.Length, targets.Count);
++
++        return rows
++            .Select(row => new TargetStudent(row.Id, $"{row.LastName}, {row.FirstName}"))
++            .ToArray();
++    }
++
++    private static string BuildUrl(IReadOnlyList<TargetConstraint> targets, bool includeAllStudents)
++    {
+         var query = new List<string> { $"allStudents={includeAllStudents.ToString().ToLowerInvariant()}" };
+         foreach (var target in targets)
+         {
+@@ -51,15 +90,9 @@ public sealed class AssignmentTargetResolverHttpClient(
+             });
+         }
+ 
+-        var client = httpClientFactory.CreateClient("students-api");
+-        var url = $"students/by-target?{string.Join("&", query)}";
+-
+-        logger.LogDebug("Resolving target students via {Url}", url);
+-        var studentIds = await client.GetFromJsonAsync<Guid[]>(url, cancellationToken) ?? [];
+-        logger.LogInformation(
+-            "Target resolution matched {Count} student(s) for {ConstraintCount} constraint(s)",
+-            studentIds.Length, targets.Count);
+-
+-        return studentIds;
++        return $"students/by-target?{string.Join("&", query)}";
+     }
++
++    /// <summary>The <c>withNames=true</c> wire shape of <c>GET /students/by-target</c>.</summary>
++    private sealed record TargetStudentRow(Guid Id, string FirstName, string LastName);
+ }
 diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
 index f4033b0e..357aac18 100644
 --- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
@@ -3239,10 +3309,10 @@ index 958008e3..cd0b1518 100644
      Guid Id,
 diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentAudience/GetAssignmentAudience.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentAudience/GetAssignmentAudience.cs
 new file mode 100644
-index 00000000..c6a50d6b
+index 00000000..9c7bdb0b
 --- /dev/null
 +++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentAudience/GetAssignmentAudience.cs
-@@ -0,0 +1,260 @@
+@@ -0,0 +1,203 @@
 +using Microsoft.EntityFrameworkCore;
 +using Microsoft.Extensions.Logging;
 +using SchoolCollab.Assignments.Contracts;
@@ -3251,7 +3321,6 @@ index 00000000..c6a50d6b
 +using SchoolCollab.Assignments.Core.Domain.Exceptions;
 +using SchoolCollab.Assignments.Core.Services;
 +using SchoolCollab.Core.CQRS;
-+using SchoolCollab.Students.Core.Domain;
 +
 +namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAudience;
 +
@@ -3271,14 +3340,16 @@ index 00000000..c6a50d6b
 +/// supplies <i>opened</i> only: the two are read side by side and the log never overwrites the
 +/// recipient's own opened stamp, nor the reverse. A recipient with no publish log row answers
 +/// <see cref="AudienceDeliveryStateDto.Unknown"/>, never a fabricated <c>Sent</c>.</para>
-+/// <para><b>Degradation is split, never collapsed.</b> A directory (name) failure leaves the rows
-+/// intact with an empty name and delivery untouched; a log failure leaves the roster and the
-+/// contacts intact with <see cref="AudienceDeliveryStateDto.Unknown"/>. Neither empties the panel.</para>
++/// <para><b>Names come from the cohort read, not from the contacts.</b> The target resolver returns
++/// id <i>and</i> display name in one round-trip, so a student with no subscribed guardian contact
++/// still carries their name — those are exactly the rows a teacher has to chase. A failed resolver
++/// read degrades to the persisted recipient cohort with empty names and
++/// <c>Degraded = true</c>, leaving every row and every delivery state intact; a log failure
++/// degrades delivery only, never the roster.</para>
 +/// </remarks>
 +public sealed class GetAssignmentAudienceHandler(
 +    AssignmentsDbContext db,
 +    IAssignmentTargetResolver targetResolver,
-+    IContactResolver contactResolver,
 +    ILogger<GetAssignmentAudienceHandler> logger)
 +    : IQueryHandler<GetAssignmentAudience, AssignmentAudienceDto>
 +{
@@ -3303,9 +3374,7 @@ index 00000000..c6a50d6b
 +            .Where(r => r.WardStudentId.HasValue)
 +            .ToLookup(r => r.WardStudentId!.Value);
 +
-+        var (cohort, cohortDegraded) = await ResolveCohortAsync(assignment, recipientsByStudent, cancellationToken);
-+        var (names, namesDegraded) = await ResolveStudentNamesAsync(assignment, cohort, cancellationToken);
-+        var degraded = cohortDegraded || namesDegraded;
++        var (cohort, degraded) = await ResolveCohortAsync(assignment, recipientsByStudent, cancellationToken);
 +
 +        // A log read failure degrades DELIVERY only: the rows keep their roster and contacts.
 +        IReadOnlyDictionary<Guid, NotificationLog>? publishLogs;
@@ -3327,23 +3396,23 @@ index 00000000..c6a50d6b
 +        }
 +
 +        var ordered = cohort
-+            .OrderBy(studentId => names.TryGetValue(studentId, out var name) ? name : string.Empty, StringComparer.OrdinalIgnoreCase)
-+            .ThenBy(studentId => studentId)
++            .OrderBy(student => student.FullName, StringComparer.OrdinalIgnoreCase)
++            .ThenBy(student => student.Id)
 +            .ToArray();
 +
 +        var rows = ordered
 +            .Take(AudienceLimits.AudienceCap)
-+            .Select(studentId =>
++            .Select(student =>
 +            {
-+                var contacts = recipientsByStudent[studentId]
++                var contacts = recipientsByStudent[student.Id]
 +                    .OrderBy(recipient => (int)recipient.Channel)
 +                    .ThenBy(recipient => (int)recipient.OwnerType)
 +                    .Select(recipient => ProjectContact(recipient, publishLogs))
 +                    .ToList();
 +
 +                return new AudienceStudentDto(
-+                    studentId,
-+                    names.TryGetValue(studentId, out var name) ? name : string.Empty,
++                    student.Id,
++                    student.FullName,
 +                    contacts.Exists(contact => contact.SubscriptionActive),
 +                    contacts);
 +            })
@@ -3353,11 +3422,12 @@ index 00000000..c6a50d6b
 +    }
 +
 +    /// <summary>
-+    /// The student cohort, from the same resolver publish uses. A resolver failure degrades to the
-+    /// persisted recipients' wards — the cohort that really was published — rather than an empty
-+    /// list, because those rows are exactly what the caller came to read.
++    /// The student cohort and its display names, from the same resolver publish uses. A resolver
++    /// failure degrades to the persisted recipients' wards — the cohort that really was published,
++    /// without names — rather than an empty list, because those rows are exactly what the caller
++    /// came to read.
 +    /// </summary>
-+    private async Task<(Guid[] Cohort, bool Degraded)> ResolveCohortAsync(
++    private async Task<(TargetStudent[] Cohort, bool Degraded)> ResolveCohortAsync(
 +        Assignment assignment,
 +        ILookup<Guid, AssignmentRecipient> recipientsByStudent,
 +        CancellationToken cancellationToken)
@@ -3370,7 +3440,7 @@ index 00000000..c6a50d6b
 +
 +        try
 +        {
-+            var resolved = await targetResolver.ResolveStudentIdsAsync(
++            var resolved = await targetResolver.ResolveStudentsAsync(
 +                targets.Select(target => new TargetConstraint(target.Kind, target.RefId)).ToArray(),
 +                targets.Any(target => target.Kind == TargetKind.AllStudents),
 +                cancellationToken);
@@ -3383,69 +3453,12 @@ index 00000000..c6a50d6b
 +        catch (Exception ex)
 +        {
 +            logger.LogWarning(ex,
-+                "Target resolution failed for assignment {AssignmentId}; falling back to the persisted recipient cohort",
++                "Target resolution failed for assignment {AssignmentId}; falling back to the persisted recipient cohort, without names",
 +                assignment.Id);
-+            return (recipientsByStudent.Select(group => group.Key).ToArray(), true);
++            return (recipientsByStudent
++                .Select(group => new TargetStudent(group.Key, string.Empty))
++                .ToArray(), true);
 +        }
-+    }
-+
-+    /// <summary>
-+    /// Student display names from the ONE batched subscriber read the publish path already uses
-+    /// (spec §4.2: no per-student directory hop). A failure degrades the NAMES only: the rows keep
-+    /// their cohort and their delivery state.
-+    /// </summary>
-+    /// <remarks>
-+    /// The catch below is not the whole failure surface: the production <c>StudentsContactResolver</c>
-+    /// swallows a per-owner <see cref="HttpRequestException"/> and degrades that owner to an empty
-+    /// result, so a directory outage arrives here as a SUCCESSFUL read carrying few or no names. A
-+    /// cohort student left without a name is therefore the only observable evidence of that swallowed
-+    /// failure — which is why a successful read still has to report <c>Degraded</c>.
-+    /// </remarks>
-+    private async Task<(IReadOnlyDictionary<Guid, string> Names, bool Degraded)> ResolveStudentNamesAsync(
-+        Assignment assignment,
-+        Guid[] cohort,
-+        CancellationToken cancellationToken)
-+    {
-+        var names = new Dictionary<Guid, string>();
-+        if (cohort.Length == 0)
-+        {
-+            return (names, false);
-+        }
-+
-+        try
-+        {
-+            var subscribers = await contactResolver.ResolveSubscribersAsync(
-+                new ResolveSubscribersRequest(
-+                    db.CurrentTenantId,
-+                    SubscriptionScope.AllAssignments,
-+                    AssignmentPolicyScope.GradeTargetIds(assignment),
-+                    cohort,
-+                    assignment.TopicId),
-+                cancellationToken);
-+
-+            foreach (var group in subscribers.Where(subscriber => subscriber.StudentId.HasValue).GroupBy(s => s.StudentId!.Value))
-+            {
-+                names[group.Key] = group
-+                    .Select(subscriber => subscriber.StudentName)
-+                    .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty;
-+            }
-+        }
-+        catch (OperationCanceledException)
-+        {
-+            throw;
-+        }
-+        catch (Exception ex)
-+        {
-+            logger.LogWarning(ex,
-+                "Student directory read failed for assignment {AssignmentId}; the audience rows keep an empty name",
-+                assignment.Id);
-+            return (names, true);
-+        }
-+
-+        var namesDegraded = cohort.Any(studentId =>
-+            !names.TryGetValue(studentId, out var resolvedName) || string.IsNullOrWhiteSpace(resolvedName));
-+
-+        return (names, namesDegraded);
 +    }
 +
 +    /// <summary>
@@ -3503,12 +3516,13 @@ index 00000000..c6a50d6b
 +        _ => AudienceDeliveryStateDto.Unknown,
 +    };
 +}
+\ No newline at end of file
 diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentAudiencePreview/GetAssignmentAudiencePreview.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentAudiencePreview/GetAssignmentAudiencePreview.cs
 new file mode 100644
-index 00000000..0f2ff743
+index 00000000..6d810f89
 --- /dev/null
 +++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentAudiencePreview/GetAssignmentAudiencePreview.cs
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,199 @@
 +using Microsoft.EntityFrameworkCore;
 +using Microsoft.Extensions.Logging;
 +using SchoolCollab.Assignments.Contracts;
@@ -3525,7 +3539,8 @@ index 00000000..0f2ff743
 +
 +/// <summary>
 +/// The DRAFT audience read (spec §4.2 Q152, round plan P2b): the same rows the published read
-+/// returns, resolved from the assignment's persisted targets through the same resolver, the same
++/// returns, resolved from the assignment's persisted targets through the same resolver (which
++/// supplies both the cohort and its names), the same
 +/// batched subscriber read and the same policy filter publish runs — with
 +/// <see cref="AudienceDeliveryStateDto.NotPublishingYet"/> where the published read would carry a
 +/// delivery state. <b>Nothing is persisted</b>: publish re-resolves, and the panel says so in words.
@@ -3541,6 +3556,9 @@ index 00000000..0f2ff743
 +/// <see cref="AudienceDeliveryStateDto.BlockedByPolicy"/>: the draft panel exists to answer "who will
 +/// be told", and an omitted contact answers it with silence. Nothing here writes — no recipient row,
 +/// no gate, no log entry.
++/// <para>Student names ride the target resolver's read, exactly as in the published read, so a
++/// student with no subscribed contact is still named; the subscriber read is the contact source
++/// only.</para>
 +/// </remarks>
 +public sealed class GetAssignmentAudiencePreviewHandler(
 +    AssignmentsDbContext db,
@@ -3567,10 +3585,10 @@ index 00000000..0f2ff743
 +            return new AssignmentAudienceDto([], false, false);
 +        }
 +
-+        Guid[] cohort;
++        TargetStudent[] students;
 +        try
 +        {
-+            cohort = await targetResolver.ResolveStudentIdsAsync(
++            students = await targetResolver.ResolveStudentsAsync(
 +                targets.Select(target => new TargetConstraint(target.Kind, target.RefId)).ToArray(),
 +                targets.Any(target => target.Kind == TargetKind.AllStudents),
 +                cancellationToken);
@@ -3587,10 +3605,14 @@ index 00000000..0f2ff743
 +            return new AssignmentAudienceDto([], false, true);
 +        }
 +
-+        if (cohort.Length == 0)
++        if (students.Length == 0)
 +        {
 +            return new AssignmentAudienceDto([], false, false);
 +        }
++
++        // The names ride the cohort read, so a student with no subscribed contact still carries
++        // one; the subscriber read below is the CONTACT source only.
++        var cohort = students.Select(student => student.Id).ToArray();
 +
 +        var tenantId = db.CurrentTenantId;
 +        var gradeTargetIds = AssignmentPolicyScope.GradeTargetIds(assignment);
@@ -3663,26 +3685,21 @@ index 00000000..0f2ff743
 +            .Select(recipient => (recipient.ContactId, recipient.WardStudentId))
 +            .ToHashSet();
 +
-+        var names = subscribers
-+            .Where(subscriber => subscriber.StudentId.HasValue)
-+            .GroupBy(subscriber => subscriber.StudentId!.Value)
-+            .ToDictionary(
-+                group => group.Key,
-+                group => group.Select(subscriber => subscriber.StudentName)
-+                    .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty);
-+
-+        var rows = cohort
-+            .OrderBy(studentId => names.TryGetValue(studentId, out var name) ? name : string.Empty, StringComparer.OrdinalIgnoreCase)
-+            .ThenBy(studentId => studentId)
++        var ordered = students
++            .OrderBy(student => student.FullName, StringComparer.OrdinalIgnoreCase)
++            .ThenBy(student => student.Id)
 +            .Take(AudienceLimits.AudienceCap)
-+            .Select(studentId => new AudienceStudentDto(
-+                studentId,
-+                names.TryGetValue(studentId, out var studentName) ? studentName : string.Empty,
++            .ToArray();
++
++        var rows = ordered
++            .Select(student => new AudienceStudentDto(
++                student.Id,
++                student.FullName,
 +                projected.Exists(recipient =>
-+                    recipient.WardStudentId == studentId
++                    recipient.WardStudentId == student.Id
 +                    && reachable.Contains((recipient.ContactId, recipient.WardStudentId))),
 +                projected
-+                    .Where(recipient => recipient.WardStudentId == studentId)
++                    .Where(recipient => recipient.WardStudentId == student.Id)
 +                    .OrderBy(recipient => (int)recipient.Channel)
 +                    .ThenBy(recipient => (int)recipient.OwnerType)
 +                    .Select(recipient => new AudienceContactDto(
@@ -3702,9 +3719,44 @@ index 00000000..0f2ff743
 +                    .ToList()))
 +            .ToList();
 +
-+        return new AssignmentAudienceDto(rows, cohort.Length > AudienceLimits.AudienceCap, false);
++        return new AssignmentAudienceDto(rows, students.Length > AudienceLimits.AudienceCap, false);
 +    }
 +}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/IAssignmentTargetResolver.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/IAssignmentTargetResolver.cs
+index e7a17b10..98c01278 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Services/IAssignmentTargetResolver.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/IAssignmentTargetResolver.cs
+@@ -9,6 +9,13 @@ namespace SchoolCollab.Assignments.Core.Services;
+ /// </summary>
+ public sealed record TargetConstraint(TargetKind Kind, Guid? RefId);
+ 
++/// <summary>
++/// One resolved target student with the display name the audience reads render.
++/// <see cref="FullName"/> is <c>"{LastName}, {FirstName}"</c> — comma, surname first: the format the
++/// audience panel already renders and the one its name sort assumes.
++/// </summary>
++public sealed record TargetStudent(Guid Id, string FullName);
++
+ /// <summary>
+ /// Cross-bounded-context port (Assignments → Students) that resolves the student-id union of
+ /// an assignment's authored targeting constraints (TGT-3…TGT-9). The interface lives in
+@@ -33,4 +40,16 @@ public interface IAssignmentTargetResolver
+         IReadOnlyList<TargetConstraint> targets,
+         bool includeAllStudents,
+         CancellationToken cancellationToken = default);
++
++    /// <summary>
++    /// Returns the deduped union of student ids matching <paramref name="targets"/> together with
++    /// each student's display name — one round-trip for both, so a student with no subscribed
++    /// contact still carries a name. Same short-circuit and failure posture as
++    /// <see cref="ResolveStudentIdsAsync"/>; the names ride the <c>withNames=true</c> shape of the
++    /// same Students route.
++    /// </summary>
++    Task<TargetStudent[]> ResolveStudentsAsync(
++        IReadOnlyList<TargetConstraint> targets,
++        bool includeAllStudents,
++        CancellationToken cancellationToken = default);
+ }
 diff --git a/src/SchoolCollab.Admin.Shared/Components/Authoring/AuthoringShell.razor b/src/SchoolCollab.Admin.Shared/Components/Authoring/AuthoringShell.razor
 index 71d56089..f07ade1c 100644
 --- a/src/SchoolCollab.Admin.Shared/Components/Authoring/AuthoringShell.razor
@@ -3748,6 +3800,215 @@ index 71d56089..f07ade1c 100644
      /// <summary>The title + badge cluster, shared by both placements so the two cannot drift.</summary>
      private RenderFragment TitleGroup => @<text>
          <div class="authoring-title-group">
+diff --git a/src/Students/SchoolCollab.Students.Api/Endpoints/StudentRoutes.cs b/src/Students/SchoolCollab.Students.Api/Endpoints/StudentRoutes.cs
+index 1c132e70..2e156635 100644
+--- a/src/Students/SchoolCollab.Students.Api/Endpoints/StudentRoutes.cs
++++ b/src/Students/SchoolCollab.Students.Api/Endpoints/StudentRoutes.cs
+@@ -7,6 +7,7 @@ using SchoolCollab.Students.Core.CQRS.Students.Commands.RecoverStudent;
+ using SchoolCollab.Students.Core.CQRS.Students.Commands.UpdateStudent;
+ using SchoolCollab.Students.Core.CQRS.Students.Commands.UpdateStudentWithLinkedData;
+ using SchoolCollab.Students.Core.Domain.Exceptions;
++using SchoolCollab.Students.Core.DTOs;
+ using SchoolCollab.Students.Core.CQRS.Students.Queries.GetStudentById;
+ using SchoolCollab.Students.Core.CQRS.Students.Queries.GetStudentByStudentNumber;
+ using SchoolCollab.Students.Core.CQRS.Students.Queries.ListDeletedStudents;
+@@ -65,22 +66,33 @@ public static class StudentRoutes
+         // `allStudents` leg is explicit (D-6) so the tenant-wide cohort cannot be requested
+         // by accident. Mapped on this group, so it inherits its RequireAuthorization +
+         // BearerScheme (D-7). Tenant scoping comes from the handler's DbContext query filter.
++        //
++        // `withNames` is additive on the wire: absent (the default) the response is the bare
++        // `Guid[]` every existing caller reads, and `withNames=true` adds the two name columns
++        // the audience panel needs for a student who has no subscribed contact at all.
+         group.MapGet("/by-target", async (
++            [FromQuery] bool? withNames,
+             [FromQuery] bool allStudents,
+             [FromQuery] Guid[] gradeLevelIds,
+             [FromQuery] Guid[] streamCodedValueIds,
+             [FromQuery] Guid[] studentIds,
+             [FromQuery] Guid[] activityGroupIds,
+-            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ResolveStudentsByTarget, Guid[]> handler,
++            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ResolveStudentsByTarget, TargetStudentDto[]> handler,
+             CancellationToken ct) =>
+-            Results.Ok(await handler.HandleAsync(
++        {
++            var students = await handler.HandleAsync(
+                 new ResolveStudentsByTarget(
+                     allStudents,
+                     gradeLevelIds ?? [],
+                     streamCodedValueIds ?? [],
+                     studentIds ?? [],
+                     activityGroupIds ?? []),
+-                ct)));
++                ct);
++
++            return withNames == true
++                ? Results.Ok(students)
++                : Results.Ok(students.Select(student => student.Id).ToArray());
++        });
+ 
+         group.MapPost("/", async (
+             [FromBody] CreateStudent command,
+diff --git a/src/Students/SchoolCollab.Students.Core/CQRS/Students/Queries/ResolveStudentsByTarget/ResolveStudentsByTarget.cs b/src/Students/SchoolCollab.Students.Core/CQRS/Students/Queries/ResolveStudentsByTarget/ResolveStudentsByTarget.cs
+index 6597744b..f3cb2ac8 100644
+--- a/src/Students/SchoolCollab.Students.Core/CQRS/Students/Queries/ResolveStudentsByTarget/ResolveStudentsByTarget.cs
++++ b/src/Students/SchoolCollab.Students.Core/CQRS/Students/Queries/ResolveStudentsByTarget/ResolveStudentsByTarget.cs
+@@ -1,4 +1,5 @@
+ using SchoolCollab.Core.CQRS;
++using SchoolCollab.Students.Core.DTOs;
+ 
+ namespace SchoolCollab.Students.Core.CQRS.Students.Queries.ResolveStudentsByTarget;
+ 
+@@ -24,4 +25,4 @@ public sealed record ResolveStudentsByTarget(
+     IReadOnlyList<Guid> GradeLevelIds,
+     IReadOnlyList<Guid> StreamCodedValueIds,
+     IReadOnlyList<Guid> StudentIds,
+-    IReadOnlyList<Guid> ActivityGroupIds) : IQuery<Guid[]>;
++    IReadOnlyList<Guid> ActivityGroupIds) : IQuery<TargetStudentDto[]>;
+diff --git a/src/Students/SchoolCollab.Students.Core/CQRS/Students/Queries/ResolveStudentsByTarget/ResolveStudentsByTargetHandler.cs b/src/Students/SchoolCollab.Students.Core/CQRS/Students/Queries/ResolveStudentsByTarget/ResolveStudentsByTargetHandler.cs
+index 9abfed35..016a4fa7 100644
+--- a/src/Students/SchoolCollab.Students.Core/CQRS/Students/Queries/ResolveStudentsByTarget/ResolveStudentsByTargetHandler.cs
++++ b/src/Students/SchoolCollab.Students.Core/CQRS/Students/Queries/ResolveStudentsByTarget/ResolveStudentsByTargetHandler.cs
+@@ -2,22 +2,30 @@ using Microsoft.EntityFrameworkCore;
+ using SchoolCollab.Core.CQRS;
+ using SchoolCollab.Students.Core.Data;
+ using SchoolCollab.Students.Core.Domain;
++using SchoolCollab.Students.Core.DTOs;
+ 
+ namespace SchoolCollab.Students.Core.CQRS.Students.Queries.ResolveStudentsByTarget;
+ 
+ /// <summary>
+ /// Handles <see cref="ResolveStudentsByTarget"/> — the union of the five targeting legs
+ /// (TGT-3…TGT-9, EC-4). One round-trip per leg, then a dedupe; no ordering guarantee is
+-/// promised because the consumer (publish recipient resolution) is order-insensitive.
++/// promised because the consumers (publish recipient resolution, the audience name read) are
++/// order-insensitive.
+ /// </summary>
++/// <remarks>
++/// Every leg projects the student's id and both name columns: the wire keeps a names-free
++/// <c>Guid[]</c> shape unless the caller passes <c>withNames=true</c>, so one query serves both
++/// shapes and the route does the projection.
++/// </remarks>
+ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
+-    : IQueryHandler<ResolveStudentsByTarget, Guid[]>
++    : IQueryHandler<ResolveStudentsByTarget, TargetStudentDto[]>
+ {
+-    public async Task<Guid[]> HandleAsync(
++    public async Task<TargetStudentDto[]> HandleAsync(
+         ResolveStudentsByTarget query,
+         CancellationToken cancellationToken = default)
+     {
+-        var result = new HashSet<Guid>();
++        // Keyed by id: a student matching several legs appears once (TGT-3).
++        var result = new Dictionary<Guid, TargetStudentDto>();
+ 
+         // ── allStudents leg (D-6): tenant-wide, no grade/period/group predicate. ──
+         if (query.AllStudents)
+@@ -25,9 +33,12 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
+             var all = await db.Students
+                 .AsNoTracking()
+                 .Where(s => !s.IsDeleted)
+-                .Select(s => s.Id)
++                .Select(s => new TargetStudentDto(s.Id, s.FirstName, s.LastName))
+                 .ToListAsync(cancellationToken);
+-            result.UnionWith(all);
++            foreach (var student in all)
++            {
++                result.TryAdd(student.Id, student);
++            }
+         }
+ 
+         // ── student leg (TGT-6): the id must exist, be non-soft-deleted and same-tenant. ──
+@@ -37,9 +48,12 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
+             var students = await db.Students
+                 .AsNoTracking()
+                 .Where(s => ids.Contains(s.Id) && !s.IsDeleted)
+-                .Select(s => s.Id)
++                .Select(s => new TargetStudentDto(s.Id, s.FirstName, s.LastName))
+                 .ToListAsync(cancellationToken);
+-            result.UnionWith(students);
++            foreach (var student in students)
++            {
++                result.TryAdd(student.Id, student);
++            }
+         }
+ 
+         // ── Current period, derived exactly as ListStudentsByGradeHandler does. The
+@@ -66,11 +80,15 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
+                     .Where(se => gradeIds.Contains(se.GradeLevelId)
+                               && se.PeriodId == currentPeriodId
+                               && se.Status == EnrollmentStatus.Active)
+-                    .Join(db.Students, se => se.StudentId, s => s.Id, (se, s) => new { s.Id, s.IsDeleted })
++                    .Join(db.Students, se => se.StudentId, s => s.Id,
++                        (se, s) => new { s.Id, s.FirstName, s.LastName, s.IsDeleted })
+                     .Where(x => !x.IsDeleted)
+-                    .Select(x => x.Id)
++                    .Select(x => new TargetStudentDto(x.Id, x.FirstName, x.LastName))
+                     .ToListAsync(cancellationToken);
+-                result.UnionWith(byGrade);
++                foreach (var student in byGrade)
++                {
++                    result.TryAdd(student.Id, student);
++                }
+             }
+ 
+             // ── stream leg (TGT-5): grade-agnostic — the stream is the whole constraint. ──
+@@ -83,11 +101,15 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
+                               && streamIds.Contains(se.StreamCodedValueId.Value)
+                               && se.PeriodId == currentPeriodId
+                               && se.Status == EnrollmentStatus.Active)
+-                    .Join(db.Students, se => se.StudentId, s => s.Id, (se, s) => new { s.Id, s.IsDeleted })
++                    .Join(db.Students, se => se.StudentId, s => s.Id,
++                        (se, s) => new { s.Id, s.FirstName, s.LastName, s.IsDeleted })
+                     .Where(x => !x.IsDeleted)
+-                    .Select(x => x.Id)
++                    .Select(x => new TargetStudentDto(x.Id, x.FirstName, x.LastName))
+                     .ToListAsync(cancellationToken);
+-                result.UnionWith(byStream);
++                foreach (var student in byStream)
++                {
++                    result.TryAdd(student.Id, student);
++                }
+             }
+         }
+ 
+@@ -102,13 +124,17 @@ public sealed class ResolveStudentsByTargetHandler(StudentsDbContext db)
+                 .Where(m => groupIds.Contains(m.ActivityGroupId) && m.Status == MembershipStatus.Active)
+                 .Join(db.ActivityGroups, m => m.ActivityGroupId, g => g.Id, (m, g) => new { m.StudentId, g.IsActive })
+                 .Where(x => x.IsActive)
+-                .Join(db.Students, x => x.StudentId, s => s.Id, (x, s) => new { s.Id, s.IsDeleted })
++                .Join(db.Students, x => x.StudentId, s => s.Id,
++                    (x, s) => new { s.Id, s.FirstName, s.LastName, s.IsDeleted })
+                 .Where(x => !x.IsDeleted)
+-                .Select(x => x.Id)
++                .Select(x => new TargetStudentDto(x.Id, x.FirstName, x.LastName))
+                 .ToListAsync(cancellationToken);
+-            result.UnionWith(byGroup);
++            foreach (var student in byGroup)
++            {
++                result.TryAdd(student.Id, student);
++            }
+         }
+ 
+-        return result.ToArray();
++        return result.Values.ToArray();
+     }
+ }
+diff --git a/src/Students/SchoolCollab.Students.Core/DTOs/TargetStudentDto.cs b/src/Students/SchoolCollab.Students.Core/DTOs/TargetStudentDto.cs
+new file mode 100644
+index 00000000..1bb05f9f
+--- /dev/null
++++ b/src/Students/SchoolCollab.Students.Core/DTOs/TargetStudentDto.cs
+@@ -0,0 +1,9 @@
++namespace SchoolCollab.Students.Core.DTOs;
++
++/// <summary>
++/// One student matched by <c>GET /students/by-target</c> when the caller asks for names
++/// (<c>withNames=true</c>): the id the default <c>Guid[]</c> shape already carries, plus the
++/// two name columns the audience panel renders. The id-only shape stays the wire default so
++/// the publish path keeps reading exactly what it always did.
++/// </summary>
++public sealed record TargetStudentDto(Guid Id, string FirstName, string LastName);
 diff --git a/tests/SchoolCollab.Admin.Tests.Unit/AuthoringShellTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/AuthoringShellTests.cs
 index dc1871d1..48e7ae5a 100644
 --- a/tests/SchoolCollab.Admin.Tests.Unit/AuthoringShellTests.cs
@@ -3822,6 +4083,153 @@ index 3c1deaf8..f8d154e5 100644
  
          "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:203", // error field assigned the raw message
          "src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Index.razor:264", // error field assigned the raw message
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentRecipientPreviewRouteTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentRecipientPreviewRouteTests.cs
+index 1a087f01..1eddf374 100644
+--- a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentRecipientPreviewRouteTests.cs
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentRecipientPreviewRouteTests.cs
+@@ -66,6 +66,16 @@ public class AssignmentRecipientPreviewRouteTests
+             LastIncludeAllStudents = includeAllStudents;
+             return Throw is null ? Task.FromResult(StudentIds) : Task.FromException<Guid[]>(Throw);
+         }
++
++        public Task<TargetStudent[]> ResolveStudentsAsync(
++            IReadOnlyList<TargetConstraint> targets, bool includeAllStudents, CancellationToken ct = default)
++        {
++            LastConstraints = targets;
++            LastIncludeAllStudents = includeAllStudents;
++            return Throw is null
++                ? Task.FromResult(StudentIds.Select(id => new TargetStudent(id, string.Empty)).ToArray())
++                : Task.FromException<TargetStudent[]>(Throw);
++        }
+     }
+ 
+     private sealed class CapturingContactResolver : IContactResolver
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentTargetResolverHttpClientTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentTargetResolverHttpClientTests.cs
+new file mode 100644
+index 00000000..1ea94579
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentTargetResolverHttpClientTests.cs
+@@ -0,0 +1,120 @@
++using System.Net;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using RichardSzalay.MockHttp;
++using SchoolCollab.Assignments.Api.Services;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// The glue the audience panel's ordering depends on: <see cref="AssignmentTargetResolverHttpClient"/>
++/// is the ONLY place the Students wire shape (<c>{ id, firstName, lastName }</c>) becomes the panel's
++/// sort key <see cref="TargetStudent.FullName"/>. The handler tests prove the name SOURCE changed to
++/// this read; they build <see cref="TargetStudent"/> fakes by hand, so they cannot catch a format
++/// regression here (grill round 3 pinned <c>"{LastName}, {FirstName}"</c>; swapping to
++/// <c>"{First} {Last}"</c> would silently invert the panel's only stated ordering) and they cannot
++/// catch the <c>withNames=true</c> flag disappearing from the URL.
++///
++/// <para>Also pins the round's additive-contract claim from the caller side: the id-only method sends
++/// NO <c>withNames</c> parameter, which is what keeps the response a bare <c>Guid[]</c> for every
++/// pre-existing consumer.</para>
++/// </summary>
++[TestClass]
++public class AssignmentTargetResolverHttpClientTests
++{
++    private static readonly Guid StudentA = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid StudentB = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid GradeId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
++
++    private const string ByTargetUrl = "http://students-api/students/by-target?gradeLevelIds=";
++
++    private static AssignmentTargetResolverHttpClient NewClient(MockHttpMessageHandler studentsApi)
++        => new(new SingleClientFactory(studentsApi), NullLogger<AssignmentTargetResolverHttpClient>.Instance);
++
++    private static readonly IReadOnlyList<TargetConstraint> GradeTarget =
++        [new TargetConstraint(TargetKind.GradeLevel, GradeId)];
++
++    [TestMethod]
++    public async Task ResolveStudents_FormatsFullNameAsSurnameThenFirstName()
++    {
++        // Arrange — the wire carries first/last separately; the panel sorts on "Surname, First".
++        var studentsApi = new MockHttpMessageHandler();
++        studentsApi.When($"{ByTargetUrl}{GradeId}&withNames=true")
++            .Respond("application/json", JsonSerializer.Serialize(new[]
++            {
++                new { id = StudentA, firstName = "Tolu", lastName = "Adeyemi" },
++                new { id = StudentB, firstName = "Ngozi", lastName = "Okafor" },
++            }));
++
++        // Act
++        var students = await NewClient(studentsApi).ResolveStudentsAsync(GradeTarget, includeAllStudents: false);
++
++        // Assert
++        students.Should().HaveCount(2);
++        students[0].Id.Should().Be(StudentA);
++        students[0].FullName.Should().Be("Adeyemi, Tolu",
++            "the panel sorts on this string; \"Tolu Adeyemi\" would silently reorder the whole table");
++        students[1].FullName.Should().Be("Okafor, Ngozi");
++        studentsApi.VerifyNoOutstandingExpectation();
++    }
++
++    [TestMethod]
++    public async Task ResolveStudents_RequestsTheNamesFlag()
++    {
++        // Arrange — an unmatched URL throws in MockHttp, so this asserts the flag is on the wire.
++        var studentsApi = new MockHttpMessageHandler();
++        studentsApi.When($"{ByTargetUrl}{GradeId}&withNames=true")
++            .Respond("application/json", "[]");
++
++        // Act
++        await NewClient(studentsApi).ResolveStudentsAsync(GradeTarget, includeAllStudents: false);
++
++        // Assert
++        studentsApi.VerifyNoOutstandingExpectation();
++    }
++
++    [TestMethod]
++    public async Task ResolveStudentIds_SendsNoNamesFlag_SoTheResponseStaysAGuidArray()
++    {
++        // Arrange — the pre-existing contract: every consumer that came before the names layer reads
++        // a bare Guid[]. If this URL ever grows withNames, the route silently switches response shape.
++        var studentsApi = new MockHttpMessageHandler();
++        studentsApi.When($"{ByTargetUrl}{GradeId}")
++            .Respond("application/json", JsonSerializer.Serialize(new[] { StudentA, StudentB }));
++
++        // Act
++        var ids = await NewClient(studentsApi).ResolveStudentIdsAsync(GradeTarget, includeAllStudents: false);
++
++        // Assert
++        ids.Should().Equal(StudentA, StudentB);
++        studentsApi.VerifyNoOutstandingExpectation();
++    }
++
++    [TestMethod]
++    public async Task ResolveStudents_WithNoConstraintsAndNoAllStudents_ShortCircuits()
++    {
++        // Arrange — no handler is registered, so any round-trip would throw.
++        var studentsApi = new MockHttpMessageHandler();
++
++        // Act
++        var students = await NewClient(studentsApi).ResolveStudentsAsync([], includeAllStudents: false);
++
++        // Assert
++        students.Should().BeEmpty("an empty target set resolves to nothing without a cross-context hop");
++    }
++
++    /// <summary>The resolver only ever calls the <c>students-api</c> client.</summary>
++    private sealed class SingleClientFactory(MockHttpMessageHandler studentsApi) : IHttpClientFactory
++    {
++        public HttpClient CreateClient(string name)
++        {
++            var client = studentsApi.ToHttpClient();
++            client.BaseAddress = new Uri("http://students-api");
++            return client;
++        }
++    }
++}
 diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
 index 3dde9534..b1925e2d 100644
 --- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
@@ -6183,12 +6591,50 @@ index b0c3c83c..e6e35031 100644
 +        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Assignment not found"));
      }
  }
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/FakeAssignmentTargetResolver.cs b/tests/SchoolCollab.Assignments.Tests.Unit/FakeAssignmentTargetResolver.cs
+index 469f8435..87f58d4e 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/FakeAssignmentTargetResolver.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/FakeAssignmentTargetResolver.cs
+@@ -14,6 +14,12 @@ internal sealed class FakeAssignmentTargetResolver : IAssignmentTargetResolver
+     /// <summary>The resolved student ids. Empty is a legal answer — publish must refuse it (D-6c).</summary>
+     public Guid[] StudentIds { get; set; } = [];
+ 
++    /// <summary>
++    /// The resolved students WITH display names — the audience reads' source. <see cref="TargetStudent.FullName"/>
++    /// is "{Last}, {First}", the format the panel renders and sorts on.
++    /// </summary>
++    public TargetStudent[] Students { get; set; } = [];
++
+     /// <summary>When set, the resolve throws it — the resolver-outage path (TGT-10 / D-6b).</summary>
+     public Exception? Throw { get; set; }
+ 
+@@ -36,6 +42,20 @@ internal sealed class FakeAssignmentTargetResolver : IAssignmentTargetResolver
+             ? Task.FromResult(StudentIds)
+             : Task.FromException<Guid[]>(Throw);
+     }
++
++    public Task<TargetStudent[]> ResolveStudentsAsync(
++        IReadOnlyList<TargetConstraint> targets,
++        bool includeAllStudents,
++        CancellationToken cancellationToken = default)
++    {
++        CallCount++;
++        LastConstraints = targets;
++        LastIncludeAllStudents = includeAllStudents;
++
++        return Throw is null
++            ? Task.FromResult(Students)
++            : Task.FromException<TargetStudent[]>(Throw);
++    }
+ }
+ 
+ /// <summary>
 diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/GetAssignmentAudienceHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/GetAssignmentAudienceHandlerTests.cs
 new file mode 100644
-index 00000000..b6932567
+index 00000000..70233a65
 --- /dev/null
 +++ b/tests/SchoolCollab.Assignments.Tests.Unit/GetAssignmentAudienceHandlerTests.cs
-@@ -0,0 +1,319 @@
+@@ -0,0 +1,317 @@
 +using System.Text.Json;
 +using System.Text.RegularExpressions;
 +using FluentAssertions;
@@ -6214,6 +6660,8 @@ index 00000000..b6932567
 +/// delivery state, <see cref="AssignmentRecipient.OpenedAt"/> supplies "opened" only, a missing log
 +/// row is <see cref="AudienceDeliveryStateDto.Unknown"/> (never a fabricated <c>Sent</c>), an
 +/// unreached student is a visible row, and the serialized payload carries no address at all (§4.9).
++/// <para>Names come from the cohort read itself, so the rows are name-ordered and a student with no
++/// subscribed contact still carries their name — those rows are the point of the panel.</para>
 +/// </summary>
 +[TestClass]
 +public class GetAssignmentAudienceHandlerTests
@@ -6284,16 +6732,10 @@ index 00000000..b6932567
 +        return log;
 +    }
 +
-+    private static GetAssignmentAudienceHandler Handler(
-+        AssignmentsDbContext db, Guid[] cohort, params SubscriberInfo[] subscribers) =>
++    private static GetAssignmentAudienceHandler Handler(AssignmentsDbContext db, params TargetStudent[] cohort) =>
 +        new(db,
-+            new FakeAssignmentTargetResolver { StudentIds = cohort },
-+            new FixedSubscriberContactResolver(subscribers),
++            new FakeAssignmentTargetResolver { Students = cohort },
 +            NullLogger<GetAssignmentAudienceHandler>.Instance);
-+
-+    private static SubscriberInfo Subscriber(Guid studentId, string studentName, Guid contactId) =>
-+        new(contactId, ContactOwnerType.Guardian, contactId, studentId, ContactChannel.Email, GuardianRole.Primary,
-+            "Guardian Name", studentName);
 +
 +    [TestMethod]
 +    public async Task Rows_CarryTheCohort_WithTheLogAuthoritativeForDelivery_AndOpenedFromTheRecipient()
@@ -6314,13 +6756,16 @@ index 00000000..b6932567
 +        db.NotificationLogs.Add(PublishLog(assignment.Id, sentRecipient.Id, sentContact, NotificationDeliveryStatus.Sent));
 +        await db.SaveChangesAsync();
 +
-+        var result = await Handler(db, [StudentAdeyemi, StudentOkafor],
-+            Subscriber(StudentAdeyemi, "Adeyemi, Tolu", unreachedRecipient.ContactId),
-+            Subscriber(StudentOkafor, "Okafor, Ngozi", sentContact))
++        // The cohort arrives in the OPPOSITE order to the names, so the rows below prove the
++        // name ordering rather than the resolver's order.
++        var result = await Handler(db,
++            new TargetStudent(StudentOkafor, "Okafor, Ngozi"),
++            new TargetStudent(StudentAdeyemi, "Adeyemi, Tolu"))
 +            .HandleAsync(new GetAssignmentAudience(assignment.Id));
 +
 +        result.Degraded.Should().BeFalse();
-+        result.Rows.Select(row => row.StudentName).Should().Equal("Adeyemi, Tolu", "Okafor, Ngozi");
++        result.Rows.Select(row => row.StudentName).Should()
++            .Equal(["Adeyemi, Tolu", "Okafor, Ngozi"], "the panel is surname-sorted");
 +
 +        var unreached = result.Rows[0];
 +        unreached.Reached.Should().BeFalse("AC2 — a student with no subscribed contact is a visible row");
@@ -6356,7 +6801,10 @@ index 00000000..b6932567
 +            PublishLog(assignment.Id, skipped.Id, skippedContact, NotificationDeliveryStatus.Skipped));
 +        await db.SaveChangesAsync();
 +
-+        var result = await Handler(db, [StudentAdeyemi, StudentOkafor]).HandleAsync(new GetAssignmentAudience(assignment.Id));
++        var result = await Handler(db,
++            new TargetStudent(StudentAdeyemi, "Adeyemi, Tolu"),
++            new TargetStudent(StudentOkafor, "Okafor, Ngozi"))
++            .HandleAsync(new GetAssignmentAudience(assignment.Id));
 +
 +        var failedRow = result.Rows.Single(row => row.StudentId == StudentOkafor).Contacts.Single();
 +        failedRow.DeliveryState.Should().Be(AudienceDeliveryStateDto.Failed);
@@ -6382,7 +6830,7 @@ index 00000000..b6932567
 +        db.AssignmentRecipients.Add(recipient);
 +        await db.SaveChangesAsync();
 +
-+        var result = await Handler(db, [StudentOkafor], Subscriber(StudentOkafor, "Okafor, Ngozi", contactId))
++        var result = await Handler(db, new TargetStudent(StudentOkafor, "Okafor, Ngozi"))
 +            .HandleAsync(new GetAssignmentAudience(assignment.Id));
 +
 +        // Spec §4.9 / AC1: asserted on the PAYLOAD, not the view — a field a later template starts
@@ -6409,20 +6857,20 @@ index 00000000..b6932567
 +        await db.SaveChangesAsync();
 +
 +        var cohort = Enumerable.Range(0, AudienceLimits.AudienceCap + 1).Select(_ => Guid.NewGuid()).ToArray();
-+        var subscribers = cohort
-+            .Select((studentId, index) => Subscriber(studentId, $"Student {index:D3}", Guid.NewGuid()))
++        var students = cohort
++            .Select((studentId, index) => new TargetStudent(studentId, $"Student {index:D3}"))
 +            .ToArray();
 +
-+        var result = await Handler(db, cohort, subscribers).HandleAsync(new GetAssignmentAudience(assignment.Id));
++        var result = await Handler(db, students).HandleAsync(new GetAssignmentAudience(assignment.Id));
 +
 +        result.Rows.Should().HaveCount(AudienceLimits.AudienceCap, "Q146 fixes the read at 200 rows");
 +        result.Truncated.Should().BeTrue("the panel must be able to state the cap");
 +    }
 +
 +    [TestMethod]
-+    public async Task ADirectoryFailure_LeavesTheRowsAndTheDeliveryIntact()
++    public async Task AFailedCohortRead_LeavesTheRowsAndTheDeliveryIntact()
 +    {
-+        var (db, _) = Build(nameof(ADirectoryFailure_LeavesTheRowsAndTheDeliveryIntact));
++        var (db, _) = Build(nameof(AFailedCohortRead_LeavesTheRowsAndTheDeliveryIntact));
 +        var assignment = NewAssignment("Photosynthesis lab report");
 +        db.Assignments.Add(assignment);
 +
@@ -6433,10 +6881,11 @@ index 00000000..b6932567
 +        db.NotificationLogs.Add(PublishLog(assignment.Id, recipient.Id, contactId, NotificationDeliveryStatus.Sent));
 +        await db.SaveChangesAsync();
 +
++        // The students-api leg is down, so the same read that supplies the names fails: the rows
++        // fall back to the persisted recipients, with a state and a delivery answer but no name.
 +        var handler = new GetAssignmentAudienceHandler(
 +            db,
-+            new FakeAssignmentTargetResolver { StudentIds = [StudentOkafor] },
-+            new ThrowingContactResolver(),
++            new FakeAssignmentTargetResolver { Throw = new HttpRequestException("students-api unreachable") },
 +            NullLogger<GetAssignmentAudienceHandler>.Instance);
 +
 +        var result = await handler.HandleAsync(new GetAssignmentAudience(assignment.Id));
@@ -6445,13 +6894,13 @@ index 00000000..b6932567
 +        result.Rows.Should().ContainSingle("a name outage never empties the panel");
 +        result.Rows[0].StudentName.Should().BeEmpty("a name that could not be read is not invented");
 +        result.Rows[0].Contacts.Single().DeliveryState.Should().Be(AudienceDeliveryStateDto.Sent,
-+            "a directory failure does not touch delivery — the log still answers");
++            "a name outage does not touch delivery — the log still answers");
 +    }
 +
 +    [TestMethod]
-+    public async Task ADirectoryThatReturnsNoName_DegradesTheRead_AndKeepsTheRowsAndDelivery()
++    public async Task AStudentWithoutASubscriber_StillCarriesTheirName_AndIsNotADegradation()
 +    {
-+        var (db, _) = Build(nameof(ADirectoryThatReturnsNoName_DegradesTheRead_AndKeepsTheRowsAndDelivery));
++        var (db, _) = Build(nameof(AStudentWithoutASubscriber_StillCarriesTheirName_AndIsNotADegradation));
 +        var assignment = NewAssignment("Photosynthesis lab report");
 +        db.Assignments.Add(assignment);
 +
@@ -6462,23 +6911,26 @@ index 00000000..b6932567
 +        db.NotificationLogs.Add(PublishLog(assignment.Id, recipient.Id, contactId, NotificationDeliveryStatus.Sent));
 +        await db.SaveChangesAsync();
 +
-+        // The production StudentsContactResolver swallows a per-owner HttpRequestException and degrades
-+        // that owner to an EMPTY result — this read therefore succeeds and carries no name at all,
-+        // which is the shape a directory outage actually reaches the handler in.
-+        var handler = new GetAssignmentAudienceHandler(
-+            db,
-+            new FakeAssignmentTargetResolver { StudentIds = [StudentOkafor] },
-+            new FixedSubscriberContactResolver([]),
-+            NullLogger<GetAssignmentAudienceHandler>.Instance);
++        // Only Okafor has a persisted contact row. Adeyemi has none at all — and still carries a
++        // name, because the name rides the cohort read rather than the contact read. Those are
++        // exactly the rows a teacher has to chase.
++        var result = await Handler(db,
++            new TargetStudent(StudentAdeyemi, "Adeyemi, Tolu"),
++            new TargetStudent(StudentOkafor, "Okafor, Ngozi"))
++            .HandleAsync(new GetAssignmentAudience(assignment.Id));
 +
-+        var result = await handler.HandleAsync(new GetAssignmentAudience(assignment.Id));
++        result.Degraded.Should().BeFalse("the cohort read answered with every name");
 +
-+        result.Degraded.Should().BeTrue(
-+            "a swallowed directory failure is observable only as a cohort student with no name, and it is never reported as healthy");
-+        result.Rows.Should().ContainSingle("the rows survive the name outage");
-+        result.Rows[0].StudentName.Should().BeEmpty("a name that could not be read is not invented");
-+        result.Rows[0].Contacts.Single().DeliveryState.Should().Be(AudienceDeliveryStateDto.Sent,
-+            "a name outage does not touch delivery — the log still answers");
++        var adeyemi = result.Rows.Single(row => row.StudentId == StudentAdeyemi);
++        adeyemi.StudentName.Should().Be("Adeyemi, Tolu",
++            "a student with no subscribed contact is still named — this is the row the panel exists to show");
++        adeyemi.Reached.Should().BeFalse("with no subscribed contact the student was never reached");
++        adeyemi.Contacts.Should().BeEmpty();
++
++        var okafor = result.Rows.Single(row => row.StudentId == StudentOkafor);
++        okafor.StudentName.Should().Be("Okafor, Ngozi");
++        okafor.Reached.Should().BeTrue();
++        okafor.Contacts.Single().DeliveryState.Should().Be(AudienceDeliveryStateDto.Sent);
 +    }
 +
 +    [TestMethod]
@@ -6486,22 +6938,14 @@ index 00000000..b6932567
 +    {
 +        var (db, _) = Build(nameof(AnUnknownAssignment_IsNotFound));
 +
-+        var act = () => Handler(db, []).HandleAsync(new GetAssignmentAudience(Guid.NewGuid()));
++        var act = () => Handler(db).HandleAsync(new GetAssignmentAudience(Guid.NewGuid()));
 +
 +        await act.Should().ThrowAsync<AssignmentNotFoundException>();
-+    }
-+
-+    /// <summary>A directory outage: every subscriber read fails.</summary>
-+    private sealed class ThrowingContactResolver : IContactResolver
-+    {
-+        public Task<IReadOnlyList<SubscriberInfo>> ResolveSubscribersAsync(
-+            ResolveSubscribersRequest request, CancellationToken cancellationToken = default) =>
-+            Task.FromException<IReadOnlyList<SubscriberInfo>>(new HttpRequestException("Students directory unavailable"));
 +    }
 +}
 +
 +/// <summary>A subscriber read over a fixed set of already-resolved contacts — the batched
-+/// Students read the publish path and both audience reads share.</summary>
++/// Students read publish and the draft preview share.</summary>
 +internal sealed class FixedSubscriberContactResolver(IReadOnlyList<SubscriberInfo> subscribers) : IContactResolver
 +{
 +    public Task<IReadOnlyList<SubscriberInfo>> ResolveSubscribersAsync(
@@ -6510,10 +6954,10 @@ index 00000000..b6932567
 +}
 diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/GetAssignmentAudiencePreviewHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/GetAssignmentAudiencePreviewHandlerTests.cs
 new file mode 100644
-index 00000000..58f0e473
+index 00000000..a1fbe912
 --- /dev/null
 +++ b/tests/SchoolCollab.Assignments.Tests.Unit/GetAssignmentAudiencePreviewHandlerTests.cs
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,197 @@
 +using FluentAssertions;
 +using Microsoft.EntityFrameworkCore;
 +using Microsoft.Extensions.DependencyInjection;
@@ -6569,19 +7013,19 @@ index 00000000..58f0e473
 +    }
 +
 +    private static GetAssignmentAudiencePreviewHandler Handler(
-+        AssignmentsDbContext db, Guid[] cohort, params SubscriberInfo[] subscribers) =>
-+        Build(db, cohort, new FakeNotificationPolicyResolver(), subscribers);
++        AssignmentsDbContext db, TargetStudent[] students, params SubscriberInfo[] subscribers) =>
++        Build(db, students, new FakeNotificationPolicyResolver(), subscribers);
 +
 +    private static GetAssignmentAudiencePreviewHandler HandlerWithPolicy(
-+        AssignmentsDbContext db, Guid[] cohort, INotificationPolicyResolver policyResolver,
++        AssignmentsDbContext db, TargetStudent[] students, INotificationPolicyResolver policyResolver,
 +        params SubscriberInfo[] subscribers) =>
-+        Build(db, cohort, policyResolver, subscribers);
++        Build(db, students, policyResolver, subscribers);
 +
 +    private static GetAssignmentAudiencePreviewHandler Build(
-+        AssignmentsDbContext db, Guid[] cohort, INotificationPolicyResolver policyResolver,
++        AssignmentsDbContext db, TargetStudent[] students, INotificationPolicyResolver policyResolver,
 +        SubscriberInfo[] subscribers) =>
 +        new(db,
-+            new FakeAssignmentTargetResolver { StudentIds = cohort },
++            new FakeAssignmentTargetResolver { Students = students },
 +            new FixedSubscriberContactResolver(subscribers),
 +            policyResolver,
 +            new FakeAssignmentPolicyResolver(),
@@ -6601,12 +7045,12 @@ index 00000000..58f0e473
 +
 +        var before = db.AssignmentRecipients.Count();
 +
-+        var result = await Handler(db, [StudentId],
++        var result = await Handler(db, [new TargetStudent(StudentId, "Okafor, Ngozi")],
 +            Subscriber(Guid.NewGuid(), ContactChannel.Email, "Okafor, Ngozi"))
 +            .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 +
 +        var row = result.Rows.Should().ContainSingle().Subject;
-+        row.StudentName.Should().Be("Okafor, Ngozi", "the name rides the same batched subscriber read");
++        row.StudentName.Should().Be("Okafor, Ngozi", "the name rides the cohort read");
 +        row.Reached.Should().BeTrue();
 +
 +        var contact = row.Contacts.Should().ContainSingle().Subject;
@@ -6622,19 +7066,21 @@ index 00000000..58f0e473
 +    }
 +
 +    [TestMethod]
-+    public async Task AStudentWithNoSubscriber_IsUnreachedAndContactless()
++    public async Task AStudentWithNoSubscriber_IsUnreachedAndContactless_ButStillNamed()
 +    {
-+        var (db, _) = Build(nameof(AStudentWithNoSubscriber_IsUnreachedAndContactless));
++        var (db, _) = Build(nameof(AStudentWithNoSubscriber_IsUnreachedAndContactless_ButStillNamed));
 +        var assignment = DraftWithGradeTarget("Yeast respiration write-up");
 +        db.Assignments.Add(assignment);
 +        await db.SaveChangesAsync();
 +
-+        var result = await Handler(db, [StudentId]).HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
++        var result = await Handler(db, [new TargetStudent(StudentId, "Okafor, Ngozi")])
++            .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 +
 +        var row = result.Rows.Should().ContainSingle().Subject;
 +        row.Reached.Should().BeFalse("AC7 — a student with no subscriber renders Reached = false");
 +        row.Contacts.Should().BeEmpty();
-+        row.StudentName.Should().BeEmpty("no name resolved is empty, never invented");
++        row.StudentName.Should().Be("Okafor, Ngozi",
++            "the name rides the cohort read, so a student with no subscriber is still named");
 +    }
 +
 +    [TestMethod]
@@ -6645,7 +7091,7 @@ index 00000000..58f0e473
 +        db.Assignments.Add(assignment);
 +        await db.SaveChangesAsync();
 +
-+        var result = await HandlerWithPolicy(db, [StudentId], new BlockedEmailPolicyResolver(),
++        var result = await HandlerWithPolicy(db, [new TargetStudent(StudentId, "Okafor, Ngozi")], new BlockedEmailPolicyResolver(),
 +            Subscriber(Guid.NewGuid(), ContactChannel.Email, "Okafor, Ngozi"))
 +            .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 +
@@ -6672,7 +7118,7 @@ index 00000000..58f0e473
 +        db.Assignments.Add(assignment);
 +        await db.SaveChangesAsync();
 +
-+        var result = await HandlerWithPolicy(db, [StudentId], new ThrowingPolicyResolver(),
++        var result = await HandlerWithPolicy(db, [new TargetStudent(StudentId, "Okafor, Ngozi")], new ThrowingPolicyResolver(),
 +            Subscriber(Guid.NewGuid(), ContactChannel.Email, "Okafor, Ngozi"))
 +            .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 +
@@ -6702,9 +7148,142 @@ index 00000000..58f0e473
 +        db.Assignments.Add(assignment);
 +        await db.SaveChangesAsync();
 +
-+        var result = await Handler(db, [StudentId]).HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
++        var result = await Handler(db, [new TargetStudent(StudentId, "Okafor, Ngozi")])
++            .HandleAsync(new GetAssignmentAudiencePreview(assignment.Id));
 +
 +        result.Rows.Should().BeEmpty("nothing is targeted, so nothing resolves");
 +        result.Degraded.Should().BeFalse();
 +    }
 +}
+diff --git a/tests/SchoolCollab.Students.Api.Tests.Unit/StudentTargetRoutesTests.cs b/tests/SchoolCollab.Students.Api.Tests.Unit/StudentTargetRoutesTests.cs
+index 44e3eaf1..5b2faa2e 100644
+--- a/tests/SchoolCollab.Students.Api.Tests.Unit/StudentTargetRoutesTests.cs
++++ b/tests/SchoolCollab.Students.Api.Tests.Unit/StudentTargetRoutesTests.cs
+@@ -19,6 +19,7 @@ using SchoolCollab.Students.Api;
+ using SchoolCollab.Students.Core.CQRS.Students.Queries.ResolveStudentsByTarget;
+ using SchoolCollab.Students.Core.Data;
+ using SchoolCollab.Students.Core.Domain;
++using SchoolCollab.Students.Core.DTOs;
+ 
+ namespace SchoolCollab.Students.Api.Tests.Unit;
+ 
+@@ -26,7 +27,9 @@ namespace SchoolCollab.Students.Api.Tests.Unit;
+ /// R2-7 (TGT-8 / D-7): wire tests for <code>GET /students/by-target</code>.
+ /// Covers repeated query-array binding, all four id-array legs (union + dedupe),
+ /// archived-group exclusion, soft-deleted student exclusion, the grade-agnostic
+-/// stream leg, and that the route inherits the students group's authorization.
++/// stream leg, that the route inherits the students group's authorization, and that the
++/// additive <code>withNames=true</code> shape carries id + both names while the default stays
++/// the bare <code>Guid[]</code>.
+ /// </summary>
+ [TestClass]
+ public class StudentTargetRoutesTests
+@@ -59,7 +62,7 @@ public class StudentTargetRoutesTests
+         var dbName = "students-by-target-" + Guid.NewGuid();
+         builder.Services.AddTenancy();
+         builder.Services.AddDbContext<StudentsDbContext>(o => o.UseInMemoryDatabase(dbName));
+-        builder.Services.AddScoped<IQueryHandler<ResolveStudentsByTarget, Guid[]>, ResolveStudentsByTargetHandler>();
++        builder.Services.AddScoped<IQueryHandler<ResolveStudentsByTarget, TargetStudentDto[]>, ResolveStudentsByTargetHandler>();
+         builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags());
+         builder.Services.Replace(ServiceDescriptor.Singleton<ITenantProvider>(new StubTenantProvider()));
+ 
+@@ -241,6 +244,28 @@ public class StudentTargetRoutesTests
+         }
+     }
+ 
++    [TestMethod]
++    public async Task ByTarget_WithNames_ReturnsIdAndBothNames_ForAMatchedStudent()
++    {
++        await using var app = BuildApp(out var client);
++        var (db, scope) = await SeedAsync(app.Services);
++        await using (scope)
++        {
++            var kept = db.Students.Single(s => s.StudentNumber == "S4").Id;
++
++            var response = await client.GetAsync($"/students/by-target?allStudents=false&studentIds={kept}&withNames=true");
++            response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
++            var json = await response.Content.ReadAsStringAsync();
++            var students = JsonSerializer.Deserialize<TargetStudentDto[]>(
++                json, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
++
++            var student = students.Should().ContainSingle().Subject;
++            student.Id.Should().Be(kept, "the name shape keeps the id the id-only shape carried");
++            student.FirstName.Should().Be("A");
++            student.LastName.Should().Be("S4");
++        }
++    }
++
+     private static async Task<Guid[]> DeserializeIdsAsync(HttpResponseMessage response)
+     {
+         var json = await response.Content.ReadAsStringAsync();
+diff --git a/tests/SchoolCollab.Students.Tests.Unit/ResolveStudentsByTargetHandlerTests.cs b/tests/SchoolCollab.Students.Tests.Unit/ResolveStudentsByTargetHandlerTests.cs
+index f38b4e11..16fbc943 100644
+--- a/tests/SchoolCollab.Students.Tests.Unit/ResolveStudentsByTargetHandlerTests.cs
++++ b/tests/SchoolCollab.Students.Tests.Unit/ResolveStudentsByTargetHandlerTests.cs
+@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
+ using SchoolCollab.Core.Tenancy;
+ using SchoolCollab.Students.Core.CQRS.Students.Queries.ResolveStudentsByTarget;
+ using SchoolCollab.Students.Core.Domain;
++using SchoolCollab.Students.Core.DTOs;
+ 
+ namespace SchoolCollab.Students.Tests.Unit;
+ 
+@@ -48,6 +49,8 @@ public class ResolveStudentsByTargetHandlerTests
+ 
+     private static ResolveStudentsByTargetHandler Handler(StudentsTestScope s) => new(s.Db);
+ 
++    private static Guid[] Ids(TargetStudentDto[] students) => students.Select(student => student.Id).ToArray();
++
+     private static ResolveStudentsByTarget Query(
+         bool all = false, Guid[]? grades = null, Guid[]? streams = null, Guid[]? students = null, Guid[]? groups = null) =>
+         new(all, grades ?? [], streams ?? [], students ?? [], groups ?? []);
+@@ -65,8 +68,10 @@ public class ResolveStudentsByTargetHandlerTests
+ 
+         var result = await Handler(s).HandleAsync(Query(all: true));
+ 
+-        result.Should().BeEquivalentTo(new[] { kept.Id, other.Id },
++        Ids(result).Should().BeEquivalentTo(new[] { kept.Id, other.Id },
+             "D-6: the allStudents leg is tenant-wide and excludes soft-deleted students only");
++        result.Should().Contain(student => student.Id == kept.Id && student.FirstName == "A" && student.LastName == "S1",
++            "the element carries both name columns beside the id");
+     }
+ 
+     [TestMethod]
+@@ -83,11 +88,11 @@ public class ResolveStudentsByTargetHandlerTests
+         await s.Db.SaveChangesAsync();
+ 
+         var byGrade = await Handler(s).HandleAsync(Query(grades: [GradeA]));
+-        byGrade.Should().BeEquivalentTo(new[] { inGradeA.Id },
++        Ids(byGrade).Should().BeEquivalentTo(new[] { inGradeA.Id },
+             "TGT-4: the grade leg is the current-period active enrollment");
+ 
+         var byStream = await Handler(s).HandleAsync(Query(streams: [StreamId]));
+-        byStream.Should().BeEquivalentTo(new[] { inGradeB.Id },
++        Ids(byStream).Should().BeEquivalentTo(new[] { inGradeB.Id },
+             "TGT-5: the stream leg carries NO grade predicate and is current-period scoped");
+     }
+ 
+@@ -115,7 +120,7 @@ public class ResolveStudentsByTargetHandlerTests
+         var union = await Handler(s).HandleAsync(
+             Query(grades: [GradeA], groups: [activeGroup.Id, archivedGroup.Id], students: [student.Id]));
+ 
+-        union.Should().BeEquivalentTo(new[] { student.Id },
++        Ids(union).Should().BeEquivalentTo(new[] { student.Id },
+             "TGT-3: a student matching several legs appears once; EC-4 excludes the archived group");
+ 
+         var archivedOnly = await Handler(s).HandleAsync(Query(groups: [archivedGroup.Id]));
+@@ -136,12 +141,12 @@ public class ResolveStudentsByTargetHandlerTests
+         await s.Db.SaveChangesAsync();
+ 
+         var byStudent = await Handler(s).HandleAsync(Query(students: [kept.Id, deleted.Id]));
+-        byStudent.Should().BeEquivalentTo(new[] { kept.Id }, "TGT-6: soft-deleted students never match");
++        Ids(byStudent).Should().BeEquivalentTo(new[] { kept.Id }, "TGT-6: soft-deleted students never match");
+ 
+         var noPeriod = await Handler(s).HandleAsync(Query(grades: [GradeA]));
+         noPeriod.Should().BeEmpty("no current period ⇒ the period-scoped legs match nothing");
+ 
+         var explicitStudent = await Handler(s).HandleAsync(Query(students: [kept.Id]));
+-        explicitStudent.Should().BeEquivalentTo(new[] { kept.Id });
++        Ids(explicitStudent).Should().BeEquivalentTo(new[] { kept.Id });
+     }
+ }
